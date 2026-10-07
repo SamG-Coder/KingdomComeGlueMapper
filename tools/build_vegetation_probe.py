@@ -13,6 +13,7 @@ from collections import defaultdict
 from compiled_terrain import parse
 from upgrade_map import read, xml
 from vegetation import read_instances, verify_target_hlods, convert_instance
+from merged_vegetation import inventory, convert_cell, build_tree
 
 
 def main():
@@ -22,6 +23,7 @@ def main():
     parser.add_argument("--level", default="kcd1_vegetation_v11")
     parser.add_argument("--limit", type=int, default=24)
     parser.add_argument("--all", action="store_true", help="Include every decoded individual vegetation instance across the world; merged vegetation is separate")
+    parser.add_argument("--merged", action="store_true", help="Experimental: include all merged grass and ground-cover sector streams")
     args = parser.parse_args()
     if not all(name.replace("_", "").isalnum() for name in (args.level,args.base_level)) or not 1 <= args.limit <= 100:
         parser.error("Invalid level name or instance limit (1..100)")
@@ -34,6 +36,10 @@ def main():
     with ExitStack() as stack:
         source_pak = stack.enter_context(zipfile.ZipFile(args.library / "KingdomComeDeliverance/Data/Levels/rataje/level.pak"))
         source = parse(read(source_pak, "terrain/terrain.dat"))
+        merged_cells, merged_groups, merged_instances = ({}, set(), 0)
+        if args.merged:
+            merged_cells, merged_groups, merged_instances = inventory(source_pak, len(source.tables["vegetation"]["paths"]))
+            print(f"Found {merged_instances} merged samples in {len(merged_cells)} cells across {len(merged_groups)} groups", flush=True)
         native = stack.enter_context(zipfile.ZipFile(args.library / "KingdomComeDeliverance2/Data/Levels/trosecko/level.pak"))
         native_counts = verify_target_hlods(read(native, "terrain/hlods.dat"))
         records, skipped = read_instances(source)
@@ -130,7 +136,7 @@ def main():
                         blob[offset:offset+128] = new.ljust(128,b"\0")
             return bytes(blob)
 
-        groups = sorted(set(r["group"] for r in selected))
+        groups = sorted(set(r["group"] for r in selected) | merged_groups)
         group_map = {g:i for i,g in enumerate(groups)}
         group_bytes = bytearray()
         for group in groups:
@@ -154,9 +160,15 @@ def main():
             terrain = bytearray(baseline.data[:32])
             terrain.extend(struct.pack("<I",len(groups))+group_bytes+bytes(8))
             terrain.extend(baseline.data[baseline.nodes[0]["offset"]:baseline.tree_offset])
-            # Native KCD2 stores these instances in the HLOD stream, not
-            # terrain.dat's object tree. Keep that tree empty to avoid duplicates.
-            terrain.extend(struct.pack("<HBB6fI",8,0,0,0,0,0,4096,4096,4096,0))
+            # Individual instances live in HLOD; merged render nodes remain
+            # in the terrain octree and reference external compact sectors.
+            merged_records = {}
+            merged_streams = {}
+            for cell, entries in sorted(merged_cells.items()):
+                record, stream = convert_cell(source_pak, cell, entries, group_map)
+                merged_records[cell] = record
+                merged_streams[cell] = stream
+            terrain.extend(build_tree(merged_records))
             struct.pack_into("<I",terrain,4,len(terrain))
             parsed = parse(bytes(terrain))
             if len(parsed.tables["vegetation"]["paths"]) != len(groups):
@@ -165,6 +177,12 @@ def main():
             with zipfile.ZipFile(destination/"terrain.pak","x",zipfile.ZIP_STORED) as output:
                 output.writestr("terrain/terrain.dat",terrain)
                 output.writestr("terrain/indoor.dat",archive.read("terrain/indoor.dat"))
+                for (x,y,z), stream in merged_streams.items():
+                    output.writestr(f"terrain/merged_meshes_sectors/sector_{x}_{y}_{z}_0.dat",stream)
+                if args.merged:
+                    paths = [prefix + "mesh" + str(group_map[g]) + ".cgf" for g in sorted(merged_groups)]
+                    output.writestr("terrain/merged_meshes_sectors/mmrm_used_meshes.lst", "\n".join(paths)+"\n")
+            del merged_streams, merged_records
         hlod_data = bytearray(struct.pack("<III",2,0,0))
         hlod = ET.Element("HLod",DataOffset="4",DataSize="4",ProxyIndex="-1",Type="Cluster",Radius="8000",NearestObserverDistance="0",Name="root",Hash="0")
         vegetation_root = ET.SubElement(hlod,"HLod",DataOffset="8",DataSize="4",ProxyIndex="-1",Type="Vegetation",Pos="2048,2048,128",Radius="8000",NearestObserverDistance="0",Name="vegetation")
@@ -203,8 +221,10 @@ def main():
                   "skipped_remainder_blocks_by_type":skipped,"native_hlod_records_validated":native_counts,
                   "selected_instances":selected,"species":species,"files":len(emitted),"material_map":material_names,
                   "instance_storage":"KCD2 HLOD version2 with64m vegetation sectors, no proxies",
+                  "merged_instances":merged_instances,"merged_cells":len(merged_cells),"merged_groups":len(merged_groups),
                   "status":"Experimental source-CGF compatibility probe; runtime acceptance pending",
-                  "limitations":["Only leading vegetation records inspected; merged vegetation excluded",
+                  "limitations":["Only leading individual vegetation records inspected",
+                                 "Merged sector geometry identifiers and combined legacy parts require runtime validation" if args.merged else "Merged vegetation excluded",
                                  "CGF geometry chunks unchanged; embedded material paths rewritten",
                                  "Source trailing instance word omitted; target high render flag bits zero",
                                  "Source billboard atlases and advanced wind compatibility unverified"]}

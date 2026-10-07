@@ -8,11 +8,11 @@
 
 ![Converted KCD1 terrain and original vegetation running in the KCD2 development runtime](docs/images/kcd1-vegetation-in-kcd2.png)
 
-*Actual in-game capture near Skalitz: converted KCD1 terrain, original ground materials and restored vegetation in KCD2. The v11 build contains 541,465 individual vegetation instances across 226 meshes. Buildings and merged ground cover are not yet converted. The debug FPS is from this incomplete world, not a full-game benchmark.*
+*Actual in-game capture near Skalitz: converted KCD1 terrain, original ground materials and restored vegetation in KCD2. The v11 build contains 541,465 individual vegetation instances across 226 meshes. This v11 screenshot predates the merged grass and ground cover added in v13. Buildings are not yet converted. The debug FPS is from this incomplete world, not a full-game benchmark.*
 
 KingdomComeGlueMapper is an experimental Python converter that reads **compiled files from your installed games** and builds a separate test level for the official KCD2 Modding Tools. Raw editor source is not required by this workflow.
 
-Terrain, original close-up materials, and the first world-wide individual vegetation conversion are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
+Terrain, original close-up materials, individual vegetation, and merged grass / ground cover are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
 
 ## What works today
 
@@ -27,7 +27,7 @@ Terrain, original close-up materials, and the first world-wide individual vegeta
 | Test launcher | Terrain-height spawn, Skalitz default, no-collision flight, intro-skip settings |
 | Texture transitions | Optional softer-blending experiment; original transition fidelity not established |
 | Individual vegetation | 541,465 original instances / 226 meshes; trees and distant forest visually confirmed |
-| Merged grass / ground cover | Not converted |
+| Merged grass / ground cover | 25,405,423 samples / 83,431 cells / 169 groups; v13 confirmed working in game |
 | Buildings, road objects, water, NPCs and quests | Not converted |
 
 This is a **terrain-porting prototype**, not a complete game port. Visible gaps, material transitions and missing world objects are still under investigation. Highest-resolution mip residency and walking collision have not been comprehensively validated.
@@ -122,10 +122,36 @@ python tools/launch_probe.py --level kcd1_vegetation_v11 --x 748 --y 3427
 
 `--all` includes every decoded individual instance whose mesh is under the
 original vegetation path. Without it, the tool builds a small two-species patch.
-This is not complete vegetation coverage: the reader decodes leading vegetation
-records in each source block and stops at unsupported record types. Merged grass,
-merged vegetation sectors, distant proxy atlases, advanced wind behaviour and
-exhaustive collision/LOD validation remain unfinished.
+This is not complete individual vegetation coverage: the reader decodes leading
+vegetation records in each source block and stops at unsupported record types.
+Distant proxy atlases, advanced wind behaviour and exhaustive collision/LOD
+validation remain unfinished.
+
+#### Merged grass and ground cover (v13 confirmed working)
+
+```powershell
+python tools/build_vegetation_probe.py --level kcd1_groundcover_v13 --all --merged
+python tools/launch_probe.py --level kcd1_groundcover_v13 --x 748 --y 3427
+```
+
+`--merged` converts all **25,405,423 compact merged samples**, covering **83,431
+cells and 169 vegetation groups**, alongside the individual vegetation selected
+by `--all`. It preserves the original 12-byte position/scale/rotation records,
+combines the two legacy sector parts, emits KCD2-shaped merged render nodes in
+the terrain octree, and writes matching geometry identifiers into the descriptors
+and sector streams. Models, materials and streamed textures use the same isolated
+asset packaging as the individual vegetation build.
+
+The user confirmed **v13 merged grass and ground cover working in game**. This
+remains a prototype: comprehensive checks of every group, visibility bounds, LODs
+and wind behaviour are still outstanding. The screenshot above shows the earlier
+**v11 individual vegetation** result and does not show merged ground cover.
+
+The local v13 level completed loading and confirmed terrain-based spawn with
+no-collision flight. Every packaged sector was checked against its octree group
+descriptors; all 83,431 cell counts and geometry identifiers matched. The runtime
+also reports missing item database definitions for three namespaced plant models;
+harvesting/respawn gameplay is not converted.
 
 Assets are installed under `KCD2Mod/Data/glueveg/<level>/`. The vegetation level
 also depends on the base level's terrain-material namespace; keep those assets
@@ -181,7 +207,7 @@ See [development notes](docs/development-notes.md) for the experiment history an
 
 ## Roadmap
 
-**Current milestone: vegetation.** Individual vegetation is now rendering in KCD2, with a world-wide v11 build and a visual confirmation near Skalitz. Remaining vegetation work is merged ground cover, proxy/LOD behaviour, wind, collision and broader placement checks.
+**Current milestone: vegetation.** Individual vegetation is now rendering in KCD2, with a world-wide v11 build and a visual confirmation near Skalitz. Merged grass and ground cover are also confirmed working in the v13 build. Remaining work includes broader merged-sector checks, proxy/LOD behaviour, wind, collision and placement validation.
 
 1. **Read the vegetation data.** Trace species definitions, placed instances and merged vegetation records in the compiled KCD1 packages, and compare their representation with KCD2.
 2. **Convert one representative patch.** Resolve a few tree, shrub and ground-cover assets with their materials and texture dependencies. Preserve source positions, rotation and scale wherever the compiled data provides them.
