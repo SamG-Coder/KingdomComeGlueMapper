@@ -3,6 +3,21 @@ import math
 import struct
 
 
+# Explicitly audited visible materials in the excluded level-local brush set.
+# Other designer solids include collision barriers and giant editor helpers.
+LANDSCAPE_DESIGNER_MATERIALS = {
+    'objects/nature/rocks/rocks_modular/rock_modular_05',
+    'objects/nature/rocks/rocks_modular/rock_modular_16_darker',
+    'objects/structures/platforms/tanner_canal_ground',
+    'materials/terrain/river/river_bottom_03_for_designer_box',
+}
+
+
+def is_landscape_designer(path, material):
+    return (path.replace('\\', '/').lower().startswith('%level%/brush/designer_')
+            and material.replace('\\', '/').lower().removesuffix('.mtl') in LANDSCAPE_DESIGNER_MATERIALS)
+
+
 def is_uberlod_proxy(path):
     """World-distance stand-ins belong to the switching graph, not static props."""
     # Forest proxies use uber/, while town/building proxies use uberlods/.

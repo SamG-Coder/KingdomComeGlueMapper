@@ -236,3 +236,135 @@ to have the same cause: both v20 and v29 displayed shells after a fresh launch.
 Do not treat this correction as proof that all streaming issues are resolved.
 The original near/far switching graph remains unconverted; distant aggregate
 stand-ins are excluded until that graph is implemented.
+
+## Landscape bank comparison and road/decal diagnostic - v32
+
+The bank beside Henry's start (camera approximately 725.639,3441.424,64.994)
+shows a hard grassy sheet above the ground. The user checked the same bank in
+KCD1 and confirmed that its patch meets the bank there. Nearby brush matrices
+and bounds match the source; the root mesh geometry is unchanged apart from
+its material pathname. A v31 trial enabling render flag bit 43 on nearby
+landscape brushes did not fix the edge. That trial is not the baseline.
+
+The original official editor layer `skalice/skalice_village/sv_ground.lyr`
+contains grass-edge roads, mud roads, road borders and projected soil decals
+at this location. The v30 terrain has none of the source's 14,710 road records
+or 20,212 decals. These are independent compiled render nodes, not ordinary
+brushes, so the previous brush/entity passes did not restore them.
+
+`build_landscape_surface_probe.py` builds v32 from v30, adding only the 16 roads
+and 70 decals whose bounds lie within 20m of the inspection position. It
+preserves terrain heightfields, existing object data and resource IDs. Source
+material-less roads retain an unset material. The output uses an isolated
+asset namespace and leaves existing installed levels untouched.
+
+`landscape_surfaces.py` widens the common render-node header, remaps material
+IDs, preserves decal projection/transforms and road vertex/index/physics/source
+point buffers, and expands road tangent data. KCD1's installed Common.cfi
+documents signed 15-bit XY with low-bit Z signs, handedness and a planar-Z
+flag; KCD2 road records use two four-component signed-short vectors. The
+conversion follows that decoding rather than treating the bytes as a quaternion.
+
+Binary traversal verifies all 86 added records and retained water/merged counts;
+35 asset-free tests pass. This is a bounded diagnostic, not a completed
+worldwide road import or proof that the floating grass geometry is fixed.
+Runtime and visual acceptance are pending.
+
+The v32 runtime subsequently loaded successfully, and the user confirmed improved
+close-up ground detail. The hard grass-sheet edge remains visible: roads/decals
+are a real missing layer, but restoring them did not resolve that separate issue.
+
+## Full layer audit and first checklist passes - v33/v34
+
+The user requested an audit of all layers and authorized working through the
+missing features. `audit_world_layers.py` read all 6,990 rataje editor layer files,
+1,969 compiled layer definitions and 1,832 mission/layer entity XML files.
+See `world-import-checklist.md` for counts, evidence boundaries and work order.
+
+v33 starts from v30 and adds 14,198 road records and 15,698 decals from shared and
+explicit initial-state layers. It excludes 512 roads and 4,514 decals in other
+layers rather than activating every story state. No material files were
+unresolved. Road tangent expansion follows the installed KCD1 shader decoding.
+Terrain samples and existing records are preserved. The local v32 count of 86
+records was a diagnostic; it is not the extent of the v33 conversion.
+
+v34 appends 26 audited designer brushes: 20 rocks, 5 canal-ground pieces and one
+riverbed piece. An explicit material allowlist prevents reintroducing giant
+helper/collision planes. Target HLOD brush count is 167,167, with 1,483,225
+individual instances retained. All 36 asset-free tests pass. Nearby excluded
+designer objects at the reported bank use collision-barrier materials, so they
+do not establish the cause of its floating visible patch. Full visual acceptance
+of the new world-wide surfaces and designer subset remains pending.
+
+
+## Checklist continuation: prop visuals and road shading - v35 to v38
+
+v35 adds 936 AnimDoor, 113 Ladder, 11 Grindstone and 8 ShootingTarget visuals.
+The resolver now recognizes fileModel and optionally packages simple rigid-prop
+CDF definitions through native AnimChar entities. Model/skin dependencies and
+material overrides are namespaced; authored inline CA_PROX attachments are
+preserved. v37 adds the remaining 13 door candidates, for 1,081 new visuals.
+Interaction, animation, gameplay and exhaustive per-asset visual coverage are
+not established. v35 loaded in 13.01 seconds; Henry's grindstone had a nonempty
+runtime bounding box. These changes do not activate other quest-state layers.
+
+v36 was an isolated grass-pack experiment using matching KCD2 mesh topology and
+original placements/materials. The hard bank edge remained visible. It is not
+in the v37/v38 baseline lineage and is not a bank fix.
+
+For the reported dark mud road, installed shader source establishes that KCD1
+CommonZPass.cfi excludes DECAL from parallax self-shadowing. KCD2 explicitly
+enables it (its source comment references KCD2-130666). Legacy mud materials
+carry previously ignored strengths such as 2.814. The material converter now
+sets SelfShadowStrength=0 for imported Illum parallax decals while preserving
+height textures, displacement, height bias, normal maps and normal scene shadows.
+Non-decal materials retain their authored self-shadowing.
+
+build_road_material_probe.py builds v38 from v37, cloning 53 affected surface
+materials into a new namespace and remapping only their terrain material-table
+paths. It leaves earlier builds, geometry and source game files intact. v38
+loaded in 12.86 seconds without shader compilation failures found in its startup
+log. All 40 asset-free tests pass. A same-camera comparison at approximately
+14:45 still shows a dark road strip, so this compatibility correction is not
+reported as a complete visual fix. The floating bank remains unresolved too.
+
+
+## Road tangent alignment root cause - v42
+
+The user observed black road strips appearing after loading, with close-range
+terrain showing through, and requested a native wet-road comparison like water.
+The deferred rain toggle did not remove the dark bands; hiding road render nodes
+did. v39 removed selected mud shading features as a diagnostic, and v41 mapped
+5,562 mud roads to installed KCD2 road materials. Both retained visible artifacts;
+neither is the accepted replacement for the original mud appearance.
+
+Native binary inspection then identified a packing error. All 4,796 native
+KCD2 roads with odd index counts have two 0xDE padding bytes immediately after
+the uint16 index array, before the 16-byte tangent vectors. KCD1's compressed
+8-byte tangent stream does not have that padding. The initial converter padded
+only the record end, so KCD2 read affected tangents two bytes out of alignment.
+The total record length is identical, so traversal/count checks could not detect
+this error. Regression checks now verify the aligned tangent start and the
+position of the trailing physics/source-point data.
+
+landscape_surfaces.convert_surface now aligns the target tangent array to four
+bytes. rebuild_road_buffers.py re-reads source records and preserves existing
+material IDs, headers, positions, UVs and indices. v42 starts from v37 (original
+KCD1 surface materials and completed prop visuals), not the native-material
+experiments. It rebuilds 14,198 roads, changes 6,125 odd-index records, and leaves
+even-index records and all unrelated data unchanged. All 42 tests pass. Runtime
+and visual results are recorded separately; binary verification alone is not
+visual acceptance.
+
+
+v42 runtime verification: loaded in 12.14 seconds, terrain-based spawn confirmed,
+and no shader compile failures found in the inspected log. The same camera at
+approximately 14:46 no longer shows the black/ridged strips visible in v38/v41.
+Evidence: screenshot_261008_095200.jpg under the local Saved Games/kingdomcome2/
+screenshots directory. User close-up confirmation remains pending.
+
+The earlier self-shadowing compatibility helper is retained only as an explicit
+optional diagnostic, not called by normal material conversion. v42 uses the
+original materials; disabling self-shadowing or substituting native mud is not
+required by the alignment fix. The floating grass-bank mesh is a separate open
+issue and is not claimed fixed by the road result.

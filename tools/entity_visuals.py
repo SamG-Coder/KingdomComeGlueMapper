@@ -11,6 +11,12 @@ VISUAL_CLASSES = {"GeomEntity", "Bed", "Chair", "Stash", "AnimObject", "AnimDoor
                   "AlchemyItem", "ShootingTarget", "LedgerBook"}
 
 
+def visual_model(entity, properties):
+    """Honor the class-authored static model property before rejecting a model."""
+    return (entity.get('Geometry') or properties.get('object_Model')
+            or properties.get('fileModel') or '')
+
+
 def initial_layer(name):
     name = name.split("{")[0].lower()
     return name.endswith(("_state0", "_state0_prefabs"))
@@ -48,7 +54,7 @@ def world_transform(entity, entities, visiting=()):
     return pos,rot,scale
 
 
-def collect_visuals(source_pak, library):
+def collect_visuals(source_pak, library, character_visuals=False):
     """Resolve direct models and pickable-item database IDs; audit exclusions."""
     items = {}
     paths = [library / "KingdomComeDeliverance/Data/Tables.pak"]
@@ -94,7 +100,7 @@ def collect_visuals(source_pak, library):
         except ValueError as error:
             excluded['transform:'+str(error)] += 1
             continue
-        model = e.get("Geometry") or props.get("object_Model", "")
+        model = visual_model(e, props)
         material = e.get("Material", "")
         cls = e.get("EntityClass")
         if cls == "ItemSlot":
@@ -111,7 +117,8 @@ def collect_visuals(source_pak, library):
         if cls in ("ItemSlot", "PickableItem"):
             model, material = items.get(props.get("guidItemClassId", "").lower(), ("", ""))
         model = model.replace("\\", "/").lower()
-        if not model.endswith((".cgf", ".cga")):
+        character = character_visuals and cls in ('AnimDoor', 'Grindstone') and model.endswith('.cdf')
+        if not character and not model.endswith((".cgf", ".cga")):
             excluded["unresolved_or_character_model"] += 1
             continue
         target = ET.Element("Entity", Name="glue_item_" + e.get("EntityId", str(len(result))),
@@ -120,6 +127,12 @@ def collect_visuals(source_pak, library):
         target.set('Rotate',','.join(map(str,rotation)))
         target.set('Scale',','.join(map(str,scale)))
         ET.SubElement(target, "Properties", bSaved_by_game="0", bInteractiveCollisionClass="0")
+        if character:
+            target.set('EntityClass', 'AnimChar')
+            target.attrib.pop('Geometry')
+            properties = target.find('Properties')
+            properties.set('object_Model', model)
+            ET.SubElement(properties, 'Physics', bPhysicalize='0', bRigidBody='0', bPushableByPlayers='0')
         result.append({"entity": target, "model": model, "material": material,
                        "source_id": e.get("EntityId"), "source_class": cls, "source_name": e.get("Name"),
                        "source_layer": e.get("Layer")})

@@ -11,7 +11,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
-from building_brushes import read_brush, convert_brush, resource_table, is_uberlod_proxy
+from building_brushes import read_brush, convert_brush, resource_table, is_uberlod_proxy, is_landscape_designer
 from compiled_terrain import parse
 from static_assets import asset_pack
 from upgrade_map import read, xml
@@ -29,10 +29,11 @@ def main():
     parser.add_argument("--all", action="store_true", help="Include shared and initial-state structures across the full map")
     parser.add_argument("--streams-only", action="store_true", help="Append stream and waterfall meshes to an existing building level")
     parser.add_argument("--props-only", action="store_true", help="Append remaining static props and initial-state visual item entities")
+    parser.add_argument('--landscape-designers-only', action='store_true', help='Append only audited rock, canal-ground and riverbed level-local designer brushes')
     parser.add_argument("--retry-report", type=Path, help="Retry only unavailable brushes from a previous props report")
     args = parser.parse_args()
-    if args.streams_only and args.props_only:
-        parser.error("Choose streams or props, not both")
+    if sum((args.streams_only, args.props_only, args.landscape_designers_only)) > 1:
+        parser.error("Choose one append mode")
     if args.retry_report and not args.props_only:
         parser.error('Retry reports require --props-only')
     retry_offsets = {r['offset'] for r in json.loads(args.retry_report.read_text())['unavailable_brushes']} if args.retry_report else None
@@ -73,6 +74,9 @@ def main():
             if args.props_only:
                 matches = not any(part in record["path"] for part in (
                     "/buildings/", "/structures/", "/props/fences/", "/nature/stream_edge/", "/nature/waterfalls/"))
+            if args.landscape_designers_only:
+                mat = source.tables['materials']['paths'][record['material']] if record['material'] >= 0 else ''
+                matches = is_landscape_designer(record['path'], mat)
             if ((args.all or (x-734.9)**2+(y-3421.4)**2 < args.radius**2) and matches):
                 if record["layer"] in allowed:
                     selected.append(record)
@@ -128,7 +132,7 @@ def main():
         print(f"Packaged {len(packaged_entities)} visible entity furnishings/items", flush=True)
         with zipfile.ZipFile(base / "terrain.pak") as archive:
             base_meshes = list(parse(archive.read("terrain/terrain.dat")).tables["meshes"]["paths"])
-        if base_meshes and not (args.streams_only or args.props_only):
+        if base_meshes and not (args.streams_only or args.props_only or args.landscape_designers_only):
             raise ValueError("Base mesh table is not empty")
         meshes = list(base_meshes)
         mesh_map = {}

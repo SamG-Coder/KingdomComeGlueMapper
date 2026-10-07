@@ -33,7 +33,15 @@ Terrain, original close-up materials, individual vegetation, merged grass / grou
 | Static props and furnishings | v26 interiors confirmed furnished; 120,776 additional brush placements. v28 contains 10,250 visual item entities, including 31 item material fixes; broader validation pending |
 | Complete individual-instance coverage | v24 reads all 1,483,225 source instances, including instanced stones and clutter; adds 177,466 foliage placements over v13. Visual LOD alignment remains under investigation |
 | Original opening position | `--kcd1-start` uses the opening quest's player CutsceneSpot, TagPoint231, including source height and facing |
-| Road objects, NPCs and quests | Not converted |
+| Road objects and decals | v34: 14,198 roads and 15,698 decals in shared/initial layers; broad visual validation pending |
+| NPCs and quests | Not converted |
+
+**Latest coverage audit:** see [the world import checklist](docs/world-import-checklist.md).
+The v34 development build adds 14,198 shared/initial-state road records, 15,698
+decals and 26 audited level-local landscape meshes. These additions are still
+under visual validation. NPCs and quests remain unconverted. The checklist
+supersedes older milestone coverage statements above and distinguishes actual
+omissions from intentionally excluded states, helpers and distant proxies.
 
 This is a **terrain-porting prototype**, not a complete game port. Visible gaps, material transitions and missing world objects are still under investigation. Highest-resolution mip residency and walking collision have not been comprehensively validated.
 

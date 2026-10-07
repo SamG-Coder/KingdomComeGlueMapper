@@ -5,10 +5,30 @@ import unittest
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from static_assets import convert_material_features
+from static_assets import convert_material_features, preserve_legacy_decal_shadows
 
 
 class StaticMaterialTests(unittest.TestCase):
+    def test_legacy_decal_displacement_does_not_enable_new_self_shadows(self):
+        features = {"%DECAL": 1, "%PARALLAX_OCCLUSION_MAPPING": 2}
+        m = ET.fromstring('''<Material Shader="Illum"
+          StringGenMask="%DECAL%PARALLAX_OCCLUSION_MAPPING">
+          <PublicParams SelfShadowStrength="2.814" PomDisplacement="0.0145" HeightBias="0.425"/>
+          <Textures><Texture Map="Heightmap" File="mud_displ.dds"/></Textures></Material>''')
+        preserve_legacy_decal_shadows(m, set(features))
+        self.assertEqual(m.find("PublicParams").get("SelfShadowStrength"), "0")
+        self.assertEqual(m.find("PublicParams").get("PomDisplacement"), "0.0145")
+        self.assertEqual(m.find("PublicParams").get("HeightBias"), "0.425")
+        self.assertEqual(m.find("Textures/Texture").get("File"), "mud_displ.dds")
+        self.assertIn("%PARALLAX_OCCLUSION_MAPPING", m.get("StringGenMask"))
+
+    def test_non_decal_parallax_retains_authored_self_shadowing(self):
+        features = {"%PARALLAX_OCCLUSION_MAPPING": 2}
+        m = ET.fromstring('''<Material Shader="Illum" StringGenMask="%PARALLAX_OCCLUSION_MAPPING">
+          <PublicParams SelfShadowStrength="2.814"/></Material>''')
+        preserve_legacy_decal_shadows(m, set(features))
+        self.assertEqual(m.find("PublicParams").get("SelfShadowStrength"), "2.814")
+
     def test_named_features_override_unrelated_serialized_bits(self):
         m = ET.fromstring('<Material Shader="Illum" GenMask="40" StringGenMask="%SNDUVS"/>')
         convert_material_features(m, {"%VERTCOLORS": 64}, {"%VERTCOLORS": 8, "%SNDUVS": 4})

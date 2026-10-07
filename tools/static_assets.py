@@ -8,6 +8,23 @@ from upgrade_map import read, xml
 from build_water_probe import shader_features, translate_features
 
 
+def preserve_legacy_decal_shadows(element, retained):
+    """Optional comparison for KCD1 decal self-shadowing; not a default conversion."""
+    if (element.get("Shader", "").lower() == "illum" and "%DECAL" in retained
+            and retained & {"%PARALLAX_OCCLUSION_MAPPING", "%OFFSET_BUMP_MAPPING",
+                            "%SILHOUETTE_PARALLAX_OCCLUSION_MAPPING"}):
+        # KCD1 CommonZPass excludes decals from POM self-shadowing. KCD2
+        # intentionally enables it (KCD2-130666), so old, previously ignored
+        # strengths become active. Preserve the source behavior while keeping
+        # its height map, displacement, normals and ordinary scene shadows.
+        params = element.find("PublicParams")
+        if params is None:
+            params = ET.SubElement(element, "PublicParams")
+        params.set("SelfShadowStrength", "0")
+        return True
+    return False
+
+
 def convert_material_features(element, source_shader, target_shader):
     """Translate named permutations and the observed Illum second-UV slot."""
     # Serialized material masks use remapped global bits; .ext masks are local.
@@ -63,7 +80,7 @@ def asset_pack(stack, library, prefix, cache_dir=None):
         archive = stack.enter_context(zipfile.ZipFile(path))
         for entry in archive.infolist():
             name = entry.filename.replace("\\", "/").lower()
-            if name.endswith((".cgf", ".cga", ".mtl")) or ".dds" in name:
+            if name.endswith((".cgf", ".cga", ".cdf", ".chr", ".skin", ".mtl")) or ".dds" in name:
                 index[name] = (archive,entry)
     level_archive = stack.enter_context(zipfile.ZipFile(library / 'KingdomComeDeliverance/Data/Levels/rataje/level.pak'))
     for entry in level_archive.infolist():
@@ -148,3 +165,41 @@ def asset_pack(stack, library, prefix, cache_dir=None):
         return bytes(blob)
 
     return index, emitted, material, mesh_bytes
+
+
+def character_definition(index, emitted, material, mesh_bytes, name, target):
+    """Package a simple rigid-prop CDF and its bind-pose geometry, not gameplay.
+
+    Bone attachments and nested definitions need explicit local transforms;
+    reject them instead of silently flattening or dropping parts.
+    """
+    key = name.replace('\\', '/').lower()
+    archive, entry = index[key]
+    doc = ET.fromstring(read(archive, entry.filename))
+    if doc.tag != 'CharacterDefinition':
+        raise ValueError('Expected character definition')
+    model = doc.find('Model')
+    if model is None or not model.get('File'):
+        raise ValueError('Character definition has no model')
+    refs = [(model, 'File')]
+    for attachment in doc.findall('AttachmentList/Attachment'):
+        if attachment.get('Type') == 'CA_PROX' and not attachment.get('Binding'):
+            # Inline bone proxy parameters have no external asset dependency.
+            # Keep their authored bone, rotation and position unchanged.
+            continue
+        if attachment.get('Type') != 'CA_SKIN' or not attachment.get('Binding'):
+            raise ValueError('Unsupported non-skin character attachment')
+        refs.append((attachment, 'Binding'))
+    for number, (element, attribute) in enumerate(refs):
+        original = element.get(attribute).replace('\\', '/').lower()
+        if original.startswith('./'):
+            original = str(PurePosixPath(key).parent / original[2:])
+        if not original.endswith(('.chr', '.skin', '.cga')):
+            raise ValueError('Unsupported character geometry reference')
+        renamed = target[:-4] + '_part' + str(number) + PurePosixPath(original).suffix
+        emitted[renamed] = mesh_bytes(original)
+        element.set(attribute, renamed)
+        override = element.get('Material')
+        if override:
+            element.set('Material', material(override))
+    emitted[target] = xml(doc)

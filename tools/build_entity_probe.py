@@ -9,7 +9,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from entity_visuals import collect_visuals
-from static_assets import asset_pack
+from static_assets import asset_pack, character_definition
 from upgrade_map import xml
 
 
@@ -18,6 +18,7 @@ def main():
     p.add_argument('--library',type=Path,default=Path(r'D:\SteamLibrary\steamapps\common'))
     p.add_argument('--base-level',required=True)
     p.add_argument('--level',required=True)
+    p.add_argument('--character-visuals', action='store_true', help='Try native AnimChar visuals for simple door/grindstone CDF assemblies')
     args=p.parse_args()
     if not all(n and n.replace('_','').isalnum() for n in (args.level,args.base_level)):p.error('Invalid level')
     root=args.library/'KCD2Mod/Data';base=root/'Levels'/args.base_level;dest=root/'Levels'/args.level
@@ -28,7 +29,7 @@ def main():
         archive=stack.enter_context(zipfile.ZipFile(base/'level.pak'))
         doc=ET.fromstring(archive.read('objects_mission0.xml'))
         names={e.get('Name') for e in doc.iter('Entity')}
-        visuals,excluded=collect_visuals(source,args.library)
+        visuals,excluded=collect_visuals(source,args.library,args.character_visuals)
         visuals=[v for v in visuals if v['entity'].get('Name') not in names]
         cache=stack.enter_context(tempfile.TemporaryDirectory(prefix='entities-',dir='outputs'))
         index,emitted,material,mesh_bytes=asset_pack(stack,args.library,prefix,cache)
@@ -38,12 +39,18 @@ def main():
             try:
                 if model not in meshes:
                     target=prefix+'model'+str(len(meshes))+Path(model).suffix
-                    blob=mesh_bytes(model)
-                    lods={lod:mesh_bytes(model[:-4]+f'_lod{lod}.cgf') for lod in range(1,7) if model[:-4]+f'_lod{lod}.cgf' in index}
-                    emitted[target]=blob
-                    for lod,payload in lods.items():emitted[target[:-4]+f'_lod{lod}.cgf']=payload
+                    if model.endswith('.cdf'):
+                        character_definition(index,emitted,material,mesh_bytes,model,target)
+                    else:
+                        blob=mesh_bytes(model)
+                        lods={lod:mesh_bytes(model[:-4]+f'_lod{lod}.cgf') for lod in range(1,7) if model[:-4]+f'_lod{lod}.cgf' in index}
+                        emitted[target]=blob
+                        for lod,payload in lods.items():emitted[target[:-4]+f'_lod{lod}.cgf']=payload
                     meshes[model]=target
-                v['entity'].set('Geometry',meshes[model])
+                if model.endswith('.cdf'):
+                    v['entity'].find('Properties').set('object_Model', meshes[model])
+                else:
+                    v['entity'].set('Geometry',meshes[model])
                 if v['material']:v['entity'].set('Material',material(v['material']))
             except (KeyError,ValueError,FileNotFoundError) as error:
                 failures[v['source_id']]={'model':model,'reason':str(error)}
