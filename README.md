@@ -271,6 +271,35 @@ but this proximity does not prove it causes the visible plane. The source volume
 selection, target polygon rendering and missing river geometry require further
 investigation. Neither issue is fixed by this buildings checkpoint.
 
+#### Stream geometry and castle-plane test (v21 / v22)
+
+The original world also contains separately placed stream surfaces, banks and
+waterfalls. These were outside the first water-volume and building selections.
+The incremental v21 build adds **8,802 placements across 117 models**, including
+their original transforms, material overrides and LODs, without rebuilding the
+existing building assets:
+
+```powershell
+python tools/build_buildings_probe.py --all --streams-only --base-level kcd1_buildings_v20 --level kcd1_streams_v21
+```
+
+The user confirmed the stray castle plane disappears when water volumes are
+temporarily disabled. A separate v22 test removes only the surface material of
+the suspect sloped volume `0x44bfc6118f6b83a9`, retaining its geometry, fog and
+physics-contour bytes and leaving all other volumes unchanged:
+
+```powershell
+python tools/build_water_surface_probe.py --base-level kcd1_streams_v21 --level kcd1_water_v22 --suppress-surface 0x44bfc6118f6b83a9
+python tools/launch_probe.py --level kcd1_water_v22 --x 2764.04 --y 681.137 --clearance 5
+```
+
+This is a **targeted rendering workaround**, not a reconstruction of the original
+sloped-water behavior. The combined test loaded successfully, but visual river
+coverage and physics behavior still require confirmation. The 57 original
+material-less river segments remain unchanged; assigning a surface to them
+without evidence could add further unwanted water. Keep the v20 and v21 asset
+namespaces installed. Existing level outputs are never overwritten.
+
 ### Terrain and materials pipeline
 
 1. Read compiled terrain and level metadata from the installed KCD1 `rataje` archives.

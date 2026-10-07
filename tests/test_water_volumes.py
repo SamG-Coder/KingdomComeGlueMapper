@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from water_volumes import water_record, read_water, convert_water, append_water
 from build_water_probe import translate_features, global_environment_probe
+from build_water_surface_probe import suppress_surfaces
 
 
 def source_water():
@@ -33,6 +34,19 @@ def tree(payload, version):
 
 
 class WaterTests(unittest.TestCase):
+    def test_surface_workaround_only_changes_requested_material(self):
+        a=convert_water(source_water(), {"offset":0,"size":len(source_water())}, 3, struct.pack('<2f',1000,1000))
+        b=bytearray(a)
+        struct.pack_into('<Q',b,48,123)
+        terrain=tree(a+bytes(b),29)
+        out,changes=suppress_surfaces(terrain,{0x123456789abcdef0})
+        self.assertEqual(len(changes),1)
+        self.assertEqual(out[32+len(a):],bytes(b))
+        self.assertEqual(out[:88],terrain.data[:88])
+        self.assertEqual(out[92:],terrain.data[92:])
+        self.assertEqual(struct.unpack_from('<i',out,88)[0],-1)
+        with self.assertRaises(ValueError):suppress_surfaces(terrain,{999})
+
     def test_global_probe_preserves_properties_without_legacy_identity(self):
         objects = ET.fromstring('<Objects><Entity EntityClass="EnvironmentLight" Name="level_global_probe" Pos="1,2,3" EntityId="99" EntityGuid="old"><Properties BoxSizeX="99999" _nVersion="0"><OptionsAdvanced bDynamic="1" texture_deferred_cubemap="" /></Properties></Entity><Entity EntityClass="Light" Name="unrelated" /></Objects>')
         output = global_environment_probe(objects)

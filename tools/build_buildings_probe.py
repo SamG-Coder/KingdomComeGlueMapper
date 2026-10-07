@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--level", default="kcd1_buildings_v19")
     parser.add_argument("--radius", type=float, default=400)
     parser.add_argument("--all", action="store_true", help="Include shared and initial-state structures across the full map")
+    parser.add_argument("--streams-only", action="store_true", help="Append stream and waterfall meshes to an existing building level")
     args = parser.parse_args()
     if not all(n and n.replace("_", "").isalnum() for n in (args.base_level, args.level)) or not math.isfinite(args.radius) or not 1 <= args.radius <= 1000:
         parser.error("Invalid level name or radius (1..1000 metres)")
@@ -53,8 +54,9 @@ def main():
                 return
             record = read_brush(data, offset, source.tables["meshes"]["paths"], source.tables["materials"]["paths"])
             x, y, _ = record["position"]
+            paths = ("/nature/stream_edge/", "/nature/waterfalls/") if args.streams_only else ("/buildings/", "/structures/", "/props/fences/")
             if ((args.all or (x-734.9)**2+(y-3421.4)**2 < args.radius**2)
-                    and any(part in record["path"] for part in ("/buildings/", "/structures/", "/props/fences/"))):
+                    and any(part in record["path"] for part in paths)):
                 if record["layer"] in allowed:
                     selected.append(record)
                 else:
@@ -67,7 +69,11 @@ def main():
         Path("outputs").mkdir(exist_ok=True)
         cache = stack.enter_context(tempfile.TemporaryDirectory(prefix="buildings-", dir="outputs"))
         index, emitted, material, mesh_bytes = asset_pack(stack, args.library, prefix, cache)
-        meshes = []
+        with zipfile.ZipFile(base / "terrain.pak") as archive:
+            base_meshes = list(parse(archive.read("terrain/terrain.dat")).tables["meshes"]["paths"])
+        if base_meshes and not args.streams_only:
+            raise ValueError("Base mesh table is not empty")
+        meshes = list(base_meshes)
         mesh_map = {}
         for number, group in enumerate(groups):
             original = source.tables["meshes"]["paths"][group].replace("\\", "/").lower()
@@ -83,8 +89,8 @@ def main():
                 print(f"Packaged {number+1}/{len(groups)} meshes; {len(emitted)} asset files", flush=True)
         with zipfile.ZipFile(base / "terrain.pak") as archive:
             baseline = parse(archive.read("terrain/terrain.dat"))
-            if baseline.tables["meshes"]["paths"]:
-                raise ValueError("Base mesh table is not empty")
+            if baseline.tables["meshes"]["paths"] != base_meshes:
+                raise ValueError("Base mesh table changed during build")
             materials = list(baseline.tables["materials"]["paths"])
             material_map = {-1: -1}
             for identifier in sorted(set(r["material"] for r in selected) - {-1}):
@@ -122,7 +128,7 @@ def main():
                 z = sum(r["position"][2] for r in records) / len(records)
                 ET.SubElement(hlod, "HLod", DataOffset=str(offset), DataSize=str(len(payload)+4),
                               ProxyIndex="-1", Type="Cluster", Pos=f"{x*64+32},{y*64+32},{z}",
-                              Radius="400", NearestObserverDistance="0", Name=f"buildings_{x}_{y}")
+                              Radius="400", NearestObserverDistance="0", Name=f"{'streams' if args.streams_only else 'buildings'}_{x}_{y}")
             after = verify_target_hlods(hlod_data)
             if after.get(1,0)-before.get(1,0) != len(selected) or after.get(2) != before.get(2):
                 raise ValueError("HLOD placement count changed unexpectedly")
@@ -146,7 +152,8 @@ def main():
             target.parent.mkdir(parents=True,exist_ok=True)
             with target.open("xb") as stream, payload.open("rb") as source_stream:
                 shutil.copyfileobj(source_stream, stream)
-        report = {"level":args.level,"base_level":args.base_level,"placements":len(selected),"meshes":len(meshes),
+        report = {"level":args.level,"base_level":args.base_level,"placements":len(selected),"meshes":len(meshes)-len(base_meshes),
+                  "inherited_meshes":len(base_meshes),"streams_only":args.streams_only,
                   "asset_files":len(emitted),"radius":None if args.all else args.radius,"all":args.all,
                   "layers":{str(i):layer_names.get(i,"shared") for i in sorted(allowed)},
                   "excluded_layers":{str(i):{"name":layer_names.get(i),"placements":n} for i,n in excluded_layers.items()},
@@ -155,10 +162,11 @@ def main():
                   "limitations":["Static structures only; dynamic doors and NPCs excluded",
                                  "CGF geometry and physics chunks retained; target neutral collision class used",
                                  "Intact/shared layers selected; game quest layer switching not implemented"]}
-        (destination/"buildings-report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
+        report_name = "streams" if args.streams_only else "buildings"
+        (destination/(report_name+"-report.json")).write_text(json.dumps(report,indent=2),encoding="utf-8")
         Path("reports").mkdir(exist_ok=True)
-        Path("reports/buildings-probe.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
-        print(f"Built {args.level}: {len(selected)} placements, {len(meshes)} meshes, {len(emitted)} asset files",flush=True)
+        Path("reports/"+report_name+"-probe.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
+        print(f"Built {args.level}: {len(selected)} added placements, {len(groups)} added meshes, {len(emitted)} asset files",flush=True)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ jobs:
       - name: Check command-line entry points
         shell: pwsh
         run: |
-          $scripts = @('audit_maps.py', 'upgrade_map.py', 'verify_compiled_conversion.py', 'launch_probe.py', 'build_vegetation_probe.py', 'build_water_probe.py', 'build_buildings_probe.py')
+          $scripts = @('audit_maps.py', 'upgrade_map.py', 'verify_compiled_conversion.py', 'launch_probe.py', 'build_vegetation_probe.py', 'build_water_probe.py', 'build_buildings_probe.py', 'build_water_surface_probe.py')
           foreach ($script in $scripts) {
             python "tools/$script" --help
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
