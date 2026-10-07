@@ -1,14 +1,14 @@
 # KingdomComeGlueMapper
 
-**Bring Kingdom Come: Deliverance terrain and vegetation into the Kingdom Come: Deliverance II engine.**
+**Bring Kingdom Come: Deliverance terrain, vegetation and static buildings into the Kingdom Come: Deliverance II engine.**
 
 [![Validate tooling](https://github.com/SamG-Coder/KingdomComeGlueMapper/actions/workflows/validate.yml/badge.svg)](https://github.com/SamG-Coder/KingdomComeGlueMapper/actions/workflows/validate.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/Code-MIT-green)](LICENSE)
 
-![KCD1 terrain, vegetation, ground cover and water running in KCD2](docs/images/kcd1-water-in-kcd2.png)
+![KCD1 castle and static buildings running in KCD2](docs/images/kcd1-buildings-in-kcd2.png)
 
-*Actual in-game capture of the confirmed v17 build: KCD1 terrain, original ground materials, trees, merged ground cover and water geometry running in KCD2. Water uses the native KCD2 river material and an explicit daytime reflection cubemap. Buildings are not yet converted. The debug FPS is from this incomplete world, not a full-game benchmark.*
+*User capture of the v20 full-map building build near Rattay. Buildings are rendering, but the visible stray water plane and missing river sections in this area remain known issues. The debug FPS is from this incomplete world, not a full-game benchmark.*
 
 KingdomComeGlueMapper is an experimental Python converter that reads **compiled files from your installed games** and builds a separate test level for the official KCD2 Modding Tools. Raw editor source is not required by this workflow.
 
@@ -29,7 +29,8 @@ Terrain, original close-up materials, individual vegetation, merged grass / grou
 | Individual vegetation | 541,465 original instances / 226 meshes; trees and distant forest visually confirmed |
 | Merged grass / ground cover | 25,405,423 samples / 83,431 cells / 169 groups; v13 confirmed working in game |
 | Water volumes | 282 original volumes; v17 appearance and reflections confirmed with native KCD2 water material and daytime cubemap |
-| Buildings, road objects, NPCs and quests | Not converted |
+| Static buildings | v20: 41,682 placements / 1,817 meshes across the map; buildings visually confirmed near Skalitz and Rattay, broader checks pending |
+| Road objects, NPCs and quests | Not converted |
 
 This is a **terrain-porting prototype**, not a complete game port. Visible gaps, material transitions and missing world objects are still under investigation. Highest-resolution mip residency and walking collision have not been comprehensively validated.
 
@@ -145,7 +146,7 @@ asset packaging as the individual vegetation build.
 
 The user confirmed **v13 merged grass and ground cover working in game**. This
 remains a prototype: comprehensive checks of every group, visibility bounds, LODs
-and wind behaviour are still outstanding. The screenshot above shows the subsequent **v17 water build**, including merged ground cover.
+and wind behaviour are still outstanding. The [v17 water screenshot](docs/images/kcd1-water-in-kcd2.png) includes merged ground cover.
 
 The local v13 level completed loading and confirmed terrain-based spawn with
 no-collision flight. Every packaged sector was checked against its octree group
@@ -164,7 +165,7 @@ Asset-free binary checks: `python -m unittest discover -s tests -v`.
 ### Water conversion (v17 confirmed working)
 
 The user confirmed water appearance and reflections working in the v17 build,
-shown in the screenshot above. Build on the existing v13 ground-cover level:
+shown in the [v17 water screenshot](docs/images/kcd1-water-in-kcd2.png). This local confirmation does not establish full river coverage. Build on the existing v13 ground-cover level:
 
 ```powershell
 python tools/build_water_probe.py --base-level kcd1_groundcover_v13 --level kcd1_water_v17 --native-water-materials
@@ -195,8 +196,80 @@ record strides needed to locate water safely. All 282 surface/physics-contour
 payloads were compared byte for byte, and the two new auxiliary defaults match
 all 115 installed native water volumes. The runtime confirmed level load, fly
 mode and an active probe with the explicit cubemap bound. The asset-free suite
-contains 14 tests. Swimming, full flow behaviour and exhaustive shoreline checks
+includes water and static-brush record checks. Swimming, full flow behaviour and exhaustive shoreline checks
 remain unverified. Keep the base terrain and vegetation asset namespaces installed.
+
+### Static buildings (experimental)
+
+The first building probe selects intact and shared static structures within
+400 metres of the Skalitz starting area. It excludes the destroyed town layers
+and adds buildings, structural meshes and fences to the confirmed v17 water level:
+
+```powershell
+python tools/build_buildings_probe.py --base-level kcd1_water_v17 --level kcd1_buildings_v19
+python tools/launch_probe.py --level kcd1_buildings_v19 --clearance 5
+```
+
+The selected source contains **4,555 placements across 586 meshes**. Conversion
+preserves each original transform, maps the 100-byte source brush record to the
+104-byte target layout, and appends spatial clusters to the existing HLOD stream.
+Models, available LODs, materials and streamed texture families are packaged under
+`KCD2Mod/Data/gluebuild/<level>/`, including installed HD and patch overrides.
+Existing terrain, vegetation and water object payloads are retained unchanged.
+
+The initial v18 runtime loaded buildings but visual testing exposed incorrect
+second-UV texture bindings and burned debris mixed into the intact town. The v19
+converter maps Illum second-UV colour textures from `[1] Diffuse` to the target
+`Opacity` slot and excludes ambiguous `pc` layers. Named shader features take
+precedence over serialized numeric masks, whose global bits are not shader-local
+`.ext` masks. The original separate tiled blend mask cannot share the target
+second-UV slot, so exact moss/dirt blend fidelity remains unverified.
+
+Visual alignment, material appearance, streaming and collision validation remain
+pending. Original CGF geometry and physics
+chunks are retained, with a neutral target collision class. Dynamic doors, NPCs,
+quest-driven layer changes and full-world building coverage are not included.
+Keep the inherited terrain and vegetation asset namespaces installed. `--radius`
+changes the selection radius from 1 to 1,000 metres; choose a new `--level` name
+when rebuilding because existing outputs are never overwritten.
+
+#### Full-map structures
+
+```powershell
+python tools/build_buildings_probe.py --all --level kcd1_buildings_v20
+python tools/launch_probe.py --level kcd1_buildings_v20 --clearance 5
+```
+
+`--all` removes the Skalitz distance restriction and includes shared layer-zero
+structures plus explicitly named `_state0` and `_state0_prefabs` layers across
+the original world. The installed source selects **41,682 placements across
+1,817 meshes**. This is geographical expansion of static structures, not a
+conversion of every quest state: later states, ambiguous platform layers and
+dynamic entities remain excluded. The generated report lists excluded layers
+and their placement counts. Existing water and vegetation are retained.
+
+Large builds stage assets on disk to bound RAM use. Keep enough free space for
+both temporary and installed assets; the temporary staging directory is removed
+when the build finishes. Full-world visual, collision and streaming coverage
+still requires in-game validation.
+
+The local v20 build installed 45,927 files (approximately 9.1 GB), with no missing
+material texture references, and completed runtime loading with flight enabled.
+Runtime caveats include zero mean-face-area reports for a quarry tent mesh and
+a Johanka stairs proxy, empty bounds on tent/rope pieces, a missing render mesh
+on an ash-pile LOD, and a rejected collision proxy for the large Uzhitz
+church interior (6,427 triangles exceed the target's 5,000-triangle limit).
+These warnings do not establish visual failure, but collision is not fully converted.
+
+### Known water issues near Rattay
+
+The user reported a stray flat water surface beside the castle/bridges and missing
+river sections in the v20 build. The screenshot above records the stray plane.
+The recorded inspection position was approximately **X 2798, Y 504, Z 52**.
+A nearby original water volume references `materials/terrain/river/river_sazava_02`,
+but this proximity does not prove it causes the visible plane. The source volume
+selection, target polygon rendering and missing river geometry require further
+investigation. Neither issue is fixed by this buildings checkpoint.
 
 ### Terrain and materials pipeline
 
@@ -238,6 +311,9 @@ Retail archives and the modding workspace's retail symlinks are not modified. To
 | `tools/launch_probe.py` | Launch the development runtime and apply spawn/flight settings |
 | `tools/build_water_probe.py` | Build original water volumes with the confirmed native-material option |
 | `tools/water_volumes.py` | Bounded object-stream reader and water record conversion |
+| `tools/build_buildings_probe.py` | Build intact Skalitz static structures on the water checkpoint |
+| `tools/building_brushes.py` | Static brush record conversion and resource-table checks |
+| `tools/static_assets.py` | Package referenced CGF, material and texture assets in isolation |
 | `tools/stage_map_probe.py` | Historical unconverted-copy diagnostic; not needed for normal use |
 
 Local checks require your installed game files. GitHub Actions checks Python compilation, CLI entry points and asset-free vegetation binary tests on Windows; it does **not** run the games or establish runtime compatibility.
@@ -255,7 +331,7 @@ See [development notes](docs/development-notes.md) for the experiment history an
 
 The first rendering checkpoint is confirmed: original vegetation is visible near Skalitz in a reproducible build. Stable distance transitions, complete coverage and collision still require further validation. A resource-table scan or successful asset extraction alone does not complete those checks.
 
-**Water milestone: v17 confirmed working.** Original water geometry now renders with native KCD2 water materials and a valid daytime reflection fallback. Remaining water work includes the day/night probe sequence, local probes, swimming and broader shoreline/flow validation. Next world-conversion steps are Skalitz buildings and other placed objects, remaining terrain gaps and material transitions, and road geometry. Walking/collision and world-streaming validation precede NPCs, navigation and quests.
+**Water milestone: v17 confirmed working.** Original water geometry now renders with native KCD2 water materials and a valid daytime reflection fallback. Remaining water work includes the day/night probe sequence, local probes, swimming and broader shoreline/flow validation. The v20 checkpoint expands static buildings across the map. Next work includes the stray water plane and missing river sections near Rattay, remaining placed objects, terrain gaps and material transitions, and road geometry. Walking/collision and world-streaming validation precede NPCs, navigation and quests.
 
 ## License and game content
 

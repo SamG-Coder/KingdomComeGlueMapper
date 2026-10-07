@@ -31,7 +31,7 @@ def water_record(data, offset, end, version):
             "material": struct.unpack_from("<i", data, offset + 52 + extra)[0]}
 
 
-def read_water(terrain):
+def read_water(terrain, visitor=None):
     """Walk every object block using observed, bounds-checked record strides.
 
     Roads use twelve-byte vertices and sixteen-bit indices in both builds;
@@ -81,6 +81,8 @@ def read_water(terrain):
                 raise ValueError(f"Unsupported object type {kind} at {cursor}")
             if cursor + size > end:
                 raise ValueError(f"Object type {kind} exceeds its block")
+            if visitor is not None:
+                visitor(data, cursor, size, kind)
             counts[kind] += 1
             cursor += size
         for bit in range(8):
