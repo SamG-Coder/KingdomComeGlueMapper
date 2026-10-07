@@ -146,3 +146,22 @@ Validation: 27 asset-free tests pass; v28 contains 171,260 brush records,
 1,483,225 individual instances, and 10,250 unique visual entities. Successful
 compilation and structural counts do not establish exhaustive visual, collision,
 LOD or streaming correctness.
+
+### Tree shadow-proxy conversion candidate
+
+The user reported a detailed tree and a coarse flat canopy drawn together.
+For the inspected `tilia_cordata_b`, the target has one individual placement;
+its base CGF contains both an atlas subset and a `shadow_proxy` subset. The
+importer previously copied that proxy's ordinary Vegetation material unchanged.
+Changing global LOD settings did not provide an acceptable correction and those
+diagnostics were reverted.
+
+`vegetation_materials.convert_shadow_proxies` now preserves material-slot order,
+converts explicitly named Vegetation shadow proxies to Nodraw, and clears the
+no-shadow flag on their visible Vegetation siblings. Thus visible geometry
+provides shadows instead of the coarse proxy. Mesh files, placement transforms,
+and LOD selection are unchanged. This can increase shadow-rendering cost.
+`repair_tree_materials.py` applies the same conversion to existing loose generated
+assets, retaining original files in a required backup directory. The first local
+pass changed 78 materials. In-game confirmation of canopy appearance, shadows,
+and distance transitions is still pending; this is not yet a verified LOD fix.

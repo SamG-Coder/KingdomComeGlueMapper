@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from upgrade_map import read, xml
 from build_water_probe import shader_features, translate_features
+from vegetation_materials import convert_shadow_proxies
 
 
 def convert_material_features(element, source_shader, target_shader):
@@ -92,6 +93,7 @@ def asset_pack(stack, library, prefix, cache_dir=None):
             return material_names[name]
         target = prefix + "m" + str(len(material_names))
         doc = ET.fromstring(asset_read(name+".mtl"))
+        convert_shadow_proxies(doc)
         for element in doc.iter("Material"):
             shader = element.get("Shader", "").lower()
             if shader in shader_maps[0] and shader in shader_maps[1]:
