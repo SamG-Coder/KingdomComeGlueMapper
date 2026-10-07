@@ -133,10 +133,16 @@ See [development notes](docs/development-notes.md) for the experiment history an
 
 ## Roadmap
 
-- Resolve terrain gaps and validate surface transitions against the original game.
-- Restore a small group of Skalitz buildings and verify mesh/material placement.
-- Convert the remaining object and HLOD data, then vegetation, roads and water.
-- Validate walking, collision and world streaming before considering gameplay systems.
+**Next milestone: vegetation.** Restore the original KCD1 vegetation layout in the KCD2 runtime, starting with a small test area near Skalitz.
+
+1. **Read the vegetation data.** Trace species definitions, placed instances and merged vegetation records in the compiled KCD1 packages, and compare their representation with KCD2.
+2. **Convert one representative patch.** Resolve a few tree, shrub and ground-cover assets with their materials and texture dependencies. Preserve source positions, rotation and scale wherever the compiled data provides them.
+3. **Validate in game.** Check terrain alignment, foliage transparency, lighting, shadows, collision where applicable, and visibility at near and far distances. Test LOD transitions and streaming before increasing the instance count.
+4. **Expand across the world.** Extend the converter to the remaining vegetation types and merged vegetation data, measuring performance as coverage grows.
+
+Acceptance for the first vegetation milestone is a reproducible build showing original vegetation instances correctly placed near Skalitz, with working materials and stable distance transitions. A resource-table scan or successful asset extraction alone does not complete it.
+
+After vegetation: restore Skalitz buildings and other placed objects, resolve remaining terrain gaps and material transitions, then add road geometry and water. Walking/collision and world-streaming validation precede NPCs, navigation and quests.
 
 ## License and game content
 
