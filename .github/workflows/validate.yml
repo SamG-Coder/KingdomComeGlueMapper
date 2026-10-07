@@ -1,0 +1,25 @@
+name: Validate tooling
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile Python tools
+        run: python -m compileall -q tools
+      - name: Check command-line entry points
+        shell: pwsh
+        run: |
+          $scripts = @('audit_maps.py', 'upgrade_map.py', 'verify_compiled_conversion.py', 'launch_probe.py')
+          foreach ($script in $scripts) {
+            python "tools/$script" --help
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

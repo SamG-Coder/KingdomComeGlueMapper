@@ -1,0 +1,21 @@
+# Local game assets, reference engine code and installed dependencies
+/research/
+/.deps/
+/reports/
+/outputs/
+*.pak
+*.dds
+*.dds.*
+*.ctc
+*.dat
+*.log
+*.trace
+*.exe
+*.dll
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+Thumbs.db
+.DS_Store
