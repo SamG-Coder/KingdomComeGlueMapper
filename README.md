@@ -1,18 +1,18 @@
 # KingdomComeGlueMapper
 
-**Bring Kingdom Come: Deliverance terrain into the Kingdom Come: Deliverance II engine.**
+**Bring Kingdom Come: Deliverance terrain and vegetation into the Kingdom Come: Deliverance II engine.**
 
 [![Validate tooling](https://github.com/SamG-Coder/KingdomComeGlueMapper/actions/workflows/validate.yml/badge.svg)](https://github.com/SamG-Coder/KingdomComeGlueMapper/actions/workflows/validate.yml)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/Code-MIT-green)](LICENSE)
 
-![Converted KCD1 landscape with detailed soil and grass running in the KCD2 development runtime](docs/images/kcd1-terrain-in-kcd2.png)
+![Converted KCD1 terrain and original vegetation running in the KCD2 development runtime](docs/images/kcd1-vegetation-in-kcd2.png)
 
-*Actual in-game capture of the converted KCD1 world in KCD2, near Skalitz. Original terrain detail textures are loaded; buildings, trees and other world objects are not yet converted. Pale terrain gaps remain visible. The debug FPS is from this stripped terrain test, not a full-world performance benchmark.*
+*Actual in-game capture near Skalitz: converted KCD1 terrain, original ground materials and restored vegetation in KCD2. The v11 build contains 541,465 individual vegetation instances across 226 meshes. Buildings and merged ground cover are not yet converted. The debug FPS is from this incomplete world, not a full-game benchmark.*
 
 KingdomComeGlueMapper is an experimental Python converter that reads **compiled files from your installed games** and builds a separate test level for the official KCD2 Modding Tools. Raw editor source is not required by this workflow.
 
-The first milestone is working: KCD1 terrain renders in KCD2, original close-up materials load, and the development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
+Terrain, original close-up materials, and the first world-wide individual vegetation conversion are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
 
 ## What works today
 
@@ -26,7 +26,9 @@ The first milestone is working: KCD1 terrain renders in KCD2, original close-up 
 | HD texture inputs | 78 texture families, with installed HD overrides and streamed mip files |
 | Test launcher | Terrain-height spawn, Skalitz default, no-collision flight, intro-skip settings |
 | Texture transitions | Optional softer-blending experiment; original transition fidelity not established |
-| Buildings, vegetation, road objects, water, NPCs and quests | Not converted |
+| Individual vegetation | 541,465 original instances / 226 meshes; trees and distant forest visually confirmed |
+| Merged grass / ground cover | Not converted |
+| Buildings, road objects, water, NPCs and quests | Not converted |
 
 This is a **terrain-porting prototype**, not a complete game port. Visible gaps, material transitions and missing world objects are still under investigation. Highest-resolution mip residency and walking collision have not been comprehensively validated.
 
@@ -91,6 +93,50 @@ This adjusts material transition shading while preserving terrain geometry, surf
 
 ## How the conversion works
 
+### Vegetation conversion (experimental)
+
+The working **v11** build restores **541,465 individual vegetation instances**
+across **226 meshes**, including original trees and shrubs. The user confirmed
+visible nearby trees and distant forest in the screenshot above. The exported
+HLOD stream contains 3,980 spatial vegetation sectors, and all 226 models loaded
+without isolated-asset load errors in the captured runtime log.
+
+The converter reads original position, scale and rotation, rewrites embedded
+absolute and relative material references in CGF files, preserves available LODs,
+and packages streamed texture families under an isolated namespace. Normal-map
+filename suffixes are preserved because the engine uses them to identify texture
+semantics. Terrain geometry and surface samples are unchanged from v6.
+
+An important format difference: the initial small probe put instances in the
+terrain object tree, but no vegetation was visible. The working build puts them
+in KCD2's **`terrain/hlods.dat` and `terrain/hlods.xml`** structure instead. The
+record layout was checked against 4,669,105 native vegetation records and 171,333
+brush records; generated XML offsets and instance counts are also validated.
+
+After building the v6 terrain/material baseline:
+
+```powershell
+python tools/build_vegetation_probe.py --level kcd1_vegetation_v11 --all
+python tools/launch_probe.py --level kcd1_vegetation_v11 --x 748 --y 3427
+```
+
+`--all` includes every decoded individual instance whose mesh is under the
+original vegetation path. Without it, the tool builds a small two-species patch.
+This is not complete vegetation coverage: the reader decodes leading vegetation
+records in each source block and stops at unsupported record types. Merged grass,
+merged vegetation sectors, distant proxy atlases, advanced wind behaviour and
+exhaustive collision/LOD validation remain unfinished.
+
+Assets are installed under `KCD2Mod/Data/glueveg/<level>/`. The vegetation level
+also depends on the base level's terrain-material namespace; keep those assets
+installed. Source game assets and generated outputs are not distributed here.
+The default launcher remains on the terrain-only v6 checkpoint; select v11
+explicitly as above.
+
+Asset-free binary checks: `python -m unittest discover -s tests -v`.
+
+### Terrain and materials pipeline
+
 1. Read compiled terrain and level metadata from the installed KCD1 `rataje` archives.
 2. Validate the observed binary layout and compare it with installed KCD2 data.
 3. Convert the node headers, height/surface packing and geometry-error layout.
@@ -124,23 +170,25 @@ Retail archives and the modding workspace's retail symlinks are not modified. To
 | `tools/upgrade_map.py` | Build an isolated compiled test level |
 | `tools/terrain_materials.py` | Resolve, namespace, package and verify texture dependencies |
 | `tools/verify_compiled_conversion.py` | Check every height/surface sample and shared sector boundaries |
+| `tools/build_vegetation_probe.py` | Build original vegetation instances and KCD2 HLOD metadata |
+| `tools/vegetation.py` | Bounded vegetation/HLOD readers and instance conversion |
 | `tools/launch_probe.py` | Launch the development runtime and apply spawn/flight settings |
 | `tools/stage_map_probe.py` | Historical unconverted-copy diagnostic; not needed for normal use |
 
-Local checks require your installed game files. GitHub Actions checks Python compilation and CLI entry points on Windows; it does **not** run the games or establish runtime compatibility.
+Local checks require your installed game files. GitHub Actions checks Python compilation, CLI entry points and asset-free vegetation binary tests on Windows; it does **not** run the games or establish runtime compatibility.
 
 See [development notes](docs/development-notes.md) for the experiment history and observed format differences. Local logs, reports, extracted engine references and generated assets are intentionally excluded from this repository.
 
 ## Roadmap
 
-**Next milestone: vegetation.** Restore the original KCD1 vegetation layout in the KCD2 runtime, starting with a small test area near Skalitz.
+**Current milestone: vegetation.** Individual vegetation is now rendering in KCD2, with a world-wide v11 build and a visual confirmation near Skalitz. Remaining vegetation work is merged ground cover, proxy/LOD behaviour, wind, collision and broader placement checks.
 
 1. **Read the vegetation data.** Trace species definitions, placed instances and merged vegetation records in the compiled KCD1 packages, and compare their representation with KCD2.
 2. **Convert one representative patch.** Resolve a few tree, shrub and ground-cover assets with their materials and texture dependencies. Preserve source positions, rotation and scale wherever the compiled data provides them.
 3. **Validate in game.** Check terrain alignment, foliage transparency, lighting, shadows, collision where applicable, and visibility at near and far distances. Test LOD transitions and streaming before increasing the instance count.
 4. **Expand across the world.** Extend the converter to the remaining vegetation types and merged vegetation data, measuring performance as coverage grows.
 
-Acceptance for the first vegetation milestone is a reproducible build showing original vegetation instances correctly placed near Skalitz, with working materials and stable distance transitions. A resource-table scan or successful asset extraction alone does not complete it.
+The first rendering checkpoint is confirmed: original vegetation is visible near Skalitz in a reproducible build. Stable distance transitions, complete coverage and collision still require further validation. A resource-table scan or successful asset extraction alone does not complete those checks.
 
 After vegetation: restore Skalitz buildings and other placed objects, resolve remaining terrain gaps and material transitions, then add road geometry and water. Walking/collision and world-streaming validation precede NPCs, navigation and quests.
 

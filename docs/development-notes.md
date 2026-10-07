@@ -83,3 +83,22 @@ Confirm the converted terrain visually in KCD2, including Skalitz and off-diagon
 The user observed abrupt grass/soil edges in v6. An audit of all 17,305,600 native KCD2 terrain samples found no nonzero secondary mixture weights, so the single-material sample representation alone is not evidence of lost blend masks. The installed target Terrain shader blends interpolated vertex alpha with the material height texture, BlendFactor and BlendFalloff.
 
 `kcd1_terrain_v7` is an A/B experiment with `--original-materials --terrain-blend-factor 1`. It retains source texture inputs and UVs; its terrain.dat is byte-identical to v6. It changes material transition shading, not terrain paint assignments, and does not claim to reconstruct missing original masks. Visual comparison is pending. The default launcher remains on the confirmed v6 checkpoint until the experiment is accepted.
+
+## Vegetation checkpoint - v11
+
+The initial 19-instance probes loaded models but were not visible. Native KCD2
+stores vegetation instances in its HLOD stream, and moving the instances there
+produced visible vegetation. The v11 build contains 541,465 individual instances
+across 226 mesh groups in 3,980 spatial sectors. The user screenshot confirms
+nearby trees and distant forest. Terrain bytes remain identical to v6.
+
+Expanded asset coverage exposed relative CGF material references; these now
+resolve against the original mesh directory before namespacing. Texture semantic
+suffixes are retained. All 226 vegetation models load with no isolated-asset
+errors in the captured v11 log. All emitted HLOD block offsets, sizes and group
+indices validate. Four asset-free binary tests pass.
+
+This is not full vegetation coverage: unsupported source block remainders and
+merged vegetation are not decoded. Billboard/proxy atlases, advanced wind,
+collision and exhaustive LOD behaviour remain unverified. The captured view is
+visual evidence for rendering, not proof of every instance or every distance.
