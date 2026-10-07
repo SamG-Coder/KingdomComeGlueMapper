@@ -63,8 +63,13 @@ def asset_pack(stack, library, prefix, cache_dir=None):
         archive = stack.enter_context(zipfile.ZipFile(path))
         for entry in archive.infolist():
             name = entry.filename.replace("\\", "/").lower()
-            if name.endswith((".cgf", ".mtl")) or ".dds" in name:
+            if name.endswith((".cgf", ".cga", ".mtl")) or ".dds" in name:
                 index[name] = (archive,entry)
+    level_archive = stack.enter_context(zipfile.ZipFile(library / 'KingdomComeDeliverance/Data/Levels/rataje/level.pak'))
+    for entry in level_archive.infolist():
+        name = entry.filename.replace('\\','/').lower()
+        if name.endswith(('.cgf','.mtl')) or '.dds' in name:
+            index['%level%/'+name] = (level_archive,entry)
 
     def asset_read(name):
         archive,entry = index[name]
@@ -81,10 +86,11 @@ def asset_pack(stack, library, prefix, cache_dir=None):
 
     def material(name):
         name = name.replace("\\", "/").lower().removesuffix(".mtl")
+        if name+'.mtl' not in index and 'objects/'+name+'.mtl' in index:
+            name = 'objects/'+name
         if name in material_names:
             return material_names[name]
         target = prefix + "m" + str(len(material_names))
-        material_names[name] = target
         doc = ET.fromstring(asset_read(name+".mtl"))
         for element in doc.iter("Material"):
             shader = element.get("Shader", "").lower()
@@ -102,13 +108,14 @@ def asset_pack(stack, library, prefix, cache_dir=None):
             if original not in texture_names:
                 # CryEngine uses semantic suffixes such as _ddna to
                 # recognize normal/gloss textures; preserve the basename.
-                texture_names[original] = prefix + "t" + str(len(texture_names)) + "_" + PurePosixPath(original).name
                 if original not in index:
                     raise FileNotFoundError(original)
+                texture_names[original] = prefix + "t" + str(len(texture_names)) + "_" + PurePosixPath(original).name
                 for member, suffix in families.get(original, []):
                     emitted[texture_names[original]+suffix] = asset_read(member)
             tex.set("File",texture_names[original])
         emitted[target+".mtl"] = xml(doc)
+        material_names[name] = target
         return target
 
     def mesh_bytes(name):

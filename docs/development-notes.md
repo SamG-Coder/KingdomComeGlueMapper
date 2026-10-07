@@ -102,3 +102,47 @@ This is not full vegetation coverage: unsupported source block remainders and
 merged vegetation are not decoded. Billboard/proxy atlases, advanced wind,
 collision and exhaustive LOD behaviour remain unverified. The captured view is
 visual evidence for rendering, not proof of every instance or every distance.
+
+## Visible world objects and shader recovery - v28
+
+The complete mixed-object walker found 253,142 vegetation-format records beyond
+the leading runs handled by the old reader. Including previously omitted
+non-vegetation models as well produces all 1,483,225 individual source instances:
+718,931 foliage placements plus instanced stones and clutter. Existing merged
+sectors, terrain, water and building HLOD records are preserved. Source position,
+scale and rotation bytes remain unchanged; the reported tree LOD misalignment is
+not yet established as fixed.
+
+The static prop pass adds 120,776 brush placements. The visual-entity pass resolves
+pickable-item database models, shared mission entities, initial-state layer
+entities and parent-local transforms. The v28 level contains 10,250 uniquely
+named visual item entities. The user confirmed Henry's house is furnished.
+These are visual imports, not working pickup, inventory or quest behavior.
+Unsupported character models, later states, missing dependencies and unresolved
+parents remain reported exclusions.
+
+An experimental v27 pass added 2,408 level-local designer meshes. User captures
+showed red blocker walls and giant helper planes; v28 restores the v26 geometry
+set and retains only 31 additional resolved item materials. Designer geometry
+is now excluded from the default prop pass pending classification.
+
+The original opening quest links its player CutsceneSpot to EntityId 120819,
+TagPoint231: position (733.87537, 3421.9014, 63.908913), quaternion
+(0.60181504, 0, 0, -0.79863548). The earlier nearby TagPoint232 belongs to Henry's
+mother. The launcher's `--kcd1-start` applies the player marker's height and
+orientation with no-collision flight enabled. Walking collision is unverified.
+
+Expanded rendering exposed two errors in the installed KCD2 shader includes:
+the instanced variants lack the per-draw constants referenced by
+`Get_BindlessBoneOffset_Prev` and `ShadowMotionBias`. A local generator reads the
+user's installed shader source and emits two loose include overrides. The first
+selects the instance-data buffer; the second retains pass motion bias with a
+neutral multiplier of one, because the instance buffer lacks that coefficient.
+No engine shader source or game assets are committed. The v28 runtime log showed
+1,984 distinct compile entries, no repeated entries and zero compilation errors;
+cache writes were enabled and shader editing disabled. User confirmed completion.
+
+Validation: 27 asset-free tests pass; v28 contains 171,260 brush records,
+1,483,225 individual instances, and 10,250 unique visual entities. Successful
+compilation and structural counts do not establish exhaustive visual, collision,
+LOD or streaming correctness.

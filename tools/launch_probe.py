@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--x", type=float, default=734.89313)
     parser.add_argument("--y", type=float, default=3421.4497)
     parser.add_argument("--clearance", type=float, default=1.0)
+    parser.add_argument("--kcd1-start", action="store_true", help="Use the original opening quest's player CutsceneSpot (TagPoint231), including height and rotation")
     parser.add_argument("--walk", action="store_true", help="Disable default no-collision flight for traversal tests")
     parser.add_argument("--attach", action="store_true", help="Only fix spawn in the already running specified level")
     args = parser.parse_args()
@@ -57,6 +58,14 @@ def main():
                + "); System.ExecuteCommand(\"goto "
                + str(args.x) + " " + str(args.y) + " \"..tostring(z+" + str(args.clearance)
                + ")); System.LogAlways(\"" + marker + " ground=\"..tostring(z)..\" fly=\"..tostring(player.player:GetFlyMode())); end; end")
+    if args.kcd1_start:
+        # q_skalitz EntityLinks: CutsceneSpot[npc('player'),alias('stribrna_skalice')]
+        # -> EntityId120819 / TagPoint231, quaternion (w,x,y,z) below.
+        heading = 2 * math.atan2(-0.79863548, 0.60181504)
+        command = ('#if player and player.player then player.player:SetFlyMode(' + fly_mode
+                   + '); System.ExecuteCommand("goto 733.87537 3421.9014 63.908913"); '
+                   + f'player:SetWorldAngles({{x=0,y=0,z={heading}}}); '
+                   + 'System.LogAlways("' + marker + ' original player CutsceneSpot fly="..tostring(player.player:GetFlyMode())); end')
     deadline = time.monotonic() + 180
     next_attempt = 0
     while time.monotonic() < deadline:
@@ -65,7 +74,7 @@ def main():
         contents = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
         if marker in contents:
             print(next(line for line in contents.splitlines() if marker in line), flush=True)
-            print("Terrain-based spawn command executed. Check movement and collision in game.", flush=True)
+            print("Original opening player transform applied." if args.kcd1_start else "Terrain-based spawn command executed. Check movement and collision in game.", flush=True)
             return
         # Use the latest completed level, not a stale earlier entry in this log.
         loaded = [line for line in contents.splitlines() if "*LOADING: Level " in line and " loading time:" in line]

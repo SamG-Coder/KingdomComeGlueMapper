@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from vegetation import convert_instance, read_instances, verify_target_hlods
+from vegetation import convert_instance, read_instances, read_all_instances, verify_target_hlods
 
 
 def source_record():
@@ -48,6 +48,17 @@ class VegetationTests(unittest.TestCase):
     def test_invalid_instance_is_rejected(self):
         with self.assertRaises(ValueError):
             convert_instance(source_record()[:-1],0,0)
+
+    def test_complete_reader_keeps_vegetation_after_brush(self):
+        brush=struct.pack('<I',1)+bytes(96)
+        payload=source_record()+brush+source_record()
+        data=struct.pack('<HBB6fI',5,0,0,0,0,0,4096,4096,4096,len(payload))+payload
+        terrain=SimpleNamespace(data=data,version=28,tree_offset=0,tables={'vegetation':{'paths':['tree.cgf']}})
+        records,counts=read_all_instances(terrain)
+        self.assertEqual([r['offset'] for r in records],[32,196])
+        self.assertEqual(counts,{2:2,1:1})
+        terrain.data=data[:-1]
+        with self.assertRaises(ValueError):read_all_instances(terrain)
 
 
 if __name__ == "__main__":

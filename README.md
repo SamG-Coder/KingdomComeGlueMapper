@@ -26,10 +26,13 @@ Terrain, original close-up materials, individual vegetation, merged grass / grou
 | HD texture inputs | 78 texture families, with installed HD overrides and streamed mip files |
 | Test launcher | Terrain-height spawn, Skalitz default, no-collision flight, intro-skip settings |
 | Texture transitions | Optional softer-blending experiment; original transition fidelity not established |
-| Individual vegetation | 541,465 original instances / 226 meshes; trees and distant forest visually confirmed |
+| Individual vegetation | v24: 718,931 foliage placements, plus instanced rocks and clutter; v11/v13 appearance confirmed, expanded coverage and LOD transitions need broader checks |
 | Merged grass / ground cover | 25,405,423 samples / 83,431 cells / 169 groups; v13 confirmed working in game |
 | Water volumes | 282 original volumes; v17 appearance and reflections confirmed with native KCD2 water material and daytime cubemap |
 | Static buildings | v20: 41,682 placements / 1,817 meshes across the map; buildings visually confirmed near Skalitz and Rattay, broader checks pending |
+| Static props and furnishings | v26 interiors confirmed furnished; 120,776 additional brush placements. v28 contains 10,250 visual item entities, including 31 item material fixes; broader validation pending |
+| Complete individual-instance coverage | v24 reads all 1,483,225 source instances, including instanced stones and clutter; adds 177,466 foliage placements over v13. Visual LOD alignment remains under investigation |
+| Original opening position | `--kcd1-start` uses the opening quest's player CutsceneSpot, TagPoint231, including source height and facing |
 | Road objects, NPCs and quests | Not converted |
 
 This is a **terrain-porting prototype**, not a complete game port. Visible gaps, material transitions and missing world objects are still under investigation. Highest-resolution mip residency and walking collision have not been comprehensively validated.
@@ -328,6 +331,46 @@ Retail archives and the modding workspace's retail symlinks are not modified. To
 
 ## Tools and validation
 
+The current visible-item pass preserves original world transforms, resolves pickable-item
+database models, and composes parent-local item placements. Items use static visual
+entities: inventory, pickup, container interactions and quest logic are not imported.
+Shared mission entities and explicitly identified initial-state layers are included;
+later states and unsupported models are recorded in the local reports.
+Level-local designer geometry is excluded: the v27 experiment exposed editor
+blockers and giant helper planes, so v28 restores the v26 geometry set.
+
+To build from the water/stream checkpoint and the original v13 vegetation report:
+
+```powershell
+python tools/build_buildings_probe.py --base-level kcd1_water_v22 --level my_props --all --props-only
+python tools/complete_instances.py --base-level my_props --level my_world --original-report "D:\SteamLibrary\steamapps\common\KCD2Mod\Data\Levels\kcd1_groundcover_v13\vegetation-report.json"
+python tools/launch_probe.py --level my_world --kcd1-start
+```
+
+Use fresh level names. `complete_instances.py` requires a base with exactly the
+individual-instance set recorded in that report; it preserves existing buildings,
+water, merged sectors and resource indices. `build_entity_probe.py` can append missing
+visual entities to an existing checkpoint without adding duplicates by source ID.
+
+In the development console, switch to walking with
+`#player.player:SetFlyMode(FlyMode_Off)` and back to flight with
+`#player.player:SetFlyMode(FlyMode_OnNoCollisions)`.
+
+The installed KCD2 shader include has a compilation failure in an instanced variant:
+`Get_BindlessBoneOffset_Prev` references an unavailable `CD_CustomData` constant.
+`python tools/fix_instanced_shader.py` generates a small loose include override from
+the user's installed shader source, selecting the instance buffer for that variant.
+It also corrects `ShadowMotionBias`, which references an unavailable
+`CD_CustomData2` in instanced shadow variants; those variants use a neutral
+per-object multiplier of one because the instance buffer has no such field.
+It does not modify archives or distribute engine source. Both reported compilation
+errors are resolved in v28: the inspected log contains 1,984 distinct compilations
+and zero compile failures. The user confirmed the test completed. Wider shadow
+appearance and LOD alignment validation remain necessary.
+Restart after installing the overrides. They can be removed by deleting only
+the generated loose `ModificatorVT.cfi` and `CommonShadowGenPass.cfi` files in
+`KCD2Mod/Engine/Shaders/HWScripts/CryFX/`.
+
 | Tool | Purpose |
 |---|---|
 | `tools/audit_maps.py` | Read-only archive inventory and bounded header inspection |
@@ -343,6 +386,10 @@ Retail archives and the modding workspace's retail symlinks are not modified. To
 | `tools/build_buildings_probe.py` | Build intact Skalitz static structures on the water checkpoint |
 | `tools/building_brushes.py` | Static brush record conversion and resource-table checks |
 | `tools/static_assets.py` | Package referenced CGF, material and texture assets in isolation |
+| `tools/entity_visuals.py` | Resolve initial-world item models and parent transforms |
+| `tools/build_entity_probe.py` | Append visible furnishings and placed items |
+| `tools/complete_instances.py` | Complete mixed-stream foliage and instanced prop coverage |
+| `tools/fix_instanced_shader.py` | Generate a local correction for the installed instanced shader variant |
 | `tools/stage_map_probe.py` | Historical unconverted-copy diagnostic; not needed for normal use |
 
 Local checks require your installed game files. GitHub Actions checks Python compilation, CLI entry points and asset-free vegetation binary tests on Windows; it does **not** run the games or establish runtime compatibility.

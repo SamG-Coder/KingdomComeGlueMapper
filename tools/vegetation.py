@@ -50,6 +50,27 @@ def read_instances(terrain):
     return instances, dict(skipped)
 
 
+def read_all_instances(terrain):
+    """Read instances anywhere in mixed blocks, using the complete bounded walker."""
+    from water_volumes import read_water
+    if terrain.version != 28:
+        raise ValueError("Expected source vegetation version 28")
+    instances = []
+    def collect(data, offset, size, kind):
+        if kind != 2:
+            return
+        group = struct.unpack_from("<H", data, offset + 36)[0]
+        values = struct.unpack_from("<4f", data, offset + 40)
+        if group >= len(terrain.tables["vegetation"]["paths"]) or not all(map(math.isfinite, values)) or not 0 < values[3] < 100:
+            raise ValueError("Invalid vegetation transform or group")
+        instances.append({"offset": offset, "group": group,
+                          "mesh": terrain.tables["vegetation"]["paths"][group],
+                          "pos": list(values[:3]), "scale": values[3],
+                          "layer": struct.unpack_from("<H", data, offset + 28)[0]})
+    _, counts = read_water(terrain, collect)
+    return instances, counts
+
+
 def verify_target_hlods(data):
     if struct.unpack_from("<I", data)[0] != 2:
         raise ValueError("Unknown HLOD container")
