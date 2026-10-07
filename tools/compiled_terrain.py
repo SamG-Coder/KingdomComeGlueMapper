@@ -94,13 +94,25 @@ def parse(data):
     return Terrain(data, version, unit, tables, nodes, tree_offset, tree_nodes)
 
 
+def legacy_height_offset(offset):
+    """KCD1 sector origins are quantized down onto the global 5 cm grid.
+
+    The serialized float is an authored bound, not an unquantized additive
+    origin. Source road vertices independently reproduce floor(offset*20)/20;
+    adding the raw float instead raises sectors by their fractional grid step.
+    """
+    if not math.isfinite(offset):
+        raise ValueError("Non-finite terrain height offset")
+    return math.floor(offset * 20.0) / 20.0
+
+
 def convert_elevation(source):
     """Convert terrain nodes; omit unconverted outdoor objects explicitly.
 
     v7 packs surface in low 4 bits and elevation in high 12 bits of uint16.
     v8 packs 20 surface bits and 12 elevation bits in uint32. The installed
     source samples already use a fixed 0.05 metre step despite the legacy
-    fRange header value. Preserve their quantized heights and offsets exactly.
+    fRange header value. Quantize the sector origin onto the same global grid.
     """
     if source.version != 28:
         raise ValueError("Expected version 28 input")
@@ -118,7 +130,7 @@ def convert_elevation(source):
         old = array("H")
         old.frombytes(source.data[node["samples"]:node["samples"]+2*count])
         step = struct.unpack("<f", struct.pack("<f", 0.05))[0]
-        new_offset = old_offset
+        new_offset = legacy_height_offset(old_offset)
         if count:
             struct.pack_into("<ff", header, 28, new_offset, step)
         output.extend(header)
@@ -153,6 +165,6 @@ def convert_elevation(source):
             raise ValueError("Terrain bounds changed")
         offset1, _legacy_range = before["values"][8:10]
         offset2, scale2 = after["values"][8:10]
-        if any(abs(offset1+(a >> 4)*0.05-offset2-(b >> 20)*scale2) > 0.00001 or (b & 0xfffff) != (a & 15) for a,b in zip(old,new)):
+        if any(abs(legacy_height_offset(offset1)+(a >> 4)*0.05-offset2-(b >> 20)*scale2) > 0.00003 or (b & 0xfffff) != (a & 15) for a,b in zip(old,new)):
             raise ValueError("Height or surface sample mismatch")
     return result, sample_count

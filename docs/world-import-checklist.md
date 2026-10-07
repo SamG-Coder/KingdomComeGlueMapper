@@ -1,12 +1,13 @@
 # World import checklist
 
-Audit date: 2026-10-08. Current road fix build: **kcd1_world_v42**.
+Audit date: 2026-10-08. Current road fix build: **kcd1_world_v43**.
 
 Runtime check: v34 completed loading in 12.44 seconds and confirmed the
 terrain-based spawn. No shader compile failures were found in the inspected
 startup log. v42 subsequently loaded in 12.14 seconds, with no shader compile
 failures found in its inspected log. Missing AI/gameplay data errors remain.
-All 42 asset-free tests pass;
+v43 completed its terrain-based spawn; the user confirmed the road visibility
+correction works. All 45 asset-free tests pass;
 this does not establish full-map visual correctness.
 
 The audit read all **6,990 editor layer files** (351,948 object entries, zero
@@ -30,9 +31,11 @@ collision, interaction, shader behavior or streaming is correct.
 
 ## Implemented data coverage
 
-- [x] Terrain heightfield conversion: 5,461 nodes. Existing numerical verification
-  covers elevations and sector boundaries. The new surface builds preserve the
-  converted heightfield and surface palettes byte-for-byte.
+- [x] Terrain heightfield conversion: 5,461 nodes. v43 corrects 4,096 sector
+  origins to KCD1's 5 cm grid, preventing terrain from covering road surfaces.
+  All 17,139,968 height/surface samples pass numerical verification; sample arrays
+  and palettes remain unchanged. Source edge differences of up to one height
+  step remain; this is not a claim of zero seams.
 - [x] Individual instances: all 1,483,225 source instance records are present in
   the target HLOD stream. Appearance, wind, collision and every model's LODs are
   not exhaustively validated.
@@ -61,7 +64,7 @@ collision, interaction, shader behavior or streaming is correct.
 | System | Evidence / remaining work | Status |
 |---|---|---|
 | Landscape material/terrain joins | User still sees a hard floating grass-sheet edge near Henry's start after the local road/decal pass. Nearby brush transforms match the source. | **Unresolved** |
-| World-wide road/decal appearance | v42 corrects tangent-buffer alignment on 6,125 odd-index roads, retaining original mud materials. Native-material and wetness tests did not fix the artifact. The corrected build removes black/ridged strips in a matching camera/time comparison; user close-up confirmation and full-map coverage remain pending. | **Road alignment fixed; local visual check passed** |
+| World-wide road/decal appearance | v42 corrects tangent-buffer alignment on 6,125 odd-index roads, retaining original mud materials. v43 corrects terrain origins that buried roads at different camera distances. User confirmed the visibility fix works; exhaustive full-map visual coverage remains pending. | **Road alignment and terrain origins fixed; user confirmed** |
 | Other level-local designer geometry | 2,382 shared/initial records remain excluded after the 26-piece pass. Most use collision/helper materials; remaining material classes require classification. | Partial; do not enable all blindly |
 | Other unmatched brush placements | 1,090 source placements remain unmatched: 1,052 empty mesh paths, 28 default-box paths and 10 other records. Duplicate placement/state ambiguity means these are investigation candidates, not 1,090 proven missing visible assets. | Unclassified |
 | Animated doors | 949 previously missing initial door visuals added via CDF/AnimChar in v35/v37; 13 require preserved inline CA_PROX attachments. 76 non-initial variants remain excluded. | Visual data implemented; animation/interaction absent |

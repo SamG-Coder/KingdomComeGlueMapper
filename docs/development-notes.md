@@ -368,3 +368,31 @@ optional diagnostic, not called by normal material conversion. v42 uses the
 original materials; disabling self-shadowing or substituting native mud is not
 required by the alignment fix. The floating grass-bank mesh is a separate open
 issue and is not claimed fixed by the road result.
+
+## Terrain height origins and road visibility - v43
+
+After v42 removed the black road bands, camera movement still made roads break
+into visible triangles or disappear beneath the terrain. An independent audit
+of 142,315 source road vertices near terrain-grid coordinates identified the
+cause: KCD1 sector origins use floor(offset * 20) / 20, while the importer added
+the unrounded serialized offset. This raised terrain by up to 5 cm over roads.
+With quantized origins, 140,108 samples match within 1 mm and 141,628 within 5 mm;
+the median road-minus-terrain difference is about 0.0000013 m. The raw-origin
+comparison had only 1,676 samples within 1 mm and a median of -0.025416 m.
+Local evidence is in reports/road-terrain-offset-audit.json.
+
+compiled_terrain.py now applies the source origin quantization during conversion.
+rebuild_terrain_offsets.py builds v43 from v42 by changing only 4,096 terrain
+origin floats, lowering them by at most 0.049979 m. It verifies all other bytes
+are unchanged, preserving roads, materials, sample arrays and palettes.
+
+All 45 asset-free tests pass. Independent conversion verification checks
+17,139,968 height/surface samples with a maximum height difference of
+0.000006707 m. Source sector boundaries can differ by one 5 cm step; the measured
+maximum seam is 0.050013 m. Unquantized authored bounds include both origin and
+sample rounding, with a maximum bound difference of 0.098695 m. These limits
+are recorded explicitly rather than claiming perfectly continuous source data.
+
+v43 completed its terrain-based spawn. The user confirmed the correction works
+and requested commit/push. No console setting is required for this fix. The
+separate floating grass-bank issue remains unresolved.

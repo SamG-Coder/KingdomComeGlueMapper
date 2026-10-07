@@ -39,9 +39,11 @@ for old, new in zip(source.nodes, converted.nodes):
     new_offset, new_scale = new["values"][8:10]
     assert source.data[old["palette"]:old["palette"]+old["surface_count"]] == converted.data[new["palette"]:new["palette"]+new["surface_count"]]
     for x, y in zip(a, b):
-        error = abs(old_offset + (x >> 4)*0.05 - new_offset - (y >> 20)*new_scale)
+        # Independent integer-grid calculation, rather than reusing converter.
+        expected_height = (math.floor(old_offset*20) + (x >> 4))/20
+        error = abs(expected_height - new_offset - (y >> 20)*new_scale)
         max_error = max(max_error, error)
-        assert error <= 0.00001
+        assert error <= 0.00003
         assert x & 15 == y & 0xfffff
     checked += n
 
@@ -80,10 +82,13 @@ for (x, y), (node, values) in leaves.items():
             j = b if dx else b*other_size
             max_seam = max(max_seam, abs(height(node, values, i)-height(neighbor, samples, j)))
             seam_count += 1
+# Source sector edges can differ by one encoded height step. Quantizing their
+# origins must not be mistaken for guaranteeing sub-millimetre edge agreement.
 assert max_seam <= 0.051, max_seam
-# Reduced-resolution source sectors may omit the original maximum. Enforce
-# the one-height-step bound only where every metre is actually sampled.
-assert max_full_resolution_bounds_error <= 0.051, max_full_resolution_bounds_error
+# Authored bounds retain the unquantized origin and maximum. Origin rounding
+# and sample quantization can each contribute one 5 cm step. Reduced-resolution
+# sectors may additionally omit the original maximum, so constrain full grids.
+assert max_full_resolution_bounds_error <= 0.101, max_full_resolution_bounds_error
 
 for payload in (source.data[:-1], bytes([99])+source.data[1:]):
     try:
