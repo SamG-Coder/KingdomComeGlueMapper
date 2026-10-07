@@ -5,7 +5,9 @@ import struct
 
 def is_uberlod_proxy(path):
     """World-distance stand-ins belong to the switching graph, not static props."""
-    return path.replace('\\', '/').lower().startswith('objects/uber/')
+    # Forest proxies use uber/, while town/building proxies use uberlods/.
+    # Both are FarObjects in terrain/uberlods.xml, not per-model LOD files.
+    return path.replace('\\', '/').lower().startswith(('objects/uber/', 'objects/uberlods/'))
 
 
 def read_brush(data, offset, mesh_paths, material_paths):

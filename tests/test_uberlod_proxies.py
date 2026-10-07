@@ -12,7 +12,10 @@ from remove_uberlod_proxies import filter_hlods
 class ProxyTests(unittest.TestCase):
     def test_source_classification_does_not_discard_individual_lods(self):
         self.assertTrue(is_uberlod_proxy(r'Objects\Uber\forest.cgf'))
+        self.assertTrue(is_uberlod_proxy(r'Objects\Uberlods\rataje\uberlod_rataje_city_h.cgf'))
+        self.assertTrue(is_uberlod_proxy('objects/uberlods/sazava/sazava_west_house1.cgf'))
         self.assertFalse(is_uberlod_proxy('objects/vegetation/trees/tree_lod3.cgf'))
+        self.assertFalse(is_uberlod_proxy('objects/buildings/houses/house_lod2.cgf'))
         self.assertFalse(is_uberlod_proxy('objects/props/uber_table.cgf'))
 
     def test_nested_offsets_and_retained_instances_survive_removal(self):

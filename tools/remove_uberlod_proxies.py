@@ -93,10 +93,12 @@ def main():
             path = terrain.tables['meshes']['paths'][mesh]
             if is_uberlod_proxy(path):
                 key = (data[offset+4:offset+28], data[offset+40:offset+88])
-                if key in keys and keys[key] != path:
-                    raise ValueError('Ambiguous proxy transform/bounds')
-                keys[key] = path
+                # Alternate quest-state far meshes can share bounds/transform.
+                # All candidates here are classified proxies; retain their
+                # names for the report instead of rejecting these aliases.
+                keys.setdefault(key, set()).add(path)
         read_water(terrain, collect)
+    keys = {key: ' | '.join(sorted(paths)) for key, paths in keys.items()}
     with zipfile.ZipFile(base/'level.pak') as z:
         document = ET.fromstring(z.read('terrain/hlods.xml'))
         payload, removed, before, after = filter_hlods(z.read('terrain/hlods.dat'),document,keys)

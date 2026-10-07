@@ -212,3 +212,27 @@ The user confirmed on 2026-10-08 that v29 fixes the overlapping flat trees.
 Legacy world-scale far stand-ins remain
 excluded until their near/far switching graph is properly converted; distant
 coverage and performance therefore still need testing.
+## Rattay building proxy correction - v30
+
+A close Rattay view showed blurred, low-detail roof and wall surfaces overlapping
+the detailed models. The earlier forest fix covered `objects/uber/` but missed
+the separate `objects/uberlods/` namespace used by town and building stand-ins.
+The original `terrain/uberlods.xml` explicitly marks these as FarObjects with
+`UberlodBrushes` near representations. For example, group 4072 references the
+bounds of `uberlod_rataje_city_h.cgf`, and group 4088 references city_g. The props
+pass had imported these far meshes as unconditional brushes.
+
+The default brush importer now excludes both world-proxy namespaces, while
+retaining ordinary per-model `_lodN.cgf` files. The incremental v30 repair removes
+78 further proxy placements, including 27 around Rattay. Alternate quest-state
+proxies sharing bounds and transforms are retained as aliases in the removal
+report. Individual vegetation bytes, terrain.pak and visual entity placements
+are unchanged; brush count is 167,141 and individual instance count is 1,483,225.
+All 31 asset-free tests pass and the output archive CRC validates. The user
+confirmed that the v30 runtime fixes the reported building appearance.
+
+The separate report of entirely missing shells after travel is not yet proven
+to have the same cause: both v20 and v29 displayed shells after a fresh launch.
+Do not treat this correction as proof that all streaming issues are resolved.
+The original near/far switching graph remains unconverted; distant aggregate
+stand-ins are excluded until that graph is implemented.
