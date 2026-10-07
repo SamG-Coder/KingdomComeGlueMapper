@@ -14,7 +14,6 @@ from compiled_terrain import parse
 from upgrade_map import read, xml
 from vegetation import read_instances, verify_target_hlods, convert_instance
 from merged_vegetation import inventory, convert_cell, build_tree
-from vegetation_materials import convert_shadow_proxies
 
 
 def main():
@@ -87,7 +86,6 @@ def main():
             target = prefix + "m" + str(len(material_names))
             material_names[name] = target
             doc = ET.fromstring(asset_read(name+".mtl"))
-            convert_shadow_proxies(doc)
             for element in doc.iter("Material"):
                 element.attrib.pop("GenMask", None)
             for tex in doc.iter("Texture"):

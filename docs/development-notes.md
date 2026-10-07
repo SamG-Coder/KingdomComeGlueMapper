@@ -165,3 +165,50 @@ and LOD selection are unchanged. This can increase shadow-rendering cost.
 assets, retaining original files in a required backup directory. The first local
 pass changed 78 materials. In-game confirmation of canopy appearance, shadows,
 and distance transitions is still pending; this is not yet a verified LOD fix.
+
+On 2026-10-08 the user confirmed that the flat canopy is still visible after
+that material conversion. The inspected tree beside Henry's starting area is
+`objects/vegetation/trees/tilia_cordata/tilia_cordata_b.cgf`, source group 388,
+record offset 115915232, position (728.38635, 3400.63550, 64.23100).
+It maps to target group 295, `glueveg/kcd1_groundcover_v13/mesh295.cgf`;
+exactly one matching individual placement was found in the target HLOD stream.
+The embedded material is `m36.mtl`; its shadow_proxy slot is already Nodraw.
+The separately copied `mesh295_lod3.cgf` has 10 vertices and 8 triangles and
+uses material slot 3 (`bblods`, BILLBOARD_ATLAS). The base mesh uses slots 4
+and 1. This identifies the explicit flat LOD asset, but does not yet establish
+which draw produces the unwanted canopy. The material candidate did not solve
+the reported issue; importer/LOD investigation remains open.
+
+### Overlapping forest stand-ins identified (v29)
+
+The KCD2 asset comparison showed the same base / `_lod1` / `_lod2` / `_lod3`
+tree family, with native render data split into `.cgfm` companions. Native
+mesh headers also carry the valid face-area flag. These differences were not
+changed in this fix: the overlapping tree came from a separate world proxy.
+
+The v23 props pass imported 4,041 `objects/uber/` brushes as ordinary objects.
+Beside Henry's house, `objects/uber/wh_modeluberlodnode_11_53.cgf` became
+`gluebuild/kcd1_items_v23/mesh2934.cgf`. Its nodes include
+`tilia_cordata_b001`; its bounds enclose the separately placed detailed tree.
+Source `terrain/uberlods.xml` identifies this mesh as the FarObject of group
+2714, centered at (736,3424,62.200001), with a 200m switching sphere and
+NearObject vegetation cell 3403. The props importer omitted that relationship,
+making the distant stand-in visible alongside the near vegetation. Native KCD2
+instead associates far representations with its HLOD hierarchy and ProxyIndex.
+
+The builder now excludes `objects/uber/` from ordinary brush imports and reports
+the excluded paths. `remove_uberlod_proxies.py` repairs an existing level by
+matching source proxy bounds and transforms exactly, rebuilding HLOD block
+offsets/sizes, and preserving all retained records. The v29 build removes 4,041
+brushes (171,260 -> 167,219), preserves all 1,483,225 individual vegetation
+records byte-for-byte, and copies terrain.pak unchanged. The original 78 tree
+materials were restored from their verified backups and the unsuccessful
+shadow-proxy conversion was removed from both build paths. The standalone
+shadow-material repair tool is historical, not the recommended correction.
+
+Validation: 31 asset-free tests pass, including nested HLOD offsets, retained
+records and distinguishing world proxies from legitimate per-tree LOD files.
+The user confirmed on 2026-10-08 that v29 fixes the overlapping flat trees.
+Legacy world-scale far stand-ins remain
+excluded until their near/far switching graph is properly converted; distant
+coverage and performance therefore still need testing.

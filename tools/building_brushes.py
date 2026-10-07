@@ -3,6 +3,11 @@ import math
 import struct
 
 
+def is_uberlod_proxy(path):
+    """World-distance stand-ins belong to the switching graph, not static props."""
+    return path.replace('\\', '/').lower().startswith('objects/uber/')
+
+
 def read_brush(data, offset, mesh_paths, material_paths):
     if offset + 100 > len(data) or struct.unpack_from("<I", data, offset)[0] != 1:
         raise ValueError("Invalid source brush")

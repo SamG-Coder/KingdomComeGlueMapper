@@ -11,7 +11,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
-from building_brushes import read_brush, convert_brush, resource_table
+from building_brushes import read_brush, convert_brush, resource_table, is_uberlod_proxy
 from compiled_terrain import parse
 from static_assets import asset_pack
 from upgrade_map import read, xml
@@ -57,12 +57,16 @@ def main():
                         or (args.all and (name.endswith("_state0") or name.endswith("_state0_prefabs")))}
         selected = []
         excluded_layers = Counter()
+        excluded_proxies = Counter()
         def collect(data, offset, size, kind):
             if kind != 1:
                 return
             if retry_offsets is not None and offset not in retry_offsets:
                 return
             record = read_brush(data, offset, source.tables["meshes"]["paths"], source.tables["materials"]["paths"])
+            if is_uberlod_proxy(record['path']):
+                excluded_proxies[record['path']] += 1
+                return
             x, y, _ = record["position"]
             paths = ("/nature/stream_edge/", "/nature/waterfalls/") if args.streams_only else ("/buildings/", "/structures/", "/props/fences/")
             matches = any(part in record["path"] for part in paths)
@@ -225,6 +229,7 @@ def main():
                   "asset_files":len(emitted),"radius":None if args.all else args.radius,"all":args.all,
                   "layers":{str(i):layer_names.get(i,"shared") for i in sorted(allowed)},
                   "excluded_layers":{str(i):{"name":layer_names.get(i),"placements":n} for i,n in excluded_layers.items()},
+                  "excluded_uberlod_proxies":dict(excluded_proxies),
                   "layer_counts":dict(Counter(r["layer"] for r in selected)),"records":selected,
                   "status":"Binary conversion verified; visual and collision checks pending",
                   "limitations":["Static structures only; dynamic doors and NPCs excluded",
