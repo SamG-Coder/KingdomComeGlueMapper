@@ -15,12 +15,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Compile Python tools
         run: python -m compileall -q tools
-      - name: Check vegetation binary records without game assets
+      - name: Check binary conversion records without game assets
         run: python -m unittest discover -s tests -v
       - name: Check command-line entry points
         shell: pwsh
         run: |
-          $scripts = @('audit_maps.py', 'upgrade_map.py', 'verify_compiled_conversion.py', 'launch_probe.py', 'build_vegetation_probe.py')
+          $scripts = @('audit_maps.py', 'upgrade_map.py', 'verify_compiled_conversion.py', 'launch_probe.py', 'build_vegetation_probe.py', 'build_water_probe.py')
           foreach ($script in $scripts) {
             python "tools/$script" --help
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

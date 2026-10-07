@@ -6,13 +6,13 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/Code-MIT-green)](LICENSE)
 
-![Converted KCD1 terrain and original vegetation running in the KCD2 development runtime](docs/images/kcd1-vegetation-in-kcd2.png)
+![KCD1 terrain, vegetation, ground cover and water running in KCD2](docs/images/kcd1-water-in-kcd2.png)
 
-*Actual in-game capture near Skalitz: converted KCD1 terrain, original ground materials and restored vegetation in KCD2. The v11 build contains 541,465 individual vegetation instances across 226 meshes. This v11 screenshot predates the merged grass and ground cover added in v13. Buildings are not yet converted. The debug FPS is from this incomplete world, not a full-game benchmark.*
+*Actual in-game capture of the confirmed v17 build: KCD1 terrain, original ground materials, trees, merged ground cover and water geometry running in KCD2. Water uses the native KCD2 river material and an explicit daytime reflection cubemap. Buildings are not yet converted. The debug FPS is from this incomplete world, not a full-game benchmark.*
 
 KingdomComeGlueMapper is an experimental Python converter that reads **compiled files from your installed games** and builds a separate test level for the official KCD2 Modding Tools. Raw editor source is not required by this workflow.
 
-Terrain, original close-up materials, individual vegetation, and merged grass / ground cover are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
+Terrain, original close-up materials, individual vegetation, merged grass / ground cover, and water are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
 
 ## What works today
 
@@ -28,7 +28,8 @@ Terrain, original close-up materials, individual vegetation, and merged grass / 
 | Texture transitions | Optional softer-blending experiment; original transition fidelity not established |
 | Individual vegetation | 541,465 original instances / 226 meshes; trees and distant forest visually confirmed |
 | Merged grass / ground cover | 25,405,423 samples / 83,431 cells / 169 groups; v13 confirmed working in game |
-| Buildings, road objects, water, NPCs and quests | Not converted |
+| Water volumes | 282 original volumes; v17 appearance and reflections confirmed with native KCD2 water material and daytime cubemap |
+| Buildings, road objects, NPCs and quests | Not converted |
 
 This is a **terrain-porting prototype**, not a complete game port. Visible gaps, material transitions and missing world objects are still under investigation. Highest-resolution mip residency and walking collision have not been comprehensively validated.
 
@@ -97,7 +98,7 @@ This adjusts material transition shading while preserving terrain geometry, surf
 
 The working **v11** build restores **541,465 individual vegetation instances**
 across **226 meshes**, including original trees and shrubs. The user confirmed
-visible nearby trees and distant forest in the screenshot above. The exported
+visible nearby trees and distant forest in the [v11 screenshot](docs/images/kcd1-vegetation-in-kcd2.png). The exported
 HLOD stream contains 3,980 spatial vegetation sectors, and all 226 models loaded
 without isolated-asset load errors in the captured runtime log.
 
@@ -144,8 +145,7 @@ asset packaging as the individual vegetation build.
 
 The user confirmed **v13 merged grass and ground cover working in game**. This
 remains a prototype: comprehensive checks of every group, visibility bounds, LODs
-and wind behaviour are still outstanding. The screenshot above shows the earlier
-**v11 individual vegetation** result and does not show merged ground cover.
+and wind behaviour are still outstanding. The screenshot above shows the subsequent **v17 water build**, including merged ground cover.
 
 The local v13 level completed loading and confirmed terrain-based spawn with
 no-collision flight. Every packaged sector was checked against its octree group
@@ -160,6 +160,43 @@ The default launcher remains on the terrain-only v6 checkpoint; select v11
 explicitly as above.
 
 Asset-free binary checks: `python -m unittest discover -s tests -v`.
+
+### Water conversion (v17 confirmed working)
+
+The user confirmed water appearance and reflections working in the v17 build,
+shown in the screenshot above. Build on the existing v13 ground-cover level:
+
+```powershell
+python tools/build_water_probe.py --base-level kcd1_groundcover_v13 --level kcd1_water_v17 --native-water-materials
+python tools/launch_probe.py --level kcd1_water_v17 --x 730 --y 3270 --clearance 5
+```
+
+This converts **282 original water volumes**: 197 area polygons and 85 river
+segments. Original surface and physics-contour coordinates, volume IDs, fog
+settings, depth and flow speed are preserved. The 57 source material-less volumes
+remain material-less. The existing terrain and vegetation are retained.
+
+The confirmed configuration uses `--native-water-materials` to bind the installed
+KCD2 river material. The original global environment probe is restored with an
+explicit installed KCD2 **07:00 cubemap**. This avoids the missing texture fallback
+from an empty dynamic probe path in a newly generated level. The cubemap is a
+**fixed daytime fallback**; the original day/night probe sequence and local baked
+probes have not been converted.
+
+Omitting `--native-water-materials` retains the experimental conversion of seven
+original water materials, packaging textures under `KCD2Mod/Data/gluewater/<level>/`.
+That path translates shader features into both named features and numeric masks
+using the installed target definitions. Named features alone did not activate
+reflections in this runtime. The original-material path is not the visually
+accepted v17 configuration.
+
+Validation covers the complete source and native object streams, including road
+record strides needed to locate water safely. All 282 surface/physics-contour
+payloads were compared byte for byte, and the two new auxiliary defaults match
+all 115 installed native water volumes. The runtime confirmed level load, fly
+mode and an active probe with the explicit cubemap bound. The asset-free suite
+contains 14 tests. Swimming, full flow behaviour and exhaustive shoreline checks
+remain unverified. Keep the base terrain and vegetation asset namespaces installed.
 
 ### Terrain and materials pipeline
 
@@ -199,6 +236,8 @@ Retail archives and the modding workspace's retail symlinks are not modified. To
 | `tools/build_vegetation_probe.py` | Build original vegetation instances and KCD2 HLOD metadata |
 | `tools/vegetation.py` | Bounded vegetation/HLOD readers and instance conversion |
 | `tools/launch_probe.py` | Launch the development runtime and apply spawn/flight settings |
+| `tools/build_water_probe.py` | Build original water volumes with the confirmed native-material option |
+| `tools/water_volumes.py` | Bounded object-stream reader and water record conversion |
 | `tools/stage_map_probe.py` | Historical unconverted-copy diagnostic; not needed for normal use |
 
 Local checks require your installed game files. GitHub Actions checks Python compilation, CLI entry points and asset-free vegetation binary tests on Windows; it does **not** run the games or establish runtime compatibility.
@@ -216,7 +255,7 @@ See [development notes](docs/development-notes.md) for the experiment history an
 
 The first rendering checkpoint is confirmed: original vegetation is visible near Skalitz in a reproducible build. Stable distance transitions, complete coverage and collision still require further validation. A resource-table scan or successful asset extraction alone does not complete those checks.
 
-After vegetation: restore Skalitz buildings and other placed objects, resolve remaining terrain gaps and material transitions, then add road geometry and water. Walking/collision and world-streaming validation precede NPCs, navigation and quests.
+**Water milestone: v17 confirmed working.** Original water geometry now renders with native KCD2 water materials and a valid daytime reflection fallback. Remaining water work includes the day/night probe sequence, local probes, swimming and broader shoreline/flow validation. Next world-conversion steps are Skalitz buildings and other placed objects, remaining terrain gaps and material transitions, and road geometry. Walking/collision and world-streaming validation precede NPCs, navigation and quests.
 
 ## License and game content
 
