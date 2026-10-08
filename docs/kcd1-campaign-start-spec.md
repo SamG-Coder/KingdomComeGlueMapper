@@ -3,6 +3,10 @@
 Status: implementation specification, 8 October 2026. No campaign bootstrap,
 quest migration or save compatibility is implemented by this document.
 
+Implementation progress: [retail quest/script importer](quest-script-import.md)
+now preserves source logic and database dependencies for translation. Native
+Skald emission and quest startup remain unfinished.
+
 ## Intended result
 
 Distribution target: a local setup consumes the installed retail KCD1 and KCD2

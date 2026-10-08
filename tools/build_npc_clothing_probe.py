@@ -8,6 +8,7 @@ import copy
 import json
 from pathlib import Path
 import re
+import shutil
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -30,6 +31,45 @@ OUTFIT = {
 }
 
 
+def native_soul_archetype(archetypes, gender):
+    gender_id = {'Male': '1', 'Female': '2'}[gender]
+    name = 'NPC_Female' if gender == 'Female' else 'NPC'
+    matches = [row for row in archetypes.iter('soul_archetype')
+               if row.get('soul_archetype_name') == name and row.get('gender_id') == gender_id]
+    if len(matches) != 1 or not matches[0].get('soul_archetype_id'):
+        raise ValueError('Missing or ambiguous native NPC soul archetype')
+    return matches[0].get('soul_archetype_id')
+
+
+def registration_profile(report, supplied=None):
+    """Require explicit native roles for new outfits; preserve the tested profile."""
+    if supplied is None:
+        if report.get('npc') != 'ska_fatherOfHenry':
+            raise ValueError('Provide a registration profile for this source person')
+        supplied = dict(gender='Male', default_body='male_body_npc', underwear='m_underwear01_m01',
+                        garments=OUTFIT, assembled_armor_type='Coat', assembled_archetype='67',
+                        assembled_layer='9')
+    required = ('gender', 'default_body', 'underwear', 'garments', 'assembled_armor_type',
+                'assembled_archetype', 'assembled_layer')
+    if any(k not in supplied for k in required): raise ValueError('Incomplete registration profile')
+    if supplied['gender'] not in ('Male', 'Female'): raise ValueError('Unsupported profile gender')
+    bodies = [p for p in report['parts'] if p['kind'] == 'body']
+    if len(bodies) != 1: raise ValueError('Expected one source body')
+    if bodies[0].get('gender_id') != {'Male': '1', 'Female': '2'}[supplied['gender']]:
+        raise ValueError('Profile gender disagrees with source body')
+    for part in report['parts']:
+        if part['kind'] != 'cloth': continue
+        role = supplied['garments'].get(part['clothing_name'])
+        if not isinstance(role, (list, tuple)) or len(role) != 5:
+            raise ValueError('Missing native clothing role: ' + part['clothing_name'])
+        armor_type, archetype, region, layer, final = role
+        if not armor_type or not str(archetype).isdigit() or not str(layer).isdigit() or not isinstance(final, bool):
+            raise ValueError('Invalid native clothing role')
+        if region not in ('torso', 'legs', 'hands', 'head', 'feet', 'face', 'beard'):
+            raise ValueError('Unsupported clothing region')
+    return supplied
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--tools', type=Path, default=Path('D:/SteamLibrary/steamapps/common/KCD2Mod'))
@@ -40,14 +80,27 @@ def main():
                    help='Register the source soul and native Storm appearance/inventory rules')
     p.add_argument('--region-profile', type=Path,
                    help='JSON mapping clothing names to explicit waist_z preview thresholds')
+    p.add_argument('--registration-profile', type=Path,
+                   help='Explicit native gender, defaults and garment role mappings for any source person')
+    p.add_argument('--output-data', type=Path,
+                   help='Stage registration and character files in a new directory instead of installing overlays')
     args = p.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_]+', args.namespace):
         p.error('Invalid namespace')
-    data = args.tools/'Data'
+    source_data = args.tools/'Data'
+    data = args.output_data if args.output_data else source_data
+    if args.output_data:
+        if data.exists(): raise FileExistsError('Staging destination already exists')
+        source_assets = source_data/'objects/characters/gluenpc'/args.namespace
+        if not (source_assets/'npc-report.json').is_file(): raise FileNotFoundError('Packaged character is missing')
+        shutil.copytree(source_assets, data/'objects/characters/gluenpc'/args.namespace,
+                        ignore=shutil.ignore_patterns('clothing-report.json'))
     asset_root = data/'objects/characters/gluenpc'/args.namespace
     report = json.loads((asset_root/'npc-report.json').read_text(encoding='utf-8'))
-    if report.get('npc') != 'ska_fatherOfHenry':
-        raise ValueError('This experimental clothing map supports ska_fatherOfHenry only')
+    registration = registration_profile(report, json.loads(args.registration_profile.read_text(encoding='utf-8'))
+                                        if args.registration_profile else None)
+    outfit = registration['garments']
+    gender = registration['gender']
     cdf = ET.parse(asset_root/'character.cdf').getroot()
     clothing = [r for r in report['parts'] if r['kind']=='cloth']
     profile = json.loads(args.region_profile.read_text(encoding='utf-8')) if args.region_profile else {}
@@ -57,7 +110,7 @@ def main():
     generated_skins = {}
     generated_materials = {}
     garments = []
-    unsupported = [r['clothing_name'] for r in clothing if r['clothing_name'] not in OUTFIT]
+    unsupported = [r['clothing_name'] for r in clothing if r['clothing_name'] not in outfit]
     if unsupported:
         raise ValueError(f'Unmapped native clothing roles: {unsupported}')
     paths = ['Libs/Tables/Character/CharacterComponent.xml',
@@ -70,8 +123,10 @@ def main():
                   'Libs/Storm/equipment/gluemapper.xml', 'Libs/Tables/item/InventoryPreset__gluenpc.xml']
     if any((data/name).exists() for name in paths):
         raise FileExistsError('Development table overlay already exists; inspect before rebuilding')
-    with zipfile.ZipFile(data/'Tables.pak') as archive:
+    with zipfile.ZipFile(source_data/'Tables.pak') as archive:
         docs = {name: ET.fromstring(read(archive,name)) for name in paths[:3]}
+        archetypes = ET.fromstring(read(archive, 'Libs/Tables/rpg/soul_archetype.xml'))
+    soul_archetype_id = native_soul_archetype(archetypes, gender)
     docs[paths[3]] = ET.Element('database', name='barbora')
     items = ET.SubElement(docs[paths[3]], 'ItemClasses', version='8')
     soul_id = report['soul_id'] if args.register_source_person else str(uuid.uuid5(uuid.NAMESPACE_URL, 'gluemapper/'+args.namespace+'/body'))
@@ -79,17 +134,17 @@ def main():
     souls = ET.SubElement(docs[paths[4]], 'souls', version='2')
     soul_name = report['npc'] if args.register_source_person else 'Glue_'+args.namespace
     ET.SubElement(souls, 'soul', soul_id=soul_id, soul_name=soul_name,
-                  soul_archetype_id='0', factionName='cutsceneOnly',
+                  soul_archetype_id=soul_archetype_id, factionName='cutsceneOnly',
                   brain_id='4b914d1c-724a-a92d-3e6b-d183d35b8b98',
                   digestion_multiplier='0', xp_multiplier='0', initial_clothing_dirt='0')
     root = ET.SubElement(docs[paths[0]].find('CharacterComponents'), 'Component',
-                         Name='Glue_'+args.namespace, Race='Human', Gender='Male',
+                         Name='Glue_'+args.namespace, Race='Human', Gender=gender,
                          FilePath='gluenpc/'+args.namespace+'/')
     derived = ET.SubElement(root, 'DerivedComponents')
     preset_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'gluemapper/'+args.namespace+'/outfit'))
     preset = ET.SubElement(docs[paths[2]].find('clothing_presets'), 'clothing_preset',
                            clothing_preset_id=preset_id, clothing_preset_name='Glue_'+args.namespace,
-                           gender='Male', prefers_hood_on='false')
+                           gender=gender, prefers_hood_on='false')
     preset_items = ET.SubElement(preset,'Items')
     converted = []
     for number, part in enumerate(report['parts']):
@@ -100,7 +155,7 @@ def main():
             raise ValueError('Missing packaged attachment')
         name = 'Glue_'+args.namespace+'_'+str(number)
         if part['kind'] == 'cloth' and args.assemble_outfit:
-            region = OUTFIT[part['clothing_name']][2]
+            region = outfit[part['clothing_name']][2]
             blob = (asset_root/Path(attachment.get('Binding')).name).read_bytes()
             garment = dict(name=part['clothing_name'], skin=blob, region=region,
                            morph=part.get('morph_target'),
@@ -112,7 +167,7 @@ def main():
             garments.append(garment)
             continue
         if part['kind']=='cloth':
-            armor_type, archetype, region, layer, final = OUTFIT[part['clothing_name']]
+            armor_type, archetype, region, layer, final = outfit[part['clothing_name']]
             node = ET.SubElement(derived,'Clothing',Name=name,ArmorType=armor_type,
                                  ArmorArchetypeId=archetype)
             item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'gluemapper/'+args.namespace+'/'+part['armor_id']))
@@ -160,7 +215,7 @@ def main():
     if args.assemble_outfit:
         regions = convert_fixed_outfit(garments, 'objects/characters/gluenpc/'+args.namespace+'/outfit_')
         name = 'Glue_'+args.namespace+'_outfit'
-        node = ET.SubElement(derived, 'Clothing', Name=name, ArmorType='Coat', ArmorArchetypeId='67')
+        node = ET.SubElement(derived, 'Clothing', Name=name, ArmorType=registration['assembled_armor_type'], ArmorArchetypeId=registration['assembled_archetype'])
         elements = ET.SubElement(node, 'Elements')
         item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, 'gluemapper/'+args.namespace+'/assembled-outfit'))
         ET.SubElement(items, 'Armor', Id=item_id, Name=name, Clothing=name, MaxStatus='100',
@@ -170,7 +225,7 @@ def main():
             filename = 'outfit_'+region
             generated_skins[filename+'.skin'] = output['skin']
             generated_materials[filename+'.mtl'] = xml(output['material'])
-            ET.SubElement(elements, 'SkinElement', EquipmentPart=region, BodyLayerId='9',
+            ET.SubElement(elements, 'SkinElement', EquipmentPart=region, BodyLayerId=registration['assembled_layer'],
                           Model=filename+'.skin', Material=filename+'.mtl',
                           KeepBodyLayer='true', IsFinalLayer='true')
         converted.append(dict(component=name, item_id=item_id, source=[g['name'] for g in garments],
@@ -178,7 +233,7 @@ def main():
                               variant_mode='Selected source variant baked at weight 1',
                               partition_verified=False))
     config='Glue_'+args.namespace
-    attributes=dict(Name=config,Race='Human',Gender='Male',DefaultBody='male_body_npc',
+    attributes=dict(Name=config,Race='Human',Gender=gender,DefaultBody=registration['default_body'],
                     DefaultClothingPreset=preset_id,HeadIsNeeded='true')
     for number,part in enumerate(report['parts']):
         if part['kind'] in ('head','hair','beard') or (part['kind']=='body' and args.register_source_person):
@@ -189,13 +244,14 @@ def main():
         # the source's lack of a separate beard and use explicit native underwear.
         ET.SubElement(derived, 'Beard', Name='Glue_'+args.namespace+'_empty_beard')
         attributes.setdefault('DefaultBeard', 'Glue_'+args.namespace+'_empty_beard')
-        attributes['DefaultUnderwear'] = 'm_underwear01_m01'
-        with zipfile.ZipFile(data/'IPL_GameData.pak') as archive:
+        attributes['DefaultUnderwear'] = registration['underwear']
+        with zipfile.ZipFile(source_data/'IPL_GameData.pak') as archive:
             storm = ET.fromstring(read(archive, 'Libs/Storm/storm.xml'))
         docs[paths[5]] = storm
         for task_name, path, operations in (
-            ('appearance', paths[6], [('set'+kind.title(), {'name': attributes.get('Default'+kind.title(), '')})
-                                     for kind in ('body', 'head', 'hair', 'beard', 'underwear')]),
+            ('appearance', paths[6], [('set'+kind.title(), {'name': attributes['Default'+kind.title()]})
+                                     for kind in ('body', 'head', 'hair', 'beard', 'underwear')
+                                     if attributes.get('Default'+kind.title())]),
             ('equipment', paths[7], [('setInventory', {'preset': 'inventory_Glue_'+args.namespace})])):
             task = storm.find(f'tasks/task[@name="{task_name}"]')
             if task is None: raise ValueError('Missing native Storm task')
@@ -216,7 +272,10 @@ def main():
             cdf.find('AttachmentList').remove(a)
     (asset_root/'layered.cdf').write_bytes(xml(cdf))
     for filename, payload in {**generated_skins, **generated_materials}.items():
-        with (asset_root/filename).open('xb') as out:
+        target = asset_root/filename
+        if args.output_data and target.exists() and target.read_bytes() == payload:
+            continue
+        with target.open('xb') as out:
             out.write(payload)
     for name,doc in docs.items():
         destination=data/name;destination.parent.mkdir(parents=True,exist_ok=True)

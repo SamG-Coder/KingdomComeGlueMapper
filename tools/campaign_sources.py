@@ -49,6 +49,10 @@ def opening_spawn(game):
 
 
 def opening_sources(game):
+    return retail_sources(game, OPENING_FILES)
+
+
+def retail_sources(game, files):
     """Resolve whole-file patch candidates, retaining every provenance record.
 
     Patch revision order is explicit, not filename lexical order (which groups
@@ -57,7 +61,7 @@ def opening_sources(game):
     """
     game = Path(game).resolve()
     results = {}
-    for label, (pak, entry) in OPENING_FILES.items():
+    for label, (pak, entry) in files.items():
         with zipfile.ZipFile(game / 'Data' / pak) as archive:
             actual = {key(n): n for n in archive.namelist()}[key(entry)]
             data = read(archive, actual)
