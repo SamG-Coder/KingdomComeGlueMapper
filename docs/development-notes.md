@@ -436,3 +436,56 @@ item/clothing_preset.xml, item/item__gluenpc.xml and rpg/soul__gluenpc.xml.
 Existing native entries are retained in the first three files. The builder
 refuses to overwrite existing overlays. No extracted assets belong in Git.
 The source tests currently pass (49); visual clothing correctness does not.
+
+## Reusable garment region splitter (2026-10-08)
+
+The NPC probe checkpoint was committed and pushed as dc92268 before this work.
+`tools/clothing_regions.py` now exposes two independent functions:
+
+```python
+labels = assign_upper_garment_regions(skin_bytes, waist_z=0.95)
+parts = split_skin_regions(skin_bytes, labels)
+```
+
+`split_skin_regions` accepts one explicit region label per render triangle, so
+it is independent of NPC names, outfits, material names, and selection policy.
+The optional assignment helper uses named arm-bone weights and an explicit
+local-space waist plane. Its labels are a preview heuristic, not authored seams.
+Callers with authoritative per-triangle regions should supply those instead.
+
+The splitter rebuilds the draw indices, material subset ranges/counts, mesh
+index/subset counts and corresponding compiled internal faces. It retains the
+vertex numbering and all other chunk payloads, including compressed morphs,
+skin weights, bind poses, masks and bone bounds. Unused vertices and conservative
+bounds deliberately remain. This costs memory but avoids rewriting unverified
+compressed morph formats. It does not convert collision, morph semantics or
+native hiding-mask semantics. Unsupported layouts and inconsistent internal
+face mappings fail before producing output.
+
+Standalone usage (the output directory must not exist):
+
+```powershell
+python tools/clothing_regions.py source.skin outputs/garment-regions --waist-z 0.95
+python tools/clothing_regions.py source.skin outputs/authored-regions --face-regions labels.json
+```
+
+The clothing probe builder accepts `--region-profile profile.json`, with an
+explicit mapping such as `{"shirt_001":{"waist_z":0.95}}`. It writes generated
+region skins and registers separate SkinElements for each region. The existing
+one-outfit registration probe remains restricted; the binary splitter is reusable.
+
+Local verification partitioned 6,480 triangles from shirt_001 (2,156),
+blacksmith_apron_002 (2,012), and coat_001 (2,312) into nine skins. The triangle
+multisets were conserved exactly, and every non-rewritten chunk remained
+byte-identical. A fresh v43 runtime accepted the skins, exposed clothing_arms,
+clothing_torso and clothing_waist, and started the native idle. Tests cover
+material preservation, triangle conservation, source payload preservation,
+corrupt remaps, invalid chunk ranges and classifier inputs (56 tests total).
+
+Visual acceptance remains open: the apron claims arms despite transparent
+coverage there, suppressing the underlying sleeves/body. Native slot ownership
+needs an authored coverage profile in addition to geometric partitions. The
+existing colourization, original-head and morph/hiding issues also remain.
+After this diagnostic, the partitioned display entity was removed and the
+working native-idle baseline was respawned. The generated files and audit XML
+remain local for further work. Source changes after dc92268 are not yet pushed.

@@ -17,6 +17,7 @@ import zipfile
 
 from static_assets import asset_pack
 from upgrade_map import read, xml
+from clothing_appearance import apply_armor_colorization
 
 
 def load_tables(stack, data):
@@ -51,6 +52,7 @@ def resolve_parts(soul, rows):
             for field in ('clothing_id', 'clothing2_id'):
                 if armor.get(field):
                     parts.append(dict(kind='cloth', armor_id=armor['item_id'],
+                                      armor_settings=armor,
                                       **clothing[armor[field]]))
     return parts
 
@@ -164,8 +166,14 @@ def main():
                 doc.append(copy.deepcopy(native.find('Modifiers')))
         for number, part in enumerate(parts):
             target = prefix + 'part' + str(number) + '.skin'
+            mat = material(part['material_path'])
+            if part['kind'] == 'cloth':
+                tinted = prefix+'part'+str(number)+'_tinted'
+                emitted[tinted+'.mtl'] = xml(apply_armor_colorization(
+                    ET.parse(emitted[mat+'.mtl']).getroot(), part['armor_settings']))
+                mat = tinted
             blob, mat = bind_material(mesh_bytes(part['mesh_path']),
-                material(part['material_path']), emitted, prefix+'part'+str(number)+'_slots')
+                mat, emitted, prefix+'part'+str(number)+'_slots')
             emitted[target] = blob
             ET.SubElement(attachments, 'Attachment', Type='CA_SKIN',
                           AName=part['kind'] + str(number), Binding=target,
@@ -190,7 +198,7 @@ def main():
                       parts=parts, placements=placements, files=len(emitted), rig=args.rig,
                       idle_animation='relaxed_idle_both' if args.rig == 'native' else None,
                       limitations=['Character visual probe only; no NPC actor or AI',
-                                   'Clothing morphs, tint, body hiding and attachment presets are not applied',
+                                   'Clothing morphs, body hiding and attachment presets are not applied',
                                    'Animation and skeleton compatibility require runtime verification'])
         (destination / 'npc-report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         print(json.dumps(report, indent=2))
