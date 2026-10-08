@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from upgrade_map import read, xml
-from clothing_regions import assign_upper_garment_regions, assign_body_regions, split_skin_regions
+from clothing_regions import assign_upper_garment_regions, split_skin_regions
 from clothing_assembly import convert_fixed_outfit
 
 
@@ -184,13 +184,9 @@ def main():
             layer='0';final=False
         elements=ET.SubElement(node,'Elements')
         models = {region: Path(attachment.get('Binding')).name}
-        if part['kind'] == 'body':
-            blob = (asset_root/models[region]).read_bytes()
-            models = {}
-            for body_region, payload in split_skin_regions(blob, assign_body_regions(blob)).items():
-                filename = 'body_'+body_region+'.skin'
-                generated_skins[filename] = payload
-                models[body_region] = filename
+        # Preserve the complete source body at initial registration. The character
+        # upgrader applies the gender-specific native assembly (female torso;
+        # male torso/arms/legs/hands/feet) after converting the bind space.
         if part['kind'] == 'cloth' and part['clothing_name'] in profile:
             if region != 'torso':
                 raise ValueError('The upper-garment preview classifier requires a torso garment')
@@ -211,7 +207,8 @@ def main():
         for part_region, model in models.items():
             ET.SubElement(elements,'SkinElement',EquipmentPart=part_region,BodyLayerId=layer,
                           Model=model, Material=Path(attachment.get('Material')).name+'.mtl',
-                          IsFinalLayer=str(final).lower())
+                          IsFinalLayer=str(final).lower(),
+                          KeepBodyLayer='true' if part['kind'] == 'cloth' else 'false')
     if args.assemble_outfit:
         regions = convert_fixed_outfit(garments, 'objects/characters/gluenpc/'+args.namespace+'/outfit_')
         name = 'Glue_'+args.namespace+'_outfit'

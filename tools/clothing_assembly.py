@@ -179,7 +179,19 @@ def assemble_region_skins(blobs, material_bases, material_name):
     replacements[template.one(0x2005).id] = bytes(internal_vertices)
     replacements[template.remap_chunk.id] = struct.pack('<'+'H'*len(remap), *remap)
     replacements[template.internal_faces.id] = struct.pack('<'+'H'*len(internal_faces), *internal_faces)
-    material_chunk = template.one(0x1014)
+    # Older female garments can retain an unused second material chunk. Resolve
+    # the mesh node's explicit material instead of assuming there is only one.
+    material_chunks = [c for c in template.chunks if c.kind == 0x1014]
+    if len(material_chunks) == 1:
+        material_chunk = material_chunks[0]
+    else:
+        nodes = [c for c in template.chunks if c.kind == 0x100b and c.version == 0x824
+                 and len(c.data) >= 80 and struct.unpack_from('<I', c.data, 64)[0] == template.mesh.id]
+        ids = {struct.unpack_from('<I', c.data, 76)[0] for c in nodes}
+        selected = [c for c in material_chunks if c.id in ids]
+        if len(selected) != 1:
+            raise ValueError('Ambiguous mesh-node material binding')
+        material_chunk = selected[0]
     if material_chunk.version != 0x802:
         raise ValueError('Unsupported material chunk')
     material_count = max(struct.unpack_from('<I', r, 16)[0] for r in subsets)+1

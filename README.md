@@ -35,6 +35,13 @@ systems are unfinished; see the
 
 Terrain, original close-up materials, individual vegetation, merged grass / ground cover, and water are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
 
+Registered NPC packages now have a [male and female character upgrader](docs/character-upgrader.md)
+for source body geometry, native rig conversion and an optional fixed initial
+outfit. It stages changes with preservation checks and reversible installation;
+the parent idle test now shows the restored female arms and corrected neck.
+Broader animation and independent equipment validation remain unfinished.
+The default retains the original body proportions and packs native skin weights.
+
 ## What works today
 
 | Component | Status |
@@ -55,12 +62,13 @@ Terrain, original close-up materials, individual vegetation, merged grass / grou
 | Complete individual-instance coverage | v24 reads all 1,483,225 source instances, including instanced stones and clutter; adds 177,466 foliage placements over v13. Visual LOD alignment remains under investigation |
 | Original opening position | `--kcd1-start` uses the opening quest's player CutsceneSpot, TagPoint231, including source height and facing |
 | Road objects and decals | v34: 14,198 roads and 15,698 decals in shared/initial layers; broad visual validation pending |
-| NPCs and quests | Not converted |
+| NPCs | Imported parent characters in the development population probe; body, clothing and animation compatibility still under validation |
+| Quests | Source audit, campaign packaging and opening-world integration in progress; full quest execution and save/load are unfinished |
 
 **Latest coverage audit:** see [the world import checklist](docs/world-import-checklist.md).
 The v34 development build adds 14,198 shared/initial-state road records, 15,698
 decals and 26 audited level-local landscape meshes. These additions are still
-under visual validation. NPCs and quests remain unconverted. The checklist
+under visual validation. NPC and quest work is described above. The checklist
 supersedes older milestone coverage statements above and distinguishes actual
 omissions from intentionally excluded states, helpers and distant proxies.
 

@@ -66,6 +66,22 @@ class ClothingAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different bind pose'):
             assemble_region_skins([blob, other], [0, 10], 'outfit')
 
+    def test_assembly_resolves_explicit_mesh_material_with_unused_chunk(self):
+        chunks = read_chunks(garment_skin())
+        unused = b'unused'.ljust(128, b'\0')+struct.pack('<II', 0, 0)
+        chunks.append(Chunk(0x1014, 0x802, 70, unused))
+        node = bytearray(80)
+        struct.pack_into('<I', node, 64, 10)
+        struct.pack_into('<I', node, 76, 49)
+        chunks.append(Chunk(0x100b, 0x824, 71, bytes(node)))
+        output = read_chunks(assemble_region_skins([write_chunks(chunks, {})], [0], 'outfit'))
+        self.assertTrue(next(c for c in output if c.id == 49).data.startswith(b'outfit\0'))
+        self.assertEqual(next(c for c in output if c.id == 70).data, unused)
+        node = bytearray(node)
+        struct.pack_into('<I', node, 76, 999)
+        with self.assertRaisesRegex(ValueError, 'Ambiguous'):
+            assemble_region_skins([write_chunks(chunks, {71: bytes(node)})], [0], 'outfit')
+
     def test_baking_changes_render_and_internal_positions_once(self):
         blob = bake_clothing_variant(garment_skin(True), '#V_001')
         skin = Skin(blob)
