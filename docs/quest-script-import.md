@@ -1,5 +1,102 @@
 # Quest and script import
 
+## Automatic campaign dependency conversion
+
+`campaign_compile.py` starts with the retail New Game UI dispatch and follows
+source world links and quest-script references. It does not select an opening
+quest, spawn position or conversation by name. Installed DLC script archives and
+numeric patch precedence are included in source resolution. No modding-tools
+database is a campaign input.
+
+```powershell
+python tools/campaign_compile.py --kcd1 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance" --kcd2 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2" --level rataje --project GlueMapperCampaign --output outputs/campaign-conversion
+```
+
+A missing destination registration now requests an import from the original
+retail record. Dependencies are imported recursively before the parent is
+registered. The same source identity is imported once, with every requesting
+quest/call site retained. Generated item IDs are namespaced and references are
+rewritten to those IDs; source placed-entity GUIDs retain their numeric identity.
+The optional `--registered` manifest provides previously converted identities;
+it is not a required hand-maintained prerequisite list.
+
+Implemented dependency adapters cover trigger polygons, tag points, static
+models/materials/textures, supported rigid-prop CDFs, item names/descriptions,
+miscellaneous items, keys, money, NPC tools, deterministic direct inventories,
+human body/head/hair/beard parts, script-defined AI types/enums, mailboxes,
+brain/subbrain records, and supported SmartEntity callbacks. Character parts call the existing male and
+female skin upgrader with `geometry_mode='preserve'`, retain source surfaces,
+and use the target rig. Male bodies use the established region split; female
+bodies retain their complete source mesh. This does not replace previously
+accepted character packages or make unconverted actor AI executable.
+
+`campaign_ai_registration.py` discovers controller entry trees and callable
+behavior tags through the retail quest, smart-object, brain and subbrain tables.
+It imports those files even when no static `IncludeTree` refers to them. It
+converts inbox filters, limits, consume/continue semantics, ordering, persistent
+variables and supported behavior templates. Source enum IDs are matched by their
+declared meaning against the target tables. Brains and SmartEntity templates are
+published only when their complete tree and registration dependencies pass.
+Case-distinct callback names remain distinct. Calls into another quest retain
+that quest's state owner; shared helpers retain their caller's owner.
+
+`campaign_doors.py` retains `AnimDoor` entities, authored placement and lock/key
+state, converts their skins onto matching native door rigs, and selects the
+native interaction/animation contract using shipped rig/helper combinations.
+It preserves left/right filenames because native interaction logic reads them.
+The earlier visual importer converted these CDFs into non-physical `AnimChar`
+entities, which explains visible doors that can be walked through. Interior
+ownership/closing policies, custom rigs and unsupported attachment formats
+still block affected doors. These fragments have not replaced installed doors.
+
+`campaign_registration.py` writes the native Skald assets, project holder/loader,
+placed-entity records, trigger geometry, CryEngine entity links and KDC2
+`waitinglinks.xml` records from successful imports. Unresolved siblings do not
+discard valid registrations. Source profile membership stays in the report;
+assembling a fragment does not activate all those profiles on New Game.
+
+The local `campaign-conversion-v8` run discovered 86 quest records and imported
+4,012 dependency jobs, with 4,465 failed jobs preserved for follow-up. It emitted
+1,366 native quest asset bindings and 1,313 links to 1,726 placed entities (173
+trigger polygons), including 455 door placements. It converted 166 character
+parts, 43 animated door assets and 98 distinct inboxes; dependency job counts
+also include requests by both mailbox name and GUID. The behavior pass emitted
+2,948 complete trees and withheld 25,946 trees with unresolved operations or
+dependencies. These counts describe conversion output, not retail gameplay.
+
+The expanded discovery finds 76 behavior callbacks for the Skalitz controller.
+Neither that controller nor the New Game master controller passes full behavior
+conversion yet; no complete quest controller was registered in this run.
+214 automated tests passed after these changes. No complete retail opening test
+was possible with this output.
+
+The installed Play KDC1 route still selects the converted map through the
+earlier native New Game probe. KDC2's `intro_new_game` entry remains its own
+opening movie. KDC1 instead selects a New Game video through
+`wh_ui_NewGameVideoFile` before dispatching its quest event. The source quest's
+`stribrna_skalice` dummy cutscene and its video entry are separate parts of that
+lifecycle. Registering a movie or using the map's default spawn does not perform
+the source cutscene handoff into the house.
+
+**The full opening is still incomplete.** Controller registration adapters now
+exist, but their source entry trees still fail conversion. Remaining work
+includes source profile activation, engine-owned types, Lua/cutscene operations,
+actor brains/souls, additional item and entity classes, random inventory
+policies, and the actual New Game UI handoff. Numeric KDC1 inventory
+icon indices are retained as source metadata, not written as KDC2 icon names;
+the icon atlas still needs conversion. The full campaign, dialogue/voices and
+save/load are not verified. Output remains under `native-fragments`, with
+`executable: false` and `ready_to_play: false`, and is not installed by this
+command. Earlier manual/mod-kit probes below are historical evidence only.
+
+Reports include `dependency-imports.json`, `native-registrations.json`,
+`behavior-conversion.json`, `bindings.json` and `campaign-conversion.json`.
+The source IR retains unconverted operations and their original context;
+unsupported trees and their callers are withheld as complete units rather
+than executing extracted actions out of order.
+
+## Earlier individual-quest import and probes
+
 The first implemented stage imports patched **retail KCD1** quest data into a
 structured migration model. A separate bounded state probe now emits and runs
 one native Skald assignment; the importer does not start the opening quest.

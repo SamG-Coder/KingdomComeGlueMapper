@@ -11,7 +11,7 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 
-from campaign_sources import key, retail_sources
+from campaign_sources import MissingRetailSource, key, retail_sources
 
 
 def literal(value):
@@ -120,23 +120,37 @@ def resolve_null_tracking_edges(graph, tables):
     graph['unresolved_edges'] = unresolved
 
 
-def import_quest(game, quest, bootstrap=()):
+def import_quest(game, quest, bootstrap=(), source_reader=None, require_behavior=True):
     if not re.fullmatch(r'[A-Za-z0-9_]+', quest): raise ValueError('Invalid quest name')
-    requested = {'graph': ('GameData.pak', f'Libs/quests/flowgraphs/{quest}.xml'),
-                 'behavior': ('Scripts.pak', f'Libs/AI/quests/{quest}.xml')}
+    resolve = source_reader or retail_sources
+    requested = {'graph': ('GameData.pak', f'Libs/quests/flowgraphs/{quest}.xml')}
     for index, entry in enumerate(bootstrap):
         requested[f'bootstrap_{index}'] = ('Scripts.pak', behavior_path(entry))
-    sources = retail_sources(game, requested)
+    sources = resolve(game, requested)
+    behavior_entry = f'Libs/AI/quests/{quest}.xml'
+    try:
+        sources.update(resolve(game, {'behavior': ('Scripts.pak', behavior_entry)}))
+    except MissingRetailSource:
+        if require_behavior:
+            raise
     graph = parse_graph(sources['graph']['data'], quest)
     with zipfile.ZipFile(Path(game) / 'Data/Tables.pak') as archive:
         names = [n for n in archive.namelist() if key(n).startswith('libs/tables/quest/') and n.lower().endswith('.xml')]
-    table_sources = retail_sources(game, {n: ('Tables.pak', n) for n in names})
+    table_sources = resolve(game, {n: ('Tables.pak', n) for n in names})
     identity, tables = select_quest_tables(table_sources, quest)
     graph_objectives = {node_id: next(c['attributes'].get('Name') for c in node['payload'] if c['op'] == 'Inputs')
                         for node_id, node in graph['nodes'].items() if node['attributes'].get('Class') == 'Quest:Objective'}
     table_objectives = {r['objective_id']: r['objective_name'] for r in tables['quest_objective']['rows']}
     if len(table_objectives) != len(tables['quest_objective']['rows']): raise ValueError('Duplicate database objective ID')
-    if graph_objectives != table_objectives: raise ValueError('Effective quest graph and database objectives disagree')
+    renamed = {i: (name, table_objectives[i]) for i, name in graph_objectives.items()
+               if i in table_objectives and name != table_objectives[i]}
+    if renamed: raise ValueError('Effective quest graph and database objectives disagree')
+    # Shipped editor graphs can predate runtime table additions/removals. Keep
+    # both inputs, but register every runtime objective, including table-only
+    # DLC/tutorial nodes. Never discard a row to fit an older authoring graph.
+    graph['objective_table_differences'] = dict(
+        graph_only={i: n for i, n in graph_objectives.items() if i not in table_objectives},
+        table_only={i: n for i, n in table_objectives.items() if i not in graph_objectives})
     resolve_null_tracking_edges(graph, tables)
     documents = {}
     pending = [item for label, item in sources.items() if label != 'graph']
@@ -153,7 +167,7 @@ def import_quest(game, quest, bootstrap=()):
                     if not value.startswith('$'): includes.add(behavior_path(value))
         for include in sorted(includes):
             if key(include) not in documents and not any(key(s['entry']) == key(include) for s in pending):
-                pending.append(retail_sources(game, {'include': ('Scripts.pak', include)})['include'])
+                pending.append(resolve(game, {'include': ('Scripts.pak', include)})['include'])
     operations = Counter(); references = []; unresolved = []; lua = []; variables = []
     for entry, doc in documents.items():
         for name, tree in doc['trees'].items():
@@ -175,6 +189,8 @@ def import_quest(game, quest, bootstrap=()):
                 if op in ('ExecuteLua', 'LuaGate'):
                     lua.append(dict(site, op=op, code=literal(attrs.get('code', ''))))
     model = {'schema': 1, 'quest': quest, 'quest_id': identity, 'tables': tables,
+             'behavior_entry': key(behavior_entry) if 'behavior' in sources else None,
+             'behavior_status': 'source_program' if 'behavior' in sources else 'no_same_named_retail_program',
              'executable': False, 'graph': graph,
              'behavior_documents': {entry: {'trees': doc['trees'], 'provenance': doc['source']['candidates']}
                                     for entry, doc in documents.items()},

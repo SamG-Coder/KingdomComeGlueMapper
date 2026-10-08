@@ -1,5 +1,6 @@
 """Read campaign evidence from retail KCD1 archives; no editor database required."""
 from collections import Counter
+from contextlib import ExitStack
 import hashlib
 import math
 from pathlib import Path
@@ -52,6 +53,104 @@ def opening_sources(game):
     return retail_sources(game, OPENING_FILES)
 
 
+class MissingRetailSource(ValueError):
+    """The entry is absent from every applicable installed retail archive."""
+
+
+class RetailSourceReader:
+    """A scoped retail resolver for a whole campaign import.
+
+    Open archives and hash each effective source once. Keeping this cache local
+    to a build avoids both repeated multi-quest scans and stale cross-run data.
+    The source/patch ordering is the same as retail_sources().
+    """
+    def __init__(self, game):
+        self.game = Path(game).resolve()
+        self.stack = ExitStack()
+        self.archives = {}
+        self.cache = {}
+        self.absent = set()
+        self.patches = []
+        for path in (self.game / 'Data/patch').glob('*.pak'):
+            match = re.fullmatch(r'(?:ipl_)?patch_(\d+)([a-z]?)(?:_hd)?\.pak', path.name.lower())
+            if not match:
+                raise ValueError('Unrecognized patch ordering: ' + path.name)
+            self.patches.append(((int(match[1]), match[2]), path))
+        self.patches.sort()
+
+    def family_archives(self, pak):
+        """Include installed DLC members of the requested content family.
+
+        New entries need no guessed precedence. Conflicting base/DLC versions
+        are rejected; numbered whole-file patches are applied afterwards.
+        """
+        base = self.game / 'Data' / pak
+        paths = [base]
+        if base.parent == self.game / 'Data':
+            pattern = re.compile(re.escape(base.stem) + r'_dlc\d+\.pak', re.I)
+            paths.extend(sorted(p for p in base.parent.glob('*.pak') if pattern.fullmatch(p.name)))
+        return paths
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.stack.__exit__(*args)
+
+    def archive(self, path):
+        path = Path(path).resolve()
+        if not path.is_relative_to(self.game / 'Data'):
+            raise ValueError('Source archive escapes retail Data directory')
+        if path not in self.archives:
+            archive = self.stack.enter_context(zipfile.ZipFile(path))
+            names = {}
+            for name in archive.namelist():
+                normalized = key(name)
+                if normalized in names:
+                    raise ValueError('Duplicate case-insensitive retail entry: ' + name)
+                names[normalized] = name
+            self.archives[path] = archive, names
+        return self.archives[path]
+
+    def __call__(self, game, files):
+        if Path(game).resolve() != self.game:
+            raise ValueError('Retail source cache used with a different installation')
+        result = {}
+        for label, (pak, entry) in files.items():
+            cache_key = (key(pak), key(entry))
+            if cache_key in self.absent:
+                raise MissingRetailSource('Missing effective retail source: ' + entry)
+            if cache_key not in self.cache:
+                data, candidates = None, []
+                for path in self.family_archives(pak):
+                    archive, names = self.archive(path)
+                    if key(entry) not in names:
+                        continue
+                    incoming = read(archive, names[key(entry)])
+                    digest = hashlib.sha256(incoming).hexdigest()
+                    if data is not None and digest != candidates[-1]['sha256']:
+                        raise ValueError('Ambiguous base/DLC campaign override: ' + entry)
+                    candidates.append(dict(archive=path.relative_to(self.game).as_posix(), revision='base', sha256=digest))
+                    data = incoming
+                for revision, path in self.patches:
+                    patch, patch_names = self.archive(path)
+                    if key(entry) not in patch_names:
+                        continue
+                    incoming = read(patch, patch_names[key(entry)])
+                    digest = hashlib.sha256(incoming).hexdigest()
+                    version = str(revision[0]) + revision[1]
+                    if candidates and candidates[-1]['revision'] == version and candidates[-1]['sha256'] != digest:
+                        raise ValueError('Ambiguous same-revision campaign override: ' + entry)
+                    candidates.append(dict(archive=path.relative_to(self.game).as_posix(), revision=version, sha256=digest))
+                    data = incoming
+                if data is None:
+                    self.absent.add(cache_key)
+                    raise MissingRetailSource('Missing effective retail source: ' + entry)
+                self.cache[cache_key] = dict(entry=entry, data=data, candidates=candidates)
+            result[label] = self.cache[cache_key]
+        return result
+
+
 def retail_sources(game, files):
     """Resolve whole-file patch candidates, retaining every provenance record.
 
@@ -59,37 +158,8 @@ def retail_sources(game, files):
     all IPL patches before all ordinary patches). Conflicting files at the same
     revision are rejected until their engine precedence has been established.
     """
-    game = Path(game).resolve()
-    results = {}
-    for label, (pak, entry) in files.items():
-        with zipfile.ZipFile(game / 'Data' / pak) as archive:
-            actual = {key(n): n for n in archive.namelist()}[key(entry)]
-            data = read(archive, actual)
-        results[label] = {'entry': entry, 'data': data, 'candidates': [
-            {'archive': 'Data/' + pak, 'sha256': hashlib.sha256(data).hexdigest(), 'revision': 'base'}]}
-    wanted = {key(value['entry']): label for label, value in results.items()}
-    patches = []
-    for path in (game / 'Data/patch').glob('*.pak'):
-        match = re.fullmatch(r'(?:ipl_)?patch_(\d+)([a-z]?)(?:_hd)?\.pak', path.name.lower())
-        if not match:
-            raise ValueError(f'Unrecognized patch ordering: {path.name}')
-        patches.append(((int(match[1]), match[2]), path))
-    for revision, path in sorted(patches):
-        with zipfile.ZipFile(path) as archive:
-            for entry in archive.namelist():
-                if key(entry) not in wanted:
-                    continue
-                result = results[wanted[key(entry)]]
-                data = read(archive, entry)
-                digest = hashlib.sha256(data).hexdigest()
-                version = str(revision[0]) + revision[1]
-                previous = result['candidates'][-1]
-                if previous['revision'] == version and previous['sha256'] != digest:
-                    raise ValueError(f'Ambiguous same-revision campaign override: {entry}')
-                result['data'] = data
-                result['candidates'].append({'archive': path.relative_to(game).as_posix(),
-                                             'revision': version, 'sha256': digest})
-    return results
+    with RetailSourceReader(game) as reader:
+        return reader(game, files)
 
 
 def audit_opening(game):

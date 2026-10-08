@@ -174,19 +174,21 @@ def package_opening(source, destination):
     return result
 
 
-def level_registration(target):
+def level_registration(target, level=LEVEL, level_id=LEVEL_ID):
     """Add a separate level-table row, refusing collisions with native levels."""
+    if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', level) or not isinstance(level_id, int) or not 0 < level_id < 32768:
+        raise ValueError('Invalid campaign level identity')
     with zipfile.ZipFile(Path(target) / 'Data/Tables.pak') as z:
         original = ET.fromstring(read(z, 'Libs/Tables/level.xml'))
     levels = original.find('levels')
     if levels is None:
         raise ValueError('Unsupported native level table')
     for row in levels:
-        if row.get('LevelId') == str(LEVEL_ID) or row.get('LevelName', '').lower() == LEVEL:
+        if row.get('LevelId') == str(level_id) or row.get('LevelName', '').lower() == level.lower():
             raise ValueError('Campaign level identity conflicts with native level table')
     output = ET.Element(original.tag, original.attrib)
     entries = ET.SubElement(output, 'levels', levels.attrib)
-    ET.SubElement(entries, 'LevelData', LevelId=str(LEVEL_ID), LevelName=LEVEL, CompassOffset='0')
+    ET.SubElement(entries, 'LevelData', LevelId=str(level_id), LevelName=level, CompassOffset='0')
     return xml(output)
 
 

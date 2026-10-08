@@ -47,10 +47,20 @@ def entity_index(documents):
     return records, indexes
 
 
-def link_entities(documents, controller):
+def link_entities(documents, controller, additional_controllers=()):
     records, indexes = entity_index(documents)
     starts = indexes['Name'].get(controller, [])
     if len(starts) != 1: raise ValueError('Startup controller is missing or ambiguous in source level')
+    startup = starts[0]
+    starts = list(starts)
+    controller_issues = []
+    for name in sorted(set(additional_controllers) - {controller}):
+        candidates = [i for i in indexes['Name'].get(name, [])
+                      if records[i]['attributes'].get('EntityClass') == 'QuestObject']
+        if len(candidates) == 1:
+            starts.extend(candidates)
+        else:
+            controller_issues.append(dict(name=name, candidates=candidates))
     queue = deque(starts); selected = {}; links = []; unresolved = []
     while queue:
         identity = queue.popleft()
@@ -71,7 +81,8 @@ def link_entities(documents, controller):
                 else:
                     result['reason'] = 'missing target' if not candidates else 'layer variants require profile selection'
                     unresolved.append(result)
-    return {'controller': starts[0], 'entities': selected, 'links': links, 'unresolved': unresolved}
+    return {'controller': startup, 'entities': selected, 'links': links, 'unresolved': unresolved,
+            'controller_issues': controller_issues}
 
 
 # These are source semantic families, not claims of implemented KCD2 adapters.
@@ -98,9 +109,10 @@ def operation_records(trees):
     return result
 
 
-def build_links(game, level, action='Libs/UI/UIActions/MM_NewGame.xml'):
+def build_links(game, level, action='Libs/UI/UIActions/MM_NewGame.xml', source_reader=None):
     if not re.fullmatch(r'[A-Za-z0-9_]+', level): raise ValueError('Invalid source level')
-    source = retail_sources(game, {'entry': ('GameData.pak', action)})['entry']
+    resolve = source_reader or retail_sources
+    source = resolve(game, {'entry': ('GameData.pak', action)})['entry']
     entry = discover_entry(source['data'])
     archive_path = Path(game) / 'Data/Levels' / level / 'level.pak'
     with zipfile.ZipFile(archive_path) as archive:
@@ -109,7 +121,7 @@ def build_links(game, level, action='Libs/UI/UIActions/MM_NewGame.xml'):
     world = link_entities(documents, entry['dispatch']['entity_name'])
     # Match QuestObject names against retail quest rows, rather than constructing
     # a quest from the link label (labels also describe actors and places).
-    table = retail_sources(game, {'quests': ('Tables.pak', 'Libs/Tables/quest/quest.xml')})['quests']
+    table = resolve(game, {'quests': ('Tables.pak', 'Libs/Tables/quest/quest.xml')})['quests']
     rows = ET.fromstring(table['data']).findall('./table/rows/row')
     quest_records = []; scripts = {}; issues = []
     for identity, record in world['entities'].items():
@@ -120,7 +132,7 @@ def build_links(game, level, action='Libs/UI/UIActions/MM_NewGame.xml'):
             issues.append({'entity': identity, 'reason': 'quest database identity missing or ambiguous'}); continue
         row = dict(matches[0].attrib); quest = row['quest_name']
         if not re.fullmatch(r'[A-Za-z0-9_]+', quest): raise ValueError('Invalid database quest name')
-        item = retail_sources(game, {'script': ('Scripts.pak', f'Libs/AI/quests/{quest}.xml')})['script']
+        item = resolve(game, {'script': ('Scripts.pak', f'Libs/AI/quests/{quest}.xml')})['script']
         trees = parse_behavior(item['data'], item['entry'])
         scripts[quest] = {'source': item['entry'], 'provenance': item['candidates'],
                          'trees': trees, 'operations': operation_records(trees)}
