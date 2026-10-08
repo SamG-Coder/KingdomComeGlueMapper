@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from retail_menu import ROOT_BODY, EVENT_ACTION, patch_actions, patch_gfx, patch_ui_xml
+from retail_menu import ROOT_BODY, EVENT_ACTION, patch_actions, patch_gfx, patch_ui_xml, native_new_game_function
 
 
 def function(name, body):
@@ -29,7 +29,8 @@ class RetailMenuTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(result[:len(before)], before)
         self.assertIn(ROOT_BODY + EVENT_ACTION, result)
-        self.assertEqual(len(result), len(actions) + len(EVENT_ACTION))
+        self.assertEqual(len(result), len(actions) + len(EVENT_ACTION) + len(native_new_game_function()))
+        self.assertIn(b'FSCommand:onBasicButton\0NewGame\0', result)
 
     def test_rejects_changed_native_function(self):
         with self.assertRaisesRegex(ValueError, 'Unsupported retail'):

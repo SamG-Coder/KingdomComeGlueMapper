@@ -15,10 +15,17 @@ KingdomComeGlueMapper is an experimental Python converter that reads **compiled 
 Work toward a retail **Play KDC1** mod has started. The [retail setup](docs/retail-setup.md)
 now audits the opening quest from installed KCD1 archives and builds a package
 whose startup script has been verified in an ordinary KCD2 retail launch.
-The optional **Play KDC1** menu entry is now visible in retail and user-confirmed.
-It remains disabled; the playable campaign and save/load
-conversion are not implemented yet. Setup does not require the modding tools
-or their reference database.
+The optional **Play KDC1** entry can now route native New Game to the converted
+world in retail. Enable the experimental route with `update-runtime --start-probe`;
+quests and campaign save/load validation remain unfinished. The retail setup
+reads game archives directly, without the modding-tools reference database.
+
+`setup_campaign.py build-campaign` can now bundle an existing converted world,
+its imported asset dependencies and the retail opening quest sources under the
+stable map name `kcd1_rataje`. It includes a native spawn point read from KCD1's
+`spawnStart` beside Henry's home. Quest translation and automatic orchestration
+of every conversion stage remain unfinished; see the
+[setup instructions](docs/retail-setup.md).
 
 Terrain, original close-up materials, individual vegetation, merged grass / ground cover, and water are working in game. The development launcher places the player near the starting town of **Skalitz** with no-collision flight enabled.
 

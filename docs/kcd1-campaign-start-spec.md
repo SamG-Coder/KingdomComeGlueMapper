@@ -66,7 +66,7 @@ systems where possible; reserve a small compatibility layer for missing
 semantics. Do not create a second independent inventory or save engine.
 
 ```text
-KCD1 effective packages + editor layers/profiles + authoring database
+KCD1 effective retail packages + compiled layer/profile and database data
                           |
           dependency closure + stable identity map
                           |
@@ -208,7 +208,8 @@ Names below are planned files, not existing implementations.
 - `tools/audit_campaign_runtime.py`: read-back checks for actors, objectives,
   inventory, profiles, save identity and restored state; evidence per milestone.
 
-Generate game content locally from both installations and the modding tools.
+Generate game content locally from both retail installations. Modding tools may
+be consulted as format references during development, but are not setup inputs.
 Commit converter source, schemas, synthetic tests and documentation. Keep SQL
 dumps, extracted dialogue, voices, banks, cinematics and saves out of Git.
 

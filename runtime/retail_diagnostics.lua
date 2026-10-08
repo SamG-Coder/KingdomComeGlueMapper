@@ -20,12 +20,28 @@ for _, name in ipairs({"UIAction", "Game", "System", "Script", "Quest", "Databas
     inspect(name)
 end
 
+for _, name in ipairs({"wh_sys_BaseLevelId", "wh_sys_NoPlaylineDeleting", "wh_sys_DebugPlayline"}) do
+    local ok, value = pcall(System.GetCVar, name)
+    log("CVar " .. name .. " readable=" .. tostring(ok) .. " value=" .. tostring(value))
+end
+
+local function describe(value, depth)
+    if type(value) ~= "table" or depth == 0 then return tostring(value) end
+    local fields = {}
+    for key, item in pairs(value) do
+        fields[#fields + 1] = tostring(key) .. "=" .. describe(item, depth - 1)
+        if #fields >= 20 then break end
+    end
+    table.sort(fields)
+    return "{" .. table.concat(fields, ",") .. "}"
+end
+
 if UIAction and UIAction.RegisterElementListener then
     KingdomComeGlueMapper.diagnostics = {}
     KingdomComeGlueMapper.diagnostics.OnMenuEvent = function(...)
         local values = {}
         for _, value in ipairs({...}) do
-            values[#values + 1] = tostring(value)
+            values[#values + 1] = describe(value, 2)
         end
         log("Menu event " .. table.concat(values, " | "))
     end

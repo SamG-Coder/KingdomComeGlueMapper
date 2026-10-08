@@ -14,6 +14,13 @@ ROOT_BODY = bytes.fromhex('961000060000000000000000070100000008c23d17')
 EVENT_ACTION = b'\x83' + struct.pack('<H', len(b'FSCommand:onGlueMapperRootMenu\0\0')) + b'FSCommand:onGlueMapperRootMenu\0\0'
 
 
+def native_new_game_function():
+    command = b'FSCommand:onBasicButton\0NewGame\0'
+    body = b'\x83' + struct.pack('<H', len(command)) + command + b'\0'
+    header = b'fc_glueMapperNativeNewGame\0\0\0' + struct.pack('<H', len(body))
+    return b'\x9b' + struct.pack('<H', len(header)) + header + body
+
+
 def patch_actions(actions):
     result = bytearray()
     offset, changes = 0, 0
@@ -53,7 +60,7 @@ def patch_actions(actions):
                     raise ValueError('Unsupported retail root-menu function; inspect this game version')
                 header = bytearray(actions[start:body_start])
                 struct.pack_into('<H', header, size_at - start, body_size + len(EVENT_ACTION))
-                result += header + body + EVENT_ACTION
+                result += header + body + EVENT_ACTION + native_new_game_function()
                 changes += 1
             else:
                 result += actions[start:body_end]
@@ -120,6 +127,7 @@ def patch_ui_xml(blob):
     remove = ET.SubElement(functions, 'function', name='GlueMapperRemoveButton', funcname='fc_removeBasicButton')
     ET.SubElement(remove, 'param', name='buttonId', type='string')
     ET.SubElement(remove, 'param', name='containerIndex', type='int')
+    ET.SubElement(functions, 'function', name='GlueMapperNativeNewGame', funcname='fc_glueMapperNativeNewGame')
     return ET.tostring(root, encoding='utf-8', xml_declaration=True)
 
 

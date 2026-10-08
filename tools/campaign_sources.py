@@ -1,6 +1,7 @@
 """Read campaign evidence from retail KCD1 archives; no editor database required."""
 from collections import Counter
 import hashlib
+import math
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -19,6 +20,32 @@ OPENING_FILES = {
 
 def key(name):
     return name.replace('\\', '/').lower()
+
+
+def opening_spawn(game):
+    """Read the original retail level's default player start, not a cutscene spot."""
+    archive_path = 'Data/Levels/rataje/level.pak'
+    entry = 'objects_mission0.xml'
+    with zipfile.ZipFile(Path(game) / archive_path) as archive:
+        data = read(archive, entry)
+    root = ET.fromstring(data)
+    candidates = [e for e in root.findall('Entity')
+                  if e.get('EntityClass') == 'SpawnPoint' and e.get('Name') == 'spawnStart']
+    if len(candidates) != 1:
+        raise ValueError('Expected exactly one retail KCD1 spawnStart')
+    entity = candidates[0]
+    position = entity.get('Pos', '')
+    rotation = entity.get('Rotate', '1,0,0,0')
+    xyz = [float(n) for n in position.split(',')]
+    quat = [float(n) for n in rotation.split(',')]
+    if (len(xyz) != 3 or len(quat) != 4 or not all(math.isfinite(n) for n in xyz + quat)
+            or not (0 < xyz[0] < 4096 and 0 < xyz[1] < 4096 and -1000 < xyz[2] < 10000)
+            or abs(sum(n * n for n in quat) - 1) > 0.001):
+        raise ValueError('Invalid retail opening spawn transform')
+    return {'archive': archive_path, 'entry': entry,
+            'sha256': hashlib.sha256(data).hexdigest(),
+            'entity': entity.get('Name'), 'entity_guid': entity.get('EntityGuid'),
+            'position': position, 'rotation': rotation}
 
 
 def opening_sources(game):

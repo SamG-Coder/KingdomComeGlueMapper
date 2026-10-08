@@ -1,7 +1,7 @@
 """Build/install the retail loader probe and audit KCD1 campaign inputs.
 
-This is the first setup stage, not a playable campaign installer. The optional
-Play KDC1 menu entry stays disabled until conversion and persistence are ready.
+This packages a world startup milestone, not a playable campaign. Play KDC1
+stays disabled by default; --start-probe enables experimental native New Game.
 """
 import argparse
 from datetime import date
@@ -14,9 +14,10 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
-from campaign_sources import audit_opening
+from campaign_sources import audit_opening, opening_spawn
 from upgrade_map import read
 from retail_menu import menu_assets
+from campaign_package import LEVEL, LEVEL_ID, level_registration, package_world, package_opening, write_asset_shards, add_level_tables, mounted_level_tables
 
 MOD_ID = 'kingdomcomegluemapper'
 VERSION = '0.1.0'
@@ -48,7 +49,7 @@ def validate_games(source, target):
     return game_version(target)
 
 
-def build_probe(source, target, output, diagnostics=False, menu=False):
+def build_probe(source, target, output, diagnostics=False, menu=False, start_probe=False):
     version = validate_games(source, target)
     output = Path(output).resolve()
     if output.exists():
@@ -77,6 +78,7 @@ def build_probe(source, target, output, diagnostics=False, menu=False):
         lua = ('KingdomComeGlueMapper = KingdomComeGlueMapper or {}\n'
                'KingdomComeGlueMapper.version = "' + VERSION + '"\n'
                'KingdomComeGlueMapper.campaignReady = false\n'
+               'KingdomComeGlueMapper.startProbe = ' + ('true' if start_probe else 'false') + '\n'
                'System.LogAlways("[GlueMapper] retail bootstrap loaded; campaignReady=false; version=' + VERSION + '")\n')
         if diagnostics:
             lua += (Path(__file__).resolve().parents[1] / 'runtime/retail_diagnostics.lua').read_text(encoding='utf-8')
@@ -96,10 +98,58 @@ def build_probe(source, target, output, diagnostics=False, menu=False):
         receipt = {'schema': 1, 'owner': MOD_ID, 'version': VERSION, 'kind': 'retail-loader-probe',
                    'target_version': version, 'ready_to_play': False,
                    'diagnostics': diagnostics,
+                   'start_probe': start_probe,
                    'menu': menu_report,
                    'sources': {'kcd1': str(Path(source).resolve()), 'kcd2': str(Path(target).resolve())},
                    'files': {p.relative_to(stage).as_posix(): digest(p) for p in sorted(stage.rglob('*')) if p.is_file()}}
         (stage / RECEIPT).write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+        stage.rename(output)
+    return receipt
+
+
+def build_campaign(source, target, converted_data, source_level, output, diagnostics=False):
+    """Assemble the converted world and retail opening inputs atomically.
+
+    Native New Game routing and translated quest execution are still gated.
+    """
+    output = Path(output).resolve()
+    if output.exists():
+        raise ValueError('Output already exists; choose a new build directory')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.gluemapper-campaign-', dir=output.parent) as temporary:
+        stage = Path(temporary) / MOD_ID
+        receipt = build_probe(source, target, stage, diagnostics=diagnostics, menu=True)
+        world = package_world(converted_data, source_level, stage)
+        level_pak = stage / f'Data/Levels/{LEVEL}/level.pak'
+        tables_pak = level_pak.with_suffix('.tables.pak')
+        spawn = opening_spawn(source)
+        world['empty_level_tables'] = add_level_tables(level_pak, tables_pak, target, spawn)
+        tables_pak.replace(level_pak)
+        opening = package_opening(source, stage)
+        with zipfile.ZipFile(stage / 'Data' / (MOD_ID + '.pak'), 'a', zipfile.ZIP_STORED) as pak:
+            pak.writestr('Libs/Tables/level__' + MOD_ID + '.xml', level_registration(target))
+            for name, data in mounted_level_tables(level_pak, MOD_ID).items():
+                pak.writestr(name, data)
+        campaign = {'schema': 1, 'id': 'kcd1', 'level': LEVEL,
+                    'opening_quest': 'q_skalitz', 'world': world, 'opening_sources': opening,
+                    'new_game': {'level': LEVEL, 'level_package': f'Levels/{LEVEL}/level.pak',
+                                 'level_id': LEVEL_ID, 'initial_level_cvar': 'wh_sys_BaseLevelId',
+                                 'initial_level_hook_validated': False,
+                                 'native_dispatch_connected': True, 'spawn': spawn},
+                    'ready_to_play': False,
+                    'blockers': ['Campaign initial state and actor initialization',
+                                 'Retail quest translation and dependency closure',
+                                 'Native save/load validation',
+                                 'Retail world and native asset validation']}
+        (stage / 'campaign.json').write_text(json.dumps(campaign, indent=2), encoding='utf-8')
+        manifest = ET.parse(stage / 'mod.manifest')
+        manifest.find('./info/description').text = 'Converted KCD1 world and opening sources; campaign execution pending.'
+        manifest.write(stage / 'mod.manifest', encoding='utf-8', xml_declaration=True)
+        receipt.update(kind='retail-campaign-package', campaign_level=LEVEL)
+        receipt['files'] = {p.relative_to(stage).as_posix(): digest(p)
+                            for p in sorted(stage.rglob('*')) if p.is_file() and p.name != RECEIPT}
+        (stage / RECEIPT).write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+        verify_package(stage)
         stage.rename(output)
     return receipt
 
@@ -110,6 +160,13 @@ def verify_package(package):
     if receipt.get('owner') != MOD_ID or receipt.get('schema') != 1:
         raise ValueError('Not an owned GlueMapper package')
     required = {'mod.manifest', 'campaign-audit.json', 'Data/' + MOD_ID + '.pak'}
+    if receipt.get('kind') == 'retail-campaign-package':
+        required |= {'campaign.json',
+                     'Data/kingdomcomegluemapper_sources.pak',
+                     f'Data/Levels/{LEVEL}/level.pak', f'Data/Levels/{LEVEL}/terrain.pak',
+                     f'Data/Levels/{LEVEL}/levelinfo.xml'}
+        campaign = json.loads((package / 'campaign.json').read_text(encoding='utf-8'))
+        required.update('Data/' + name for name in campaign['world'].get('asset_archives', ['kingdomcomegluemapper_world.pak']))
     if not required.issubset(receipt.get('files', {})):
         raise ValueError('Incomplete setup package receipt')
     for relative, expected in receipt['files'].items():
@@ -123,6 +180,117 @@ def verify_package(package):
         raise ValueError('Unexpected files in package')
     if ET.parse(package / 'mod.manifest').findtext('./info/modid') != MOD_ID:
         raise ValueError('Manifest modid does not match package owner')
+    return receipt
+
+
+def refresh_runtime(package, output, diagnostics=False, start_probe=False):
+    """Rebuild menu/bootstrap from source, preserving a verified content bundle."""
+    package, output = Path(package).resolve(), Path(output).resolve()
+    previous = verify_package(package)
+    if start_probe and previous['kind'] != 'retail-campaign-package':
+        raise ValueError('Startup probe requires a packaged campaign world')
+    if output.exists():
+        raise ValueError('Output already exists; choose a new build directory')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.gluemapper-refresh-', dir=output.parent) as temporary:
+        stage = Path(temporary) / MOD_ID
+        receipt = build_probe(previous['sources']['kcd1'], previous['sources']['kcd2'], stage,
+                              diagnostics=diagnostics, menu=bool(previous.get('menu')), start_probe=start_probe)
+        if receipt['target_version'] != previous['target_version']:
+            raise ValueError('Game version changed; rebuild content before refreshing runtime')
+        if previous['kind'] == 'retail-campaign-package':
+            for relative in previous['files']:
+                if relative in receipt['files']:
+                    continue
+                if relative == 'Data/kingdomcomegluemapper_world.pak':
+                    with zipfile.ZipFile(package / relative) as old:
+                        shards, assets = write_asset_shards(stage / 'Data', ((n, old.read(n)) for n in sorted(old.namelist())))
+                    campaign = json.loads((package / 'campaign.json').read_text(encoding='utf-8'))
+                    if assets != campaign['world']['imported_assets']:
+                        raise ValueError('Repacked assets differ from the verified world manifest')
+                    campaign['world']['asset_archives'] = shards
+                    (stage / 'campaign.json').write_text(json.dumps(campaign, indent=2), encoding='utf-8')
+                    continue
+                if relative == 'campaign.json' and (stage / relative).exists():
+                    continue
+                dest = stage / relative
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(package / relative, dest)
+            level_pak = stage / f'Data/Levels/{LEVEL}/level.pak'
+            tables_pak = level_pak.with_suffix('.tables.pak')
+            spawn = opening_spawn(previous['sources']['kcd1'])
+            added = add_level_tables(level_pak, tables_pak, previous['sources']['kcd2'], spawn)
+            tables_pak.replace(level_pak)
+            campaign = json.loads((stage / 'campaign.json').read_text(encoding='utf-8'))
+            campaign['world']['empty_level_tables'] = sorted(set(campaign['world'].get('empty_level_tables', [])) | set(added))
+            campaign['new_game'].update(native_dispatch_connected=True, spawn=spawn)
+            (stage / 'campaign.json').write_text(json.dumps(campaign, indent=2), encoding='utf-8')
+            with zipfile.ZipFile(stage / 'Data' / (MOD_ID + '.pak'), 'a', zipfile.ZIP_STORED) as pak:
+                pak.writestr('Libs/Tables/level__' + MOD_ID + '.xml', level_registration(previous['sources']['kcd2']))
+                for name, data in mounted_level_tables(level_pak, MOD_ID).items():
+                    pak.writestr(name, data)
+            receipt.update(kind=previous['kind'], campaign_level=previous['campaign_level'])
+            shutil.copyfile(package / 'mod.manifest', stage / 'mod.manifest')
+        receipt['files'] = {p.relative_to(stage).as_posix(): digest(p)
+                            for p in sorted(stage.rglob('*')) if p.is_file() and p.name != RECEIPT}
+        (stage / RECEIPT).write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+        verify_package(stage)
+        stage.rename(output)
+    return receipt
+
+
+def update_runtime(package, backup, diagnostics=False, start_probe=False):
+    """Update only the small runtime archive, preserving verified world content.
+
+    Close the game first. The old archive and receipt are retained outside the
+    package, and restored if a replacement fails.
+    """
+    package, backup = Path(package).resolve(), Path(backup).resolve()
+    previous = verify_package(package)
+    if backup.exists() or backup.is_relative_to(package):
+        raise ValueError('Runtime backup must be a new path outside the package')
+    if start_probe and previous['kind'] != 'retail-campaign-package':
+        raise ValueError('Startup probe requires a packaged campaign world')
+    relative = 'Data/' + MOD_ID + '.pak'
+    with tempfile.TemporaryDirectory(prefix='.gluemapper-runtime-', dir=package.parent) as temporary:
+        stage = Path(temporary) / MOD_ID
+        built = build_probe(previous['sources']['kcd1'], previous['sources']['kcd2'], stage,
+                            diagnostics=diagnostics, menu=bool(previous.get('menu')), start_probe=start_probe)
+        if built['target_version'] != previous['target_version'] or built['files']['campaign-audit.json'] != previous['files']['campaign-audit.json']:
+            raise ValueError('Installed game inputs changed; rebuild the campaign')
+        if previous['kind'] == 'retail-campaign-package':
+            with zipfile.ZipFile(stage / relative, 'a', zipfile.ZIP_STORED) as z:
+                z.writestr('Libs/Tables/level__' + MOD_ID + '.xml', level_registration(previous['sources']['kcd2']))
+        receipt = json.loads(json.dumps(previous))
+        receipt.update(diagnostics=diagnostics, start_probe=start_probe, menu=built['menu'])
+        changed = [relative]
+        if previous['kind'] == 'retail-campaign-package':
+            level_relative = f'Data/Levels/{LEVEL}/level.pak'
+            (stage / level_relative).parent.mkdir(parents=True)
+            spawn = opening_spawn(previous['sources']['kcd1'])
+            added = add_level_tables(package / level_relative, stage / level_relative, previous['sources']['kcd2'], spawn)
+            with zipfile.ZipFile(stage / relative, 'a', zipfile.ZIP_STORED) as z:
+                for name, data in mounted_level_tables(stage / level_relative, MOD_ID).items():
+                    z.writestr(name, data)
+            campaign = json.loads((package / 'campaign.json').read_text(encoding='utf-8'))
+            campaign['world']['empty_level_tables'] = sorted(set(campaign['world'].get('empty_level_tables', [])) | set(added))
+            campaign['new_game'].update(native_dispatch_connected=True, spawn=spawn)
+            (stage / 'campaign.json').write_text(json.dumps(campaign, indent=2), encoding='utf-8')
+            changed += [level_relative, 'campaign.json']
+        for name in changed:
+            receipt['files'][name] = digest(stage / name)
+        (stage / RECEIPT).write_text(json.dumps(receipt, indent=2), encoding='utf-8')
+        changed.append(RECEIPT)
+        for name in changed:
+            (backup / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(package / name, backup / name)
+        try:
+            for name in changed:
+                (stage / name).replace(package / name)
+        except OSError:
+            for name in changed:
+                shutil.copyfile(backup / name, package / name)
+            raise
     return receipt
 
 
@@ -177,6 +345,23 @@ def main():
     build.add_argument('--output', required=True, type=Path)
     build.add_argument('--diagnostics', action='store_true', help='Log runtime API availability and menu events')
     build.add_argument('--menu', action='store_true', help='Install the disabled Play KDC1 entry while campaign conversion is in progress')
+    campaign = commands.add_parser('build-campaign', help='Package a converted world and retail opening quest sources')
+    campaign.add_argument('--kcd1', required=True, type=Path)
+    campaign.add_argument('--kcd2', required=True, type=Path)
+    campaign.add_argument('--converted-data', required=True, type=Path, help='Data directory produced by conversion stages')
+    campaign.add_argument('--source-level', required=True)
+    campaign.add_argument('--output', required=True, type=Path)
+    campaign.add_argument('--diagnostics', action='store_true')
+    refresh = commands.add_parser('refresh-runtime', help='Rebuild runtime code while preserving verified packaged content')
+    refresh.add_argument('--package', required=True, type=Path)
+    refresh.add_argument('--output', required=True, type=Path)
+    refresh.add_argument('--diagnostics', action='store_true')
+    refresh.add_argument('--start-probe', action='store_true', help='Enable the experimental native New Game route; quests remain unconverted')
+    update = commands.add_parser('update-runtime', help='Update runtime in a verified package with a small rollback backup; close the game first')
+    update.add_argument('--package', required=True, type=Path)
+    update.add_argument('--backup', required=True, type=Path)
+    update.add_argument('--diagnostics', action='store_true')
+    update.add_argument('--start-probe', action='store_true')
     deploy = commands.add_parser('install')
     deploy.add_argument('--package', required=True, type=Path)
     deploy.add_argument('--kcd2', required=True, type=Path)
@@ -189,6 +374,12 @@ def main():
     try:
         if args.command == 'build-probe':
             result = build_probe(args.kcd1, args.kcd2, args.output, args.diagnostics, args.menu)
+        elif args.command == 'build-campaign':
+            result = build_campaign(args.kcd1, args.kcd2, args.converted_data, args.source_level, args.output, args.diagnostics)
+        elif args.command == 'refresh-runtime':
+            result = refresh_runtime(args.package, args.output, args.diagnostics, args.start_probe)
+        elif args.command == 'update-runtime':
+            result = update_runtime(args.package, args.backup, args.diagnostics, args.start_probe)
         elif args.command == 'install':
             result = {'installed': str(install(args.package, args.kcd2)), 'ready_to_play': False}
         elif args.command == 'uninstall':

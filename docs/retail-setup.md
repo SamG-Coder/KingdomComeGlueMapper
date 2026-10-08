@@ -15,8 +15,10 @@ still be used during development to understand formats.
 This stage is a **loader and menu probe**, not the playable campaign. Its startup
 script sets `campaignReady=false`. With `--menu`, setup generates a patched copy
 of the user's retail UI and adds **Play KDC1** with a tooltip explaining that the
-campaign is not ready. The entry stays disabled. It does not replace KCD2's New
-Game or modify saves. `--diagnostics` optionally logs available APIs and UI events.
+campaign is not ready. The entry stays disabled by default; a packaged campaign
+can enable the experimental New Game route with `--start-probe`. It calls the
+native New Game menu and selects the converted level. `--diagnostics` optionally
+logs available APIs and UI events.
 
 ```powershell
 python tools/setup_campaign.py build-probe `
@@ -69,16 +71,25 @@ Loading lua init script for mod kingdomcomegluemapper ...
 [GlueMapper] retail bootstrap loaded; campaignReady=false; version=0.1.0
 ```
 
-This proves retail package mounting and script execution. It does **not** prove
-the converted level loads in retail, campaign logic runs, or custom state saves.
+Subsequent testing on retail 1.5.6 confirmed **Play KDC1 → Standard Mode** loads
+`kcd1_rataje` and initializes the player. Campaign quest execution and save/load
+round trips are still unverified.
+
+After adding the source `spawnStart` as a native spawn point, a fresh retail
+New Game was visually checked at ground level beside Henry's home in Skalitz.
+The original source position is `728.86243,3411.5974,63.75`. This was tested with
+the isolated `KingdomComeGlueMapperTest` profile; normal-profile saves were not
+used. The source-only regression suite passes 94 tests, including spawn import,
+repeat-update deduplication and the exact database table mount path.
 
 The menu-enabled probe also recorded the root-menu event and addition of the
 Play KDC1 entry. The user confirmed that the entry appears in the retail menu.
 Setup generates `Menu.gfx` and its UI XML from the installed game; neither asset
 is distributed in this repository. The patch preserves the native root function
 and appends a lifecycle event used by the Lua menu hook. It rejects unrecognized
-function bodies rather than patching an unknown layout. Submenu return behavior
-and compatibility with other mods that replace the same UI remain unverified.
+function bodies rather than patching an unknown layout. The initial-level CVar
+is restored on return to the root menu. Compatibility with other mods replacing
+the same UI remains unverified.
 
 The opening audit contains 181 graph nodes, 148 edges and 109 objective nodes.
 It selects patched New Game (`ipl_patch_010700.pak`) and opening quest graph
@@ -90,20 +101,91 @@ conversion validation gate, not something the audit establishes.
 
 ## Next integration gates
 
-1. **Menu action:** the entry is visible through a generated root-menu hook and
-   `UIAction.CallFunction`. Connect it to the native New Game lifecycle after
-   identifying the campaign dispatcher; visible UI does not establish this link.
-2. **Campaign package:** consolidate the successful map/NPC/material conversions
-   into a dependency-complete build with a stable level identity. Current loose
-   probe namespaces are not a release package.
+### Converted campaign bundle
+
+`build-campaign` now packages an existing converter output into the retail mod:
+
+```powershell
+python tools/setup_campaign.py build-campaign `
+  --kcd1 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance" `
+  --kcd2 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2" `
+  --converted-data "D:/SteamLibrary/steamapps/common/KCD2Mod/Data" `
+  --source-level kcd1_world_v43 `
+  --output outputs/retail-campaign-002 --diagnostics
+```
+
+`--converted-data` accepts a directory produced by the conversion stages; it
+does not invoke or read an editor database. The example uses the existing local
+development output. Running all conversion stages directly from setup remains
+unfinished, so this is not yet the final two-installation-only setup experience.
+
+The bundle contains:
+
+- `Data/Levels/kcd1_rataje/level.pak`, `terrain.pak` and `levelinfo.xml`, with
+  stable level identity replacing the temporary probe name.
+- `Data/kingdomcomegluemapper_world_NNN.pak`: transitively referenced imported
+  geometry, materials, textures and streamed sidecars. Missing or ambiguous
+  imported paths stop the build. Archives are split at 1 GiB / 50,000 entries:
+  retail rejected the earlier single large archive. Native asset references
+  require separate audit.
+- A table patch registering `kcd1_rataje` as level ID `1000`, refusing a collision
+  in the installed native level table and preserving native rows.
+- `Data/kingdomcomegluemapper_sources.pak`: the four patched retail opening
+  inputs under `GlueMapper/CampaignSource/`, isolated from native quest paths.
+  These are source inputs, **not translated executable quests**.
+- `campaign.json`: map path, intended New Game level, opening source provenance,
+  imported asset hashes and explicit readiness gates.
+- A native `SpawnPoint` in `objects_mission0.xml`, taking the original retail
+  `spawnStart` position and rotation beside Henry's home. The generated name is
+  `gluemapper_new_game_spawn`; original entity IDs are not reused. Source archive,
+  entry, hash and transform are recorded in `campaign.json`. Rebuilding replaces
+  the owned point without duplicating it; competing spawn points stop the build.
+- Native level-local table containers and aliases at the retail database
+  loader's mount path. Existing converted table records are preserved; missing
+  containers are created without copying Trosecko NPC schedules or entity IDs.
+
+The verified native route sets `wh_sys_BaseLevelId=1000` for Play KDC1 and invokes
+the original New Game dispatcher. To enable it in an existing verified bundle,
+close the game, then run:
+
+```powershell
+python tools/setup_campaign.py update-runtime `
+  --package "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2/Mods/kingdomcomegluemapper" `
+  --backup outputs/runtime-backup-next --start-probe
+```
+
+Choose a new backup directory each time. The command verifies the content,
+updates the small runtime/level packages and receipt, and keeps rollback copies.
+`refresh-runtime --package ... --output ... --start-probe` makes a separate full
+bundle instead. Both paths preserve the table mount correction and native spawn.
+Restart the game and select **Play KDC1 → Standard Mode** to exercise New Game.
+This milestone adds no load-time teleport or replacement save system.
+
+The fatal database error came from a mount mismatch: retail requested
+`Data/Mods/<modid>/Data/Levels/kcd1_rataje/Tables/WeatherProfiles.xml`, but the
+level archive mounted without the leading `Data/`. The root runtime archive now
+exposes the packaged tables at that requested path. Runtime tracing confirmed
+the weather XML opens successfully and world loading continues.
+
+The first full local bundle collected 92,908 imported assets (17.50 GB of asset
+payload), totaling 18.33 GB with the converted level and metadata. Generated
+content stays local. The resulting 17 asset archives mount successfully in retail.
+
+### Remaining gates
+
+1. **Menu compatibility:** broaden testing of cancellation, campaign switching
+   and other UI mods beyond the verified native New Game route.
+2. **Campaign setup:** orchestrate all conversion stages from the two installed
+   games, so users do not need an existing converted-data directory.
 3. **New Game and persistence:** establish native quest state, actor, inventory
    and trigger round trips before translating the opening quest. Separate fresh
    initialization from save restoration; never grant starter items on load.
 4. **Original opening:** convert the retail quest behavior, entity links,
    schedules, dialogue, sounds and triggers. Resolve unsupported operations
    explicitly; do not replace the story with a handwritten approximation.
-5. **Ready state:** enable Play KDC1 only after packaged world, opening and save
-   gates pass. Existing KCD1 save migration remains separate from new KCD2 saves.
+5. **Ready state:** enable Play KDC1 by default only after opening and save gates
+   pass. The experimental start flag does not set `ready_to_play=true`. Existing
+   KCD1 save migration remains separate from new KCD2 saves.
 
 See [campaign specification](kcd1-campaign-start-spec.md) for the state and
 dependency contracts.
