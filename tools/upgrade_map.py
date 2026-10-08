@@ -3,6 +3,7 @@
 This first stage converts elevation and surface indices, not outdoor objects.
 """
 import argparse
+from game_paths import GameLibrary
 import copy
 import hashlib
 import json
@@ -26,7 +27,7 @@ def xml(element):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--library", type=Path, default=Path(r"D:\SteamLibrary\steamapps\common"))
+    parser.add_argument("--library", type=GameLibrary, default=Path(r"D:\SteamLibrary\steamapps\common"))
     parser.add_argument("--output", type=Path, default=Path(r"D:\SteamLibrary\steamapps\common\KCD2Mod\Data\Levels\kcd1_terrain"))
     parser.add_argument("--original-materials", action="store_true", help="Package original terrain materials, including installed HD mip overrides")
     parser.add_argument("--terrain-blend-factor", type=float, choices=[0.5, 1.0, 2.0, 4.0, 8.0], help="Optional A/B experiment for terrain transition shading")

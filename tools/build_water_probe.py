@@ -1,5 +1,6 @@
 """Add original water surfaces and physics contours to a working vegetation level."""
 import argparse
+from game_paths import GameLibrary
 import copy
 from contextlib import ExitStack
 import json
@@ -63,7 +64,7 @@ def global_environment_probe(objects, cubemap=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--library", type=Path, default=Path(r"D:\SteamLibrary\steamapps\common"))
+    parser.add_argument("--library", type=GameLibrary, default=Path(r"D:\SteamLibrary\steamapps\common"))
     parser.add_argument("--base-level", default="kcd1_groundcover_v13")
     parser.add_argument("--level", default="kcd1_water_v17")
     parser.add_argument("--native-water-materials", action="store_true", help="Use the visually confirmed KCD2 river material (recommended)")

@@ -1,5 +1,6 @@
 """Append previously omitted instanced foliage and props to a v13-derived level."""
 import argparse
+from game_paths import GameLibrary
 from collections import defaultdict, Counter
 from contextlib import ExitStack
 import json
@@ -20,7 +21,7 @@ from building_brushes import resource_table
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--library', type=Path, default=Path(r'D:\SteamLibrary\steamapps\common'))
+    p.add_argument('--library', type=GameLibrary, default=Path(r'D:\SteamLibrary\steamapps\common'))
     p.add_argument('--base-level', required=True)
     p.add_argument('--level', required=True)
     p.add_argument('--original-report', type=Path, required=True, help='Report for the inherited v13 individual instances')

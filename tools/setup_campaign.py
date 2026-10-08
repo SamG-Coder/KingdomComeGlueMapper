@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -17,11 +18,16 @@ import zipfile
 from campaign_sources import audit_opening, opening_spawn
 from upgrade_map import read
 from retail_menu import menu_assets
+from setup_progress import progress
 from campaign_package import LEVEL, LEVEL_ID, level_registration, package_world, package_opening, write_asset_shards, add_level_tables, mounted_level_tables
 
 MOD_ID = 'kingdomcomegluemapper'
 VERSION = '0.1.0'
 RECEIPT = 'gluemapper-install.json'
+
+
+def runtime_directory():
+    return Path(sys._MEIPASS) / 'runtime' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1] / 'runtime'
 
 
 def digest(path):
@@ -81,9 +87,9 @@ def build_probe(source, target, output, diagnostics=False, menu=False, start_pro
                'KingdomComeGlueMapper.startProbe = ' + ('true' if start_probe else 'false') + '\n'
                'System.LogAlways("[GlueMapper] retail bootstrap loaded; campaignReady=false; version=' + VERSION + '")\n')
         if diagnostics:
-            lua += (Path(__file__).resolve().parents[1] / 'runtime/retail_diagnostics.lua').read_text(encoding='utf-8')
+            lua += (runtime_directory() / 'retail_diagnostics.lua').read_text(encoding='utf-8')
         if menu:
-            lua += (Path(__file__).resolve().parents[1] / 'runtime/campaign_menu.lua').read_text(encoding='utf-8')
+            lua += (runtime_directory() / 'campaign_menu.lua').read_text(encoding='utf-8')
         pak = stage / 'Data' / (MOD_ID + '.pak')
         with zipfile.ZipFile(pak, 'w', compression=zipfile.ZIP_STORED) as archive:
             item = zipfile.ZipInfo('Scripts/Mods/' + MOD_ID + '.lua', (2026, 1, 1, 0, 0, 0))
@@ -107,7 +113,7 @@ def build_probe(source, target, output, diagnostics=False, menu=False, start_pro
     return receipt
 
 
-def build_campaign(source, target, converted_data, source_level, output, diagnostics=False):
+def build_campaign(source, target, converted_data, source_level, output, diagnostics=False, start_probe=False):
     """Assemble the converted world and retail opening inputs atomically.
 
     Native New Game routing and translated quest execution are still gated.
@@ -118,7 +124,7 @@ def build_campaign(source, target, converted_data, source_level, output, diagnos
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.gluemapper-campaign-', dir=output.parent) as temporary:
         stage = Path(temporary) / MOD_ID
-        receipt = build_probe(source, target, stage, diagnostics=diagnostics, menu=True)
+        receipt = build_probe(source, target, stage, diagnostics=diagnostics, menu=True, start_probe=start_probe)
         world = package_world(converted_data, source_level, stage)
         level_pak = stage / f'Data/Levels/{LEVEL}/level.pak'
         tables_pak = level_pak.with_suffix('.tables.pak')
@@ -169,12 +175,17 @@ def verify_package(package):
         required.update('Data/' + name for name in campaign['world'].get('asset_archives', ['kingdomcomegluemapper_world.pak']))
     if not required.issubset(receipt.get('files', {})):
         raise ValueError('Incomplete setup package receipt')
+    total = sum((package / relative).stat().st_size for relative in receipt['files']
+                if (package / relative).resolve().is_relative_to(package))
+    checked = 0
     for relative, expected in receipt['files'].items():
         path = package / relative
         if not path.resolve().is_relative_to(package) or path.is_symlink():
             raise ValueError(f'Invalid package path: {relative}')
         if digest(path) != expected:
             raise ValueError(f'Package changed: {relative}')
+        checked += path.stat().st_size
+        progress('Verifying package', checked, total, relative)
     actual = {p.relative_to(package).as_posix() for p in package.rglob('*') if p.is_file()}
     if actual != set(receipt['files']) | {RECEIPT}:
         raise ValueError('Unexpected files in package')

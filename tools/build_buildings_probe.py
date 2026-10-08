@@ -1,5 +1,6 @@
 """Restore static structures near Skalitz or across the original world."""
 import argparse
+from game_paths import GameLibrary
 from collections import defaultdict, Counter
 from contextlib import ExitStack
 import json
@@ -22,7 +23,7 @@ from entity_visuals import collect_visuals
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--library", type=Path, default=Path(r"D:\SteamLibrary\steamapps\common"))
+    parser.add_argument("--library", type=GameLibrary, default=Path(r"D:\SteamLibrary\steamapps\common"))
     parser.add_argument("--base-level", default="kcd1_water_v17")
     parser.add_argument("--level", default="kcd1_buildings_v19")
     parser.add_argument("--radius", type=float, default=400)

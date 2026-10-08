@@ -1,0 +1,27 @@
+name: Build Windows setup
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  windows-setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r requirements-setup.txt
+      - run: python -m pip install -r requirements-npc-effects.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python tools/build_setup_exe.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KingdomComeGlueMapper-Windows-Setup
+          path: |
+            outputs/release/*.exe
+            outputs/release/SHA256SUMS.txt
+            outputs/release/self-test.json
+          if-no-files-found: error

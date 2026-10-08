@@ -1,5 +1,6 @@
 """Append static visual representations of original furnishings and placed items."""
 import argparse
+from game_paths import GameLibrary
 from collections import Counter
 from contextlib import ExitStack
 import json
@@ -15,7 +16,7 @@ from upgrade_map import xml
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--library',type=Path,default=Path(r'D:\SteamLibrary\steamapps\common'))
+    p.add_argument('--library',type=GameLibrary,default=Path(r'D:\SteamLibrary\steamapps\common'))
     p.add_argument('--base-level',required=True)
     p.add_argument('--level',required=True)
     p.add_argument('--character-visuals', action='store_true', help='Try native AnimChar visuals for simple door/grindstone CDF assemblies')

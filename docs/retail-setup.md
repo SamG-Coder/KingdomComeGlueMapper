@@ -6,6 +6,10 @@ then use native New Game / Save / Load / Continue for that campaign.
 
 ## Implemented first stage
 
+The [Windows setup app](windows-setup.md) now orchestrates the world conversion
+from both retail installations and wraps installation with progress and logging.
+The commands below remain available for development and existing converted data.
+
 `tools/setup_campaign.py` builds, verifies and installs a standard retail mod.
 It reads the original opening quest and New Game graphs from **KCD1 retail
 archives**, including numbered patch candidates. Neither the modding-tools
@@ -116,8 +120,8 @@ python tools/setup_campaign.py build-campaign `
 
 `--converted-data` accepts a directory produced by the conversion stages; it
 does not invoke or read an editor database. The example uses the existing local
-development output. Running all conversion stages directly from setup remains
-unfinished, so this is not yet the final two-installation-only setup experience.
+development output. The Windows setup app creates its own private converted-data
+directory by running the world conversion stages from both retail installations.
 
 The bundle contains:
 
@@ -175,8 +179,8 @@ content stays local. The resulting 17 asset archives mount successfully in retai
 
 1. **Menu compatibility:** broaden testing of cancellation, campaign switching
    and other UI mods beyond the verified native New Game route.
-2. **Campaign setup:** orchestrate all conversion stages from the two installed
-   games, so users do not need an existing converted-data directory.
+2. **Campaign setup:** broaden compatibility and runtime validation of the new
+   two-installation build pipeline. Full gameplay conversion remains separate.
 3. **New Game and persistence:** establish native quest state, actor, inventory
    and trigger round trips before translating the opening quest. Separate fresh
    initialization from save restoration; never grant starter items on load.

@@ -1,5 +1,6 @@
 """Add a bounded road/decal diagnostic to an existing imported world."""
 import argparse
+from game_paths import GameLibrary
 from collections import Counter
 from contextlib import ExitStack
 import json
@@ -20,7 +21,7 @@ from water_volumes import read_water
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--library', type=Path, default=Path('D:/SteamLibrary/steamapps/common'))
+    parser.add_argument('--library', type=GameLibrary, default=Path('D:/SteamLibrary/steamapps/common'))
     parser.add_argument('--base-level', default='kcd1_world_v30')
     parser.add_argument('--level', default='kcd1_world_v32')
     parser.add_argument('--position', type=float, nargs=3, default=(725.63867, 3441.4238, 64.993584))

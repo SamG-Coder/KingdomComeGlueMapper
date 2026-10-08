@@ -15,6 +15,7 @@ import zipfile
 
 from campaign_sources import opening_sources
 from upgrade_map import read, xml
+from setup_progress import progress
 
 LEVEL = 'kcd1_rataje'
 LEVEL_ID = 1000
@@ -24,7 +25,7 @@ REFERENCE = re.compile(rb'(?:' + b'|'.join(p.encode() for p in PREFIXES)
                        + rb')/[A-Za-z0-9_./\\-]+', re.I)
 
 
-def write_asset_shards(directory, entries, max_bytes=1024 ** 3, max_entries=50000):
+def write_asset_shards(directory, entries, max_bytes=1024 ** 3, max_entries=50000, total_entries=0):
     """Write stored ZIP32 archives below retail's size and entry-count limits."""
     directory = Path(directory)
     reports, assets = [], []
@@ -49,6 +50,8 @@ def write_asset_shards(directory, entries, max_bytes=1024 ** 3, max_entries=5000
             size += cost
             count += 1
             assets.append({'path': name, 'bytes': len(payload), 'sha256': hashlib.sha256(payload).hexdigest()})
+            if len(assets) % 100 == 0 or len(assets) == total_entries:
+                progress('Packaging imported assets', len(assets), total_entries, name)
     finally:
         if archive is not None:
             archive.close()
@@ -153,7 +156,7 @@ def package_world(converted_data, source_level, destination):
             entry = index[name]
             return entry.read_bytes() if isinstance(entry, Path) else read(*entry)
         selected = dependency_closure(seeds, index, load)
-        shards, assets = write_asset_shards(destination / 'Data', ((name, load(name)) for name in selected))
+        shards, assets = write_asset_shards(destination / 'Data', ((name, load(name)) for name in selected), total_entries=len(selected))
     return {'level': LEVEL, 'path': 'Levels/' + LEVEL,
             'source_level': source_level, 'imported_assets': assets, 'asset_archives': shards,
             'native_dependencies_validated': False,

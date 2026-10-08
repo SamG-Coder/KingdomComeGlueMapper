@@ -1,5 +1,6 @@
 """Build a small original-vegetation compatibility probe on a working terrain level."""
 import argparse
+from game_paths import GameLibrary
 from contextlib import ExitStack
 import hashlib
 import json
@@ -18,7 +19,7 @@ from merged_vegetation import inventory, convert_cell, build_tree
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--library", type=Path, default=Path(r"D:\SteamLibrary\steamapps\common"))
+    parser.add_argument("--library", type=GameLibrary, default=Path(r"D:\SteamLibrary\steamapps\common"))
     parser.add_argument("--base-level", default="kcd1_terrain_v6")
     parser.add_argument("--level", default="kcd1_vegetation_v11")
     parser.add_argument("--limit", type=int, default=24)
