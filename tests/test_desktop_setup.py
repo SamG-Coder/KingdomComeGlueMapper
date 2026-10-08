@@ -34,8 +34,8 @@ class DesktopSetupTests(unittest.TestCase):
         config = self.root / 'paths.json'
         config.write_text(json.dumps(dict(schema=1, kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), build=str(self.root / 'build'))))
         library = GameLibrary(config)
-        self.assertEqual(library / 'KCD2Mod/Data/Levels', self.root / 'build/Data/Levels')
-        self.assertEqual(library / 'KingdomComeDeliverance' / 'Data', self.root / 'a/Data')
+        self.assertEqual(library / 'KCD2Mod/Data/Levels', (self.root / 'build/Data/Levels').resolve())
+        self.assertEqual(library / 'KingdomComeDeliverance' / 'Data', (self.root / 'a/Data').resolve())
         with self.assertRaises(ValueError): _ = library / 'KCD2Mod/../a'
         config.write_text(json.dumps(dict(schema=1, kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), build=str(self.root / 'b/build'))))
         with self.assertRaises(ValueError): GameLibrary(config)
