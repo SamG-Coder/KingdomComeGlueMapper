@@ -72,7 +72,7 @@ def asset_pack(stack, library, prefix, cache_dir=None):
                     features[PurePosixPath(name.replace("\\", "/")).stem.lower()] = shader_features(read(archive, name).decode(errors="replace"))
         shader_maps.append(features)
     index = {}
-    paths = [p for p in (library / "KingdomComeDeliverance/Data").glob("*.pak") if p.name.startswith(("GameData", "Textures", "Objects", "Buildings", "Characters", "Cloth", "Heads"))]
+    paths = [p for p in (library / "KingdomComeDeliverance/Data").glob("*.pak") if p.name.startswith(("GameData", "Textures", "Objects", "Buildings", "Characters", "Cloth", "Heads", "IPL_Heads"))]
     paths.extend((library / "KingdomComeDeliverance/Engine").glob("*.pak"))
     paths = sorted(paths, key=lambda p: ("_HD" in p.name,p.name.lower()))
     paths.extend(sorted((library / "KingdomComeDeliverance/Data/patch").glob("*.pak")))

@@ -396,3 +396,43 @@ are recorded explicitly rather than claiming perfectly continuous source data.
 v43 completed its terrain-based spawn. The user confirmed the correction works
 and requested commit/push. No console setting is required for this fix. The
 separate floating grass-bank issue remains unresolved.
+
+## NPC native animation and clothing probe (2026-10-08)
+
+The user confirmed the native KCD2 idle works with the imported KCD1 visual.
+`build_npc_probe.py` resolves Henry's father's source appearance and packages
+its skins, materials and textures. `IPL_Heads` must be indexed: required source
+heads are not all in Heads.pak. The native mode uses KCD2's skeleton and existing
+animation definitions; it does not install the legacy animation database.
+`spawn_npc_probe.py` starts `relaxed_idle_both`. This is a visual character probe,
+not NPC AI, quests, or verified facial animation.
+
+The experimental `build_npc_clothing_probe.py` registers seven outfit garments,
+native component/layer definitions, armor items, a clothing preset, clothing
+configuration and a dedicated display-body soul. `AnimCharCopyVisual(entityId)`
+requires a valid database soul through `Body.guidBodyPresetId`; an empty GUID
+does not create a clothing manager. A runtime soul GUID is not interchangeable
+with a database soul GUID. The generic NPC and NPC_NAI diagnostic actors were
+removed after testing; they are not an implemented NPC spawning path.
+
+In a fresh v43 process, the dedicated display soul creates a native clothing
+manager. `audit_npc_clothing_probe.py` confirmed all seven components in its
+live slot cache. The runtime reports the native idle starting successfully.
+The audit saves the live XML and a JSON checklist under ignored reports/.
+HTTP probes use IPv4 loopback because localhost requests intermittently reset.
+
+**Clothing conversion is incomplete.** Runtime inspection and the screenshot
+show only the selected outer torso garment. The whole KCD1 shirt/coat cannot
+be treated as a single native torso part: arms and waist need proper region
+partitions. Source garment morphs (#V_001 etc.) and hiding masks have not been
+converted. Trousers/boots still have incorrect material colorization, and the
+dedicated soul generates a native head instead of selecting the imported head.
+Native registration is not evidence of correct garment conversion. Every
+partition remains marked unverified; the tool is restricted to this one outfit.
+
+Local development overlays are loose files beneath KCD2Mod/Data/Libs/Tables:
+Character/CharacterComponent.xml, Character/ClothingConfig.xml,
+item/clothing_preset.xml, item/item__gluenpc.xml and rpg/soul__gluenpc.xml.
+Existing native entries are retained in the first three files. The builder
+refuses to overwrite existing overlays. No extracted assets belong in Git.
+The source tests currently pass (49); visual clothing correctness does not.

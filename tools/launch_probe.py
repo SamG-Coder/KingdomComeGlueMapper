@@ -11,7 +11,7 @@ import uuid
 
 
 def console(command):
-    url = "http://localhost:1403/api/System/Console/ExecuteString?"
+    url = "http://127.0.0.1:1403/api/System/Console/ExecuteString?"
     with urllib.request.urlopen(url + urllib.parse.urlencode({"command": command}), timeout=5) as response:
         return response.read()
 
