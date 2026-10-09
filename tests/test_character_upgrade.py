@@ -329,7 +329,7 @@ class InstallationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data,stage,before=self.make_plan(Path(tmp));real=shutil.copy2
             def fail(source,target):
-                if Path(source)==stage/'Data/table.xml':
+                if Path(source).resolve()==(stage/'Data/table.xml').resolve():
                     Path(target).write_bytes(b'partial');raise OSError('injected failure')
                 return real(source,target)
             with patch('upgrade_npc_characters.shutil.copy2',side_effect=fail):
