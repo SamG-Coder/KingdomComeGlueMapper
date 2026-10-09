@@ -11,6 +11,8 @@ KEYS = {
     'InventoryPresets': 'Name', 'CharacterComponents': 'Name',
     'clothing_presets': 'clothing_preset_id', 'ItemClasses': 'Id',
     'levels': 'LevelId', 'LevelSwitches': 'Name',
+    'locations': 'location_id', 'poi_types': 'poi_type_id',
+    'ui_map_labels': 'ui_map_label_id', 'ui_local_mapss': 'ui_local_map_id',
 }
 
 # RequiredAttribute fields from KCD2Mod's GeneratedDatabase reader. The XML

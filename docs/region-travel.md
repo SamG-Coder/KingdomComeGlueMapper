@@ -298,3 +298,51 @@ A second retail screenshot confirms that `A visit to Rattay` and its
 visually verified; association with the destination region is not correct.
 Audit the quest's native level/region metadata alongside the map registration.
 The screenshots alone do not establish that those two symptoms have one cause.
+
+### Region registration repair (local v20)
+
+`region_travel_locations.py` now imports the source world's `RPGLocationManager`
+instead of registering only its map painting. The build contains 52 location
+rows bound to level 1001, 1,150 source discovery records, 48 location areas,
+14 town labels and 15 detailed local-map overlays with their mip textures.
+Location-area WUID references are resolved through the source AI registry and
+converted to KCD2 persistent GUIDs; the original polygons and world transforms
+are retained. Only location geometry is imported, not its old NPC behavior links.
+
+Map-label/local-map coordinates are converted from KCD1 world coordinates to
+the target atlas's 8,192-pixel image coordinates. The old inverted height and
+two-focus activation ellipse are decoded into native extents. Alternate inset
+maps remain registered; overlapping enabled maps for the same location select
+the smaller authored footprint. Source-disabled insets remain disabled.
+
+POI icons reuse native definitions by GUID/label, translating changed explicit
+enums (fast travel is 5 in KCD1 and 7 in KCD2). Eighteen unsupported icon types
+use the native general-interest icon while retaining source labels. Ninety
+quest/layer-gated marks keep their source gate; this does not activate missing
+source quests. Two stale source area memberships reference deleted location
+rows and are excluded with their IDs recorded in the build receipt. The
+permanent fast-travel network's layer dependency is removed; route operation
+and discovery transitions still need a retail test.
+
+The Rattay journal quest is now defined inside the `kcd1_travel` Level, matching
+the native hierarchy. The original root module retains its `progress` and
+`objective` State nodes and sends their values into the regional journal, so
+their saved node paths are not intentionally moved. The root module explicitly
+keeps the old Quest's Haste namespace; the new journal does not declare another
+namespace with the same name. Save migration and the displayed region still
+require live confirmation.
+
+Offline checks: 263 tests pass; all 13 generated table XML files pass the
+official `GeneratedDatabase.dll` reader. The full builder succeeded. Comparison
+against installed v19 showed no Trosky level changes, no changes to existing
+dialogue/quest strings, and only formatting differences in the previously
+repaired inventory/outfit table rows. All imported location references resolve
+to level 1001. The first v20 retail test has loaded a KCD1 save and opened both
+map and journal without another startup-table failure; this does not by itself
+prove that markers, region text or town overlays are visually correct.
+
+The subsequent user test confirms that map items now appear and work, including
+the multiple map-detail levels. Remaining reported issues are the Rattay
+innkeeper's missing Talk interaction, facing/leaning placement, and the quest's
+missing map marker. The requested completion condition is conversation with the
+innkeeper, not entering the inn polygon. These are separate follow-up work.

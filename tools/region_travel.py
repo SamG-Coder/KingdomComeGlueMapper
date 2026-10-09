@@ -27,6 +27,7 @@ from region_travel_companions import import_horse_scheduler, import_horse_schedu
 from region_travel_navigation import package_navigation
 from region_travel_entry import register_entry
 from region_travel_map import resources as map_resources
+from region_travel_locations import resources as location_resources, merge_missing_strings
 from region_travel_services import resolve_merchant, shop_resources
 from region_travel_merchant_character import build_appearance
 from region_travel_merchant import actor_resources, register_world
@@ -319,6 +320,9 @@ def build(source, target, world, output):
                 graphs,visit_strings=attach_visit(graphs,graph,LEVEL,player.findtext('SharedSoulGuid'))
                 replacements,graphs,merchant_world_report=register_world(
                     replacements,graphs,graph,source,merchant,shop_report,guid)
+                replacements,location_files,location_strings,location_report=location_resources(
+                    source,target,replacements,LEVEL_ID)
+                dialogue_files.update(location_files)
             with zipfile.ZipFile(dest/'level.pak','x',zipfile.ZIP_STORED,allowZip64=False) as dst:
                 for info in z.infolist():
                     b=replacements.pop(info.filename.lower(),None)
@@ -359,11 +363,15 @@ def build(source, target, world, output):
     with zipfile.ZipFile(target/'Localization/English_xml.pak') as z:
         quest_strings=merge_localization(read(z,'text_ui_quest.xml'),visit_strings)
     with zipfile.ZipFile(localization/'English_xml.pak','x',zipfile.ZIP_STORED) as z:
-        z.writestr('text_ui_dialog.xml',dialogue_strings)
-        z.writestr('text_ui_quest.xml',quest_strings)
+        texts={'text_ui_dialog.xml':dialogue_strings,'text_ui_quest.xml':quest_strings}
+        with zipfile.ZipFile(target/'Localization/English_xml.pak') as native_strings:
+            for name,blob in location_strings.items():
+                base=texts[name] if name in texts else read(native_strings,name)
+                texts[name]=merge_missing_strings(base,blob)
+        for name,blob in texts.items(): z.writestr(name,blob)
     report={'schema':1,'mod':MOD,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
-        'map_ui':map_report,'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
+        'map_ui':dict(map_report,registration=location_report),'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
             character=character_report,source=merchant['provenance']),
         'driver_dialogue':{'option':'Travel to KDC1','original_destination_preserved':True,'new_voice_lines':False,'fare':0,'runtime_verified':False},
         'preservation_tests_pending':['player identity','inventory and equipped clothing','horse and saddle inventory','KDC2 quests','save/load in both maps'],

@@ -52,7 +52,6 @@ def attach(graphs, graph_path, level, player_soul):
     ET.SubElement(host.find('Ports'), 'Port', Name='arrived', Direction='Out', Type='trigger')
     output = host.find("Nodes/Output[@Name='Output']")
     edge(output, 'OnWake', 'arrived'); edge(output, 'OnLevelSwitched', 'arrived')
-    result[entry_path] = xml(entry)
     root = ET.fromstring(result[graph_path]); project = root.find('./Skald/Project')
     ET.SubElement(project.find('Definitions'), 'Definition', File='visit_rattay.xml')
     node = ET.SubElement(project.find('Nodes'), QUEST, Name=QUEST)
@@ -68,10 +67,47 @@ def attach(graphs, graph_path, level, player_soul):
     if assets is None: assets = ET.SubElement(project, 'Assets')
     ET.SubElement(assets, 'SoulAsset', Name='travel_player', SharedSoulGuids=player_soul)
     ET.SubElement(assets, 'TriggerAreaAsset', Name='rattay_inn_area')
+    # Keep the saved State nodes at their original fully-qualified paths. The
+    # journal itself must be a child of Level, as in the shipped campaign;
+    # a Quest directly under Project has no region and says "Different region".
+    state_root = ET.fromstring(quest_graph())
+    state = state_root.find('./Skald/Quest')
+    state.tag = 'Module'
+    # Quest defaults HasteNamespace=true; Module defaults false in Skald.Core.
+    # Retain the old namespace explicitly when changing the wrapper type.
+    state.set('HasteNamespace', 'true')
+    journal_root = ET.Element('Database', Name='brambora')
+    journal = ET.SubElement(ET.SubElement(journal_root, 'Skald'), 'Quest', Name=QUEST, HasteNamespace='false')
+    journal_ports = ET.SubElement(journal, 'Ports')
+    journal_nodes = ET.SubElement(journal, 'Nodes')
+    for child in list(state):
+        if child.tag in ('QuestName', 'Objectives'):
+            state.remove(child); journal.append(child)
+    state.find('Nodes').remove(state.find("Nodes/visit_inn[@Name='journal']"))
+    state_output = state.find("Nodes/Output[@Name='Output']")
+    for child in list(state_output): state_output.remove(child)
+    outputs = [('quest_progress','wh::questmodule::QuestProgress','progress.State'),
+               ('objective_progress',TYPE,'objective.State')]
+    definitions = host.find('Definitions')
+    if definitions is None: definitions = ET.SubElement(host, 'Definitions')
+    ET.SubElement(definitions, 'Definition', File='../visit_rattay_journal.xml')
+    regional = ET.SubElement(host.find('Nodes'), QUEST, Name=QUEST)
+    level_node = project.find('Nodes/'+level)
+    for port, typ, source in outputs:
+        ET.SubElement(state.find('Ports'), 'Port', Name=port, Direction='Out', Type=typ)
+        edge(state_output, source, port)
+        ET.SubElement(host.find('Ports'), 'Port', Name=port, Direction='In', Type=typ)
+        edge(level_node, QUEST+'.'+port, port)
+        edge(regional, port, port)
+        ET.SubElement(journal_ports, 'Port', Name=port, Direction='In', Type=typ)
+    edge(ET.SubElement(journal_nodes, 'Output', Name='Output'), 'quest_progress', 'Progress')
+    edge(ET.SubElement(journal_nodes, 'visit_inn', Name='journal'), 'objective_progress', 'Progress')
+    result[entry_path] = xml(entry)
     result[graph_path] = xml(root)
-    result[parent + '/visit_rattay.xml'] = quest_graph()
+    result[parent + '/visit_rattay.xml'] = xml(state_root)
+    result[parent + '/visit_rattay_journal.xml'] = xml(journal_root)
     strings = ET.Element('Table')
-    for element in ET.fromstring(result[parent + '/visit_rattay.xml']).iter():
+    for element in journal_root.iter():
         if element.get('StringName'):
             row = ET.SubElement(strings, 'Row')
             for value in [element.get('StringName'), element.get('Text'), element.get('Text')]:
