@@ -602,3 +602,42 @@ They report `shop=-1`, `shop_entity=true`, `stock_shop=20094`, and `ready=true`:
 the stock resolves to the registered shop and the seller context exists, but
 the live keeper-to-shop association is still missing. This checkpoint preserves
 the working menu and quest completion; shop opening remains unresolved.
+
+### Owner-inventory shop storage (local v30)
+
+The confirmed v28 menu/quest checkpoint is pushed as `eadc984`. Its retail log
+resolves the shop through the stock stash (20094) and reports ready=true, but
+keeper lookup still returns -1. The native ShopModule distinguishes a scheduled
+OpenShop NPC element from ownership or seller context. Its owner-only lookup
+fallback is unavailable when goods are assigned to stashes or spawned display
+items. The shipped module explicitly diagnoses these three separate conditions.
+
+The imported merchant now uses owner-inventory storage, matching the native
+spawned-shop ownership contract already installed. The exporter no longer
+creates or links the extra shop stash. The original imported shop inventory
+preset, 22 item types and quantities are unchanged; no items are manually
+granted and no saves are edited. The existing activity can still register an
+active keeper when it runs, but an owner-inventory shop can also use the native
+owner fallback. This does not claim that the complete native daily schedule
+has been imported.
+
+Dialogue diagnostics now include the resolved owner's name and count of live
+shopStash links. The expected retail evidence is shop=20094, owner=rato_innkeeper1,
+stash_links=0, followed by the native Trade screen. A loaded older map state may
+retain its old stash relationship; the live count distinguishes that case.
+The confirmed topic menu and quest event remain unchanged. Retail acceptance
+of opening the shop, stock contents and a transaction is still pending.
+The v29 folder is an intermediate build; v30 includes the final diagnostics.
+The v30 packages were installed with retail closed after verifying and backing
+up both v28 PAKs. Installed hashes match the build. Archive contents differ only
+in the diagnostic dialogue script and destination entity/link metadata; all
+tables, the 22-type stock preset, quest state/journal, localization, scheduler
+and terrain/navigation resources are unchanged. Receipts and the previous
+retail log are under `outputs/region-travel-v30/`.
+
+The subsequent user retail test confirms that Trade now opens the shop and a
+cheese purchase succeeds. Together with the preceding test, the confirmed flow
+is Talk -> quest completion with the menu retained -> Trade -> purchase.
+This validates basic buying; it does not verify every stock entry, selling,
+restocking or save/load behavior. Haggling is not implemented yet and remains
+a separate outstanding part of the merchant integration.

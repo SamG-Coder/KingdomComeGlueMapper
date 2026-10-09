@@ -17,10 +17,13 @@ def shop_trace(event):
             f"local keeper = dc['{ROLE}']; "
             "if not keeper then return 'missing_participant' end; "
             "local shop = System.GetEntityByName('gmtravel_rattay_shop'); "
-            "local stock = System.GetEntityByName('gmtravel_rattay_shop_stock'); "
+            "local owner = shop and XGenAIModule.GetOwner(XGenAIModule.GetMyWUID(shop)); "
+            "local ownerEntity = owner and Framework.IsValidWUID(owner) and XGenAIModule.GetEntityByWUID(owner); "
+            "local stashes = shop and XGenAIModule.FindLinks(XGenAIModule.GetMyWUID(shop), 'shopStash') or {}; "
             "return tostring(Shops.GetShopDBIdByKeeper(keeper.id)) .. ' keeper=' .. tostring(keeper:GetName()) "
             ".. ' shop_entity=' .. tostring(shop ~= nil) "
-            ".. ' stock_shop=' .. tostring(stock and Shops.GetShopDBIdByLinkedEntityId(stock.id) or 'missing') "
+            ".. ' owner=' .. tostring(ownerEntity and ownerEntity.this and ownerEntity.this.name or 'missing') "
+            ".. ' stash_links=' .. tostring(#stashes) "
             ".. ' ready=' .. tostring(keeper.soul:HasScriptContext('shop_sellerReadyToSell')) end); "
             f"System.LogAlways('GLUE_RATTAY_SHOP event={event} shop=' .. tostring(result) .. ' query_ok=' .. tostring(ok))")
 
@@ -95,12 +98,13 @@ def register_world(files, graphs, graph_path, source, target, merchant, shop, id
     ET.SubElement(shop_entity, 'Properties', sShopName=shop['shop_name'], iShopId=str(shop['shop_id']), bOwnerIsSpawned='1')
     files['tables/ai/scheduler.xml'] = register_shop_activity(
         files['tables/ai/scheduler.xml'], target, npc, home, shop_entity)
-    stash = add('gmtravel_rattay_shop_stock', 'Stash', original_shop.get('Pos'))
-    # An invisible inventory holder keeps shop stock separate from worn clothes.
-    props = ET.SubElement(stash, 'Properties', object_Model='', bSaved_by_game='1')
-    ET.SubElement(props, 'Database', sGeneratedInventory='')
+    # Native owner-inventory shops can trade without an active OpenShop NPC
+    # element. Linking a separate shopStash disables that fallback, even when
+    # the owner and shop_sellerReadyToSell context resolve correctly. Keep the
+    # source stock in the shop's existing inventory_preset; do not create a
+    # physical stash until the full staffed-shop schedule is available.
     links = [(npc, home, '_|innkeeper'), (npc, home, 'owner'), (home, lean, '_use'),
-             (npc, shop_entity, 'owner'), (npc, shop_entity, 'shopKeeper'), (shop_entity, stash, 'shopStash'),
+             (npc, shop_entity, 'owner'), (npc, shop_entity, 'shopKeeper'),
              (home, shop_entity, '#OpenShop[innkeeper]'),
              (home, shop_entity, '#AddContext[innkeeper,shop_sellerReadyToSell]')]
     # Use the native spawned_shop ownership/context contract at Level scope.
@@ -128,5 +132,5 @@ def register_world(files, graphs, graph_path, source, target, merchant, shop, id
         soul=merchant['soul']['soul_id'], instance=merchant['instance'].findtext('Guid'),
         source_area=merchant['area'].get('Name'), source_activity=point.get('Name'), native_activity=helper,
         compiled_scheduler_records=4, quest_completion='dialog_started from automatic conversation entry; no area trigger',
-        shop=shop['shop_name'], role=ROLE, runtime_verified=False,
+        shop=shop['shop_name'], shop_storage='owner_inventory', role=ROLE, runtime_verified=False,
         limitations=['Native merchant brain; original daily schedule and lodging service are not converted'])
