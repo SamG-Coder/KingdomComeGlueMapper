@@ -5,7 +5,6 @@ from the installed source. Unsupported stock policies fail before installation.
 """
 import copy
 from decimal import Decimal
-import hashlib
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -14,19 +13,7 @@ import zipfile
 from campaign_dependency_adapters import SourceTables
 from campaign_sources import RetailSourceReader
 from upgrade_map import read, xml
-
-
-def native_xml(blob):
-    # Some shipped ASCII-declared tables have Windows-1252 editor comments.
-    # Discard comments only; malformed gameplay records must still fail.
-    return ET.fromstring(re.sub(rb'<!--.*?-->', b'', blob, flags=re.S))
-
-
-def unique(values, label):
-    values = list(values)
-    if len(values) != 1:
-        raise ValueError(f'Expected one {label}, found {len(values)}')
-    return values[0]
+from character_person import native_xml, unique, resolve_person
 
 
 def resolve_stock(shop, defaults, overrides):
@@ -56,9 +43,10 @@ def resolve_stock(shop, defaults, overrides):
 
 
 def resolve_merchant(source, name):
+    person = resolve_person(source, name)
     with RetailSourceReader(source) as reader:
         tables = SourceTables(source, reader)
-        soul = tables.row('rpg/soul', 'soul_name', name)
+        soul = person['soul']
         keeper = tables.row('shop/shopkeeper', 'keeper_id', soul['soul_id'])
         shop = tables.row('shop/shop', 'shop_id', keeper['shop_id'])
         stock = resolve_stock(shop, tables.get('shop/shop_type2item')['rows'], tables.get('shop/shop2item')['rows'])
@@ -66,18 +54,14 @@ def resolve_merchant(source, name):
     with zipfile.ZipFile(Path(source) / 'Data/Levels/rataje/level.pak') as archive:
         mission = read(archive, 'objects_mission0.xml')
         entities = list(ET.fromstring(mission).iter('Entity'))
-        actor = unique((e for e in entities if e.get('Name') == name and e.get('EntityClass') in ('NPC', 'NPC_Female')), 'source merchant')
+        actor = person['actor']
         work = unique((l for l in actor.findall('EntityLinks/Link') if l.get('Name', '').startswith('Work[')), 'source merchant work link')
         area = unique((e for e in entities if e.get('EntityId') == work.get('TargetId')), 'source work area')
-        instance = unique((s for s in ET.fromstring(read(archive, 'whdata_0')).findall('./SoulList/Souls/Soul')
-                           if s.findtext('Name') == name), 'source merchant soul instance')
-        if instance.findtext('SharedSoulGuid') != soul['soul_id']:
-            raise ValueError('Source merchant instance/table identity differs')
         shop_entity = unique((e for e in entities if e.get('EntityClass') == 'Shop' and e.find('Properties') is not None
                               and e.find('Properties').get('iShopId') == shop['shop_id']), 'placed source shop')
-    return dict(name=name, soul=soul, shop=shop, stock=stock, actor=copy.deepcopy(actor),
-                area=copy.deepcopy(area), instance=copy.deepcopy(instance), shop_entity=copy.deepcopy(shop_entity),
-                provenance=dict(tables=table_evidence, mission_sha256=hashlib.sha256(mission).hexdigest()))
+    person.update(shop=shop, stock=stock, area=copy.deepcopy(area), shop_entity=copy.deepcopy(shop_entity))
+    person['provenance']['tables'].update(table_evidence)
+    return person
 
 
 def shop_resources(merchant, target, namespace):

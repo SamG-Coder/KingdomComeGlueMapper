@@ -43,7 +43,7 @@ class RegionRegistrationTests(unittest.TestCase):
         graph = 'Quests/GlueTravel/GlueTravel_kcd1.xml'
         entry = 'Quests/GlueTravel/entry/kcd1_travel.xml'
         base = b'<Database><Skald><Project Name="GlueTravel_kcd1"><Definitions/><Nodes><kcd1_travel Name="kcd1_travel"/></Nodes></Project></Skald></Database>'
-        result, strings = attach({graph:base,entry:entry_graph('kcd1_travel',None)},graph,'kcd1_travel','player')
+        result, strings = attach({graph:base,entry:entry_graph('kcd1_travel',None)},graph,'kcd1_travel','player','innkeeper-soul')
         legacy = ET.fromstring(result['Quests/GlueTravel/visit_rattay.xml']).find('Skald/Module')
         original = ET.fromstring(quest_graph()).find('Skald/Quest')
         self.assertEqual(legacy.get('Name'),original.get('Name'))

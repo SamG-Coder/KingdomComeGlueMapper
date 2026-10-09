@@ -346,3 +346,105 @@ the multiple map-detail levels. Remaining reported issues are the Rattay
 innkeeper's missing Talk interaction, facing/leaning placement, and the quest's
 missing map marker. The requested completion condition is conversation with the
 innkeeper, not entering the inn polygon. These are separate follow-up work.
+
+### Innkeeper interaction follow-up (local v22, awaiting retail confirmation)
+
+The visit state now accepts a `talked` input connected to the innkeeper
+FaderDialog's native `BeforePlay` output. An Active-state guard allows completion
+only while the quest is in progress. The old area trigger, its graph asset and
+its imported polygon are removed. Entering the inn cannot complete the quest.
+The objective reads `Talk to the Rattay innkeeper.` and its active journal log
+binds `Marker` to a SoulAsset containing the original innkeeper's soul GUID.
+The persistent state names and the Level-owned journal are retained.
+
+The dialogue uses a General-priority service menu, an explicit source-person
+selection, and the non-speaking innkeeper role. Trade remains a native OpenShop
+sequence with the merchant as its response role. This adds no invented voiced
+conversation. The first genuine dialogue start is the completion event; buying
+an item is not required.
+
+The old registration had no compiled person activity. The importer now follows
+the source NPC's work-area Lean links, selects the point on the closest floor,
+then the closest point on that floor. For this person that selects the outside
+right-lean point at `2891.9773,730.18958,107.4`, with the original quaternion
+`0.84804809,0,0,-0.52991927`. Neither coordinate is a constant in the importer.
+The selected point becomes a native DetailMovementSmartObject. Two compiled
+records connect person -> SchedulerHub -> native `use` leaning activity, and
+the corresponding entity/waiting links are exported. The shipped
+`AI/world/so_leaning_right.xml` enables conversation contexts while leaning;
+this replaces an unscheduled idle actor. Existing saves may retain an actor's
+current pose, so the activity must also be checked after loading an existing
+visit, not just on a first arrival.
+
+Person import is shared through `character_person.py` (source identity, soul,
+Storm and world registration), `character_person_appearance.py` (male/female
+appearance and fixed outfit) and `character_person_activity.py` (authored lean
+point conversion). The merchant adapter adds its shop and dialogue. Callers
+choose source person, namespace, native brain and role; the generic helper
+does not select Rattay or a quest. The old merchant appearance import remains
+a compatibility alias. Existing soul, instance, outfit and asset identities
+are retained.
+
+The fixed outfit now keeps source arms/hands underneath sleeves. Previously
+the male arm clothing element set KeepBodyLayer=false, hiding bare forearms
+along with covered upper arms. Geometry and materials are unchanged. A real
+female import (`aus_bartender`, staged only, not installed) also exposed a small
+uniform internal/render position offset in a source garment. The helper can
+normalize a uniform offset under 1 cm in the internal buffer while preserving
+every render position. Nonuniform/large discrepancies still fail; this does not
+relax the existing skin upgrader's consistency checks.
+
+Validation: 270 tests pass. All 13 global and six destination-level table files
+pass the official GeneratedDatabase reader, including scheduler.xml. The female
+helper build's four tables also pass. Compared with installed v20, six common
+archive entries change: four quest/dialogue graphs, CharacterComponent and the
+mirrored destination scheduler. Trosky level, KCD1 terrain and navigation archive
+contents are unchanged. The level scheduler matches its common-archive mirror.
+The generated activity references resolve to registered entities.
+
+Installed common PAK SHA256:
+`5D341BE4F86C6F11F2F18F35B614D137CC993D622BE93118B1ABC30EF779FBAA`.
+The game was closed for installation. The common PAK, destination level PAK and
+English localization were backed up, replaced and hash-verified; no save files
+were edited. Local receipts are in `outputs/region-travel-v22/installed-v22.json`
+and `validation-summary.json`.
+
+Retail acceptance is still pending: approaching the inn must leave the quest
+active; its marker should follow the innkeeper; Talk must open his menu and
+complete the quest; Trade must open the original stock; arms should remain
+visible up close; and the actor should use the authored outside lean. Source
+daily scheduling and lodging remain outside this interaction fix.
+
+### v22 retail entry crash and v23 scheduler repair
+
+The user's next retail test crashed while entering KCD1. The crash dump records
+a null read at address 0x20 in WHGame.dll (RVA 0x644f5d). Unwinding the exception
+stack and matching PE RTTI identifies C_SchedulerSubbrain and C_AIBrainMultiSubb
+in the calling chain. Evidence is retained locally under
+`outputs/innkeeper-crash-v22/`.
+
+The imported leaning target existed in objects_mission0.xml, but its compiled
+scheduler record was missing. Native leaning objects have an empty C_SmartHub
+record even when they have no outgoing activity links. The earlier two-record
+NPC -> hub -> lean export therefore left the terminal unresolved inside the
+scheduler. XML deserialization and entity-reference checks did not detect this.
+
+The importer now copies and remaps that native terminal record, exporting three
+records for the person/activity. It rejects missing or duplicate compiled
+scheduler identities and checks every activity destination against scheduler
+records. The regression test removes the leaf while retaining the entity and
+requires validation to fail.
+
+The full v23 build and all 270 tests pass. Its seven destination scheduler
+records have no unresolved activity targets, and the table passes the official
+reader. An archive comparison against v22 confirms that only scheduler.xml and
+its common-archive mirror change. Both packages were backed up and replaced,
+with installed hashes recorded in `outputs/region-travel-v23/installed-v23.json`.
+Retail entry, Talk and quest completion still require a new user test; the
+offline results do not establish that the crash is resolved in-game.
+
+The subsequent user test reached KCD1 successfully and reports that the
+remaining innkeeper issue is the missing Talk option: only Rob appears. The
+retail log also records destination arrival, horse placement and a normal
+ExitGame shutdown. This confirms entry after the scheduler repair, but does
+not confirm dialogue, trading or conversation-based quest completion.

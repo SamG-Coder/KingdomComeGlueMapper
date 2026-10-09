@@ -29,7 +29,7 @@ from region_travel_entry import register_entry
 from region_travel_map import resources as map_resources
 from region_travel_locations import resources as location_resources, merge_missing_strings
 from region_travel_services import resolve_merchant, shop_resources
-from region_travel_merchant_character import build_appearance
+from character_person_appearance import build_appearance
 from region_travel_merchant import actor_resources, register_world
 from region_travel_visit import attach as attach_visit
 from region_travel_tables import managed_patches
@@ -317,9 +317,9 @@ def build(source, target, world, output):
                     replacements,entry_graphs,entry_report=register_entry(
                         replacements,blob,graph,entry_source,entry_scripts,LEVEL,LEVEL_ID,guid)
                 graphs.update(entry_graphs)
-                graphs,visit_strings=attach_visit(graphs,graph,LEVEL,player.findtext('SharedSoulGuid'))
+                graphs,visit_strings=attach_visit(graphs,graph,LEVEL,player.findtext('SharedSoulGuid'),merchant['soul']['soul_id'])
                 replacements,graphs,merchant_world_report=register_world(
-                    replacements,graphs,graph,source,merchant,shop_report,guid)
+                    replacements,graphs,graph,source,target,merchant,shop_report,guid)
                 replacements,location_files,location_strings,location_report=location_resources(
                     source,target,replacements,LEVEL_ID)
                 dialogue_files.update(location_files)

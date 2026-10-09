@@ -1,4 +1,4 @@
-"""Native persistent arrival objective, completed by the imported inn polygon."""
+"""Native persistent arrival objective, completed by speaking to its person."""
 import xml.etree.ElementTree as ET
 from upgrade_map import xml
 
@@ -15,35 +15,35 @@ def quest_graph():
     quest = ET.SubElement(ET.SubElement(root, 'Skald'), 'Quest', Name=QUEST)
     ports = ET.SubElement(quest, 'Ports')
     ET.SubElement(ports, 'Port', Name='arrive', Direction='In', Type='trigger')
+    ET.SubElement(ports, 'Port', Name='talked', Direction='In', Type='trigger')
     nodes = ET.SubElement(quest, 'Nodes')
     progress = ET.SubElement(nodes, 'State', Name='progress', TypeT='wh::questmodule::QuestProgress')
     ET.SubElement(progress, 'Constant', Name='DefaultValue', Value='None')
     first = ET.SubElement(nodes, 'If', Name='first_arrival')
     edge(first, 'arrive', 'Exec'); edge(first, 'progress.None', 'Condition')
     edge(progress, 'first_arrival.True', 'SetActive')
-    edge(progress, 'visit.OnEnter', 'SetDone')
+    spoken = ET.SubElement(nodes, 'If', Name='spoke_to_innkeeper')
+    edge(spoken, 'talked', 'Exec'); edge(spoken, 'progress.Active', 'Condition')
+    edge(progress, 'spoke_to_innkeeper.True', 'SetDone')
     edge(ET.SubElement(nodes, 'Output', Name='Output'), 'progress.State', 'Progress')
     state = ET.SubElement(nodes, 'State', Name='objective', TypeT=TYPE)
     ET.SubElement(state, 'Constant', Name='DefaultValue', Value='None')
     edge(state, 'progress.OnActive', 'SetActive'); edge(state, 'progress.OnDone', 'SetDone')
-    visit = ET.SubElement(nodes, 'AreaTrigger', Name='visit')
-    ET.SubElement(visit, 'Asset', Name='Souls', Alias='travel_player')
-    ET.SubElement(visit, 'Asset', Name='Areas', Alias='rattay_inn_area')
-    edge(visit, 'progress.Active', 'IsActive')
     edge(ET.SubElement(nodes, 'visit_inn', Name='journal'), 'objective.State', 'Progress')
     ET.SubElement(quest, 'QuestName', StringName='gmtravel_visit_title', Text='A visit to Rattay')
     obj = ET.SubElement(ET.SubElement(quest, 'Objectives'), 'Objective', Name='visit_inn', TypeT=TYPE)
-    ET.SubElement(obj, 'LocalizedName', StringName='gmtravel_visit_objective', Text='Visit the Rattay tavern.')
+    ET.SubElement(obj, 'LocalizedName', StringName='gmtravel_visit_objective', Text='Talk to the Rattay innkeeper.')
     logs = ET.SubElement(obj, 'Logs')
     for value, kind, text in [('None', 'None', ''), ('Active', 'Started',
-        'Visit the inn outside Rattay\u2019s upper gate.'), ('Done', 'Completed', 'I visited the Rattay tavern.')]:
+        'Talk to the innkeeper at the inn outside Rattay\u2019s upper gate.'), ('Done', 'Completed', 'I spoke to the Rattay innkeeper.')]:
         log = ET.SubElement(logs, 'EnumLog', Name=value, Type=kind)
+        if value == 'Active': log.set('Marker', 'rattay_innkeeper')
         if text:
             ET.SubElement(log, 'Log', StringName='gmtravel_visit_' + value.lower(), Text=text)
     return xml(root)
 
 
-def attach(graphs, graph_path, level, player_soul):
+def attach(graphs, graph_path, level, player_soul, target_soul):
     result = dict(graphs)
     parent = graph_path.rsplit('/', 1)[0]
     entry_path = parent + '/entry/' + level + '.xml'
@@ -56,6 +56,7 @@ def attach(graphs, graph_path, level, player_soul):
     ET.SubElement(project.find('Definitions'), 'Definition', File='visit_rattay.xml')
     node = ET.SubElement(project.find('Nodes'), QUEST, Name=QUEST)
     edge(node, level + '.arrived', 'arrive')
+    edge(node, 'rattay_innkeeper.BeforePlay', 'talked')
     types = ET.SubElement(project, 'Types')
     typ = ET.SubElement(types, 'Type', TypeName=TYPE)
     logs = ET.SubElement(project, 'ObjectiveValueTypes')
@@ -66,7 +67,7 @@ def attach(graphs, graph_path, level, player_soul):
     assets = project.find('Assets')
     if assets is None: assets = ET.SubElement(project, 'Assets')
     ET.SubElement(assets, 'SoulAsset', Name='travel_player', SharedSoulGuids=player_soul)
-    ET.SubElement(assets, 'TriggerAreaAsset', Name='rattay_inn_area')
+    ET.SubElement(assets, 'SoulAsset', Name='rattay_innkeeper', SharedSoulGuids=target_soul)
     # Keep the saved State nodes at their original fully-qualified paths. The
     # journal itself must be a child of Level, as in the shipped campaign;
     # a Quest directly under Project has no region and says "Different region".
