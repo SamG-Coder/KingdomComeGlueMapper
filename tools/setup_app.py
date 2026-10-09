@@ -20,9 +20,12 @@ def self_test(destination):
     runtime = runtime_directory()
     for name in ('campaign_menu.lua', 'retail_diagnostics.lua'):
         if not (runtime / name).is_file(): raise RuntimeError('Missing bundled runtime: ' + name)
+    import region_travel_companions
+    hook = Path(region_travel_companions.__file__).with_name('region_travel_horse_recovery.lua')
+    if b'GlueTravelHorseRecovery' not in hook.read_bytes(): raise RuntimeError('Missing bundled horse arrival hook')
     result = {'version': APP_VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
               'tk': tkinter.Tcl().eval('info patchlevel'), 'converter_modules': len(CONVERTERS),
-              'runtime_files': 2, 'status': 'passed'}
+              'runtime_files': 3, 'status': 'passed'}
     Path(destination).write_text(json.dumps(result, indent=2), encoding='utf-8')
 
 
@@ -50,7 +53,7 @@ def launch_gui():
             tk.Label(header, text=f'SETUP  {APP_VERSION}   /   KCD1 world in the KCD2 engine', bg='#172c4b', fg='#bbd0ef', font=('Segoe UI', 11)).pack(anchor='w', pady=(4, 0))
             body = ttk.Frame(root, padding=(24, 14)); body.pack(fill='both', expand=True)
             ttk.Label(body, text='Experimental world import • Requires your own installed copies of both games.', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
-            ttk.Label(body, text='Installs the map and Play KDC1 menu entry. Quests, the original intro and campaign save validation are still unfinished.').pack(anchor='w', pady=(3, 14))
+            ttk.Label(body, text='Import the world, or build region travel using an installed world. Quests and full companion transfer remain unfinished.').pack(anchor='w', pady=(3, 14))
             self.kcd1, self.kcd2 = tk.StringVar(), tk.StringVar()
             self.workspace = tk.StringVar(value=str(Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'KingdomComeGlueMapper/builds'))
             self.package = tk.StringVar()
@@ -64,7 +67,7 @@ def launch_gui():
                 button = ttk.Button(form, text='Browse…', command=lambda v=variable: self.browse(v)); button.grid(row=row, column=2)
                 self.controls.extend((entry, button))
             options = ttk.Frame(body); options.pack(fill='x', pady=(10, 4))
-            for label, value in (('Build and install', 'build_install'), ('Build package only', 'build_only'), ('Install existing package', 'install')):
+            for label, value in (('Build and install', 'build_install'), ('Build package only', 'build_only'), ('Install existing package', 'install'), ('Build region travel', 'build_travel')):
                 radio = ttk.Radiobutton(options, text=label, variable=self.action, value=value, command=self.mode_changed)
                 radio.pack(side='left', padx=(0, 22)); self.controls.append(radio)
             self.package_row = ttk.Frame(body); self.package_row.pack(fill='x', pady=(4, 4))
@@ -107,7 +110,7 @@ def launch_gui():
             self.log.configure(state='disabled')
 
         def mode_changed(self):
-            labels = {'build_install': 'Build and install', 'build_only': 'Build package', 'install': 'Install package'}
+            labels = {'build_install': 'Build and install', 'build_only': 'Build package', 'install': 'Install package', 'build_travel': 'Build region travel'}
             self.start.configure(text=labels[self.action.get()])
             state = 'normal' if self.action.get() == 'install' and not self.busy else 'disabled'
             self.package_entry.configure(state=state); self.package_browse.configure(state=state)

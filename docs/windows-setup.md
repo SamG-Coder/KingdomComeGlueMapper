@@ -9,6 +9,13 @@ This is an **experimental world-import release**, tested against retail KCD2
 It does not yet implement original quests, the KCD1 intro, complete gameplay,
 or validated campaign save/load. Existing KCD1 saves are not converted.
 
+**Alpha.2 also includes Build region travel.** After installing the base world,
+this option builds an overlay for travel from Trosky with an existing KCD2
+character. It does not automatically install the overlay: follow the
+[region travel installation steps](region-travel.md#building-from-the-windows-setup-release).
+Horse calling, the corrected return-coachman Talk prompt and repeated trips
+remain under investigation. The base-world New Game route below is separate.
+
 ## Install
 
 1. Install both legal copies of the games through Steam.
@@ -39,6 +46,12 @@ selected folders must be writable by the current Windows user.
 - **Install existing package** verifies a previously generated campaign bundle
   and installs it without repeating conversion. Both game locations are still
   checked. A loader-only probe is not accepted as a campaign package.
+- **Build region travel** uses the installed static converted world and both
+  retail games to create a separate travel overlay, leaving installed mods alone.
+  Use **Open output folder** to find `region-travel/gluemappertravel` and its
+  build receipt. Close the game and install that folder manually as documented
+  in the region travel guide. This mode checks space against source archive
+  sizes rather than requiring another full 60 GiB world conversion.
 - **Cancel after current stage** waits for a conversion stage to finish. During
   file copying, cancellation stops before replacement of the installed mod.
   The saved build output and log remain available for diagnosis.
@@ -88,7 +101,7 @@ On Windows x64 with Python 3.14:
 ```powershell
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements-setup.txt
-.venv/Scripts/python.exe -m pip install -r requirements-npc-effects.txt
+.venv/Scripts/python.exe -m pip install -r requirements-test.txt
 .venv/Scripts/python.exe -m unittest discover -s tests -v
 .venv/Scripts/python.exe tools/build_setup_exe.py
 ```
@@ -119,5 +132,16 @@ runtime. Conversion remains subject to the limitations in the
   the game drive lacked staging space. Package verification is not an in-game
   acceptance test. Earlier retail world/menu validation is recorded separately.
 
-The full test suite also uses `requirements-npc-effects.txt`; those dependencies
-are excluded from this world-setup executable.
+The full test suite uses `requirements-test.txt`, including Lupa for executable
+Lua lifecycle checks. Lupa and Pillow are excluded from the setup executable;
+NumPy is included for road geometry and cart grounding.
+
+## Release validation: 0.2.0-alpha.2
+
+The travel implementation and its runtime limitations are recorded in the
+[region travel guide](region-travel.md). The EXE now bundles the travel builder
+and horse arrival Lua resource. Its self-test imports all ten converter modules,
+starts Tcl and checks all three Lua resources. This is packaging validation,
+not proof of a completed gameplay round trip. The alpha.1 conversion results
+above describe that historical build and are not claimed as a new full-world
+conversion test of alpha.2.

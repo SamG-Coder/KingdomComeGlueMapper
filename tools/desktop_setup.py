@@ -17,11 +17,12 @@ import uuid
 from setup_campaign import MOD_ID, RECEIPT, build_campaign, validate_games, verify_package
 import setup_progress
 
-APP_VERSION = '0.2.0-alpha.1'
+APP_VERSION = '0.2.0-alpha.2'
 GIB = 1024 ** 3
 CONVERTERS = ('upgrade_map', 'build_vegetation_probe', 'build_water_probe',
               'build_buildings_probe', 'build_water_surface_probe', 'complete_instances',
-              'build_entity_probe', 'build_landscape_surface_probe', 'repair_tree_materials')
+              'build_entity_probe', 'build_landscape_surface_probe', 'repair_tree_materials',
+              'region_travel')
 
 
 class Cancelled(Exception):
@@ -48,12 +49,23 @@ def preflight(config):
     if version != '1.5.6':
         raise ValueError(f'This experimental release supports KCD2 1.5.6; found {version}.')
     action = config['action']
-    if action not in ('build_install', 'build_only', 'install'):
+    if action not in ('build_install', 'build_only', 'install', 'build_travel'):
         raise ValueError('Unknown setup operation')
     workspace = Path(config['workspace']).resolve()
     for game in (source, target):
         if workspace.is_relative_to(game) or game.is_relative_to(workspace):
             raise ValueError('Choose a build folder outside both game installations.')
+    if action == 'build_travel':
+        world = travel_world(config)
+        for name in ('level.pak', 'terrain.pak'):
+            if not (world / name).is_file():
+                raise ValueError('Region travel needs an installed converted world. Build and install the base world first: ' + str(world))
+        needed = sum(p.stat().st_size for p in world.glob('*.pak'))
+        needed += (target / 'Data/Levels/trosecko/level.pak').stat().st_size
+        needed += (source / 'Data/Levels/rataje/recast.pak').stat().st_size + GIB
+        if free_space(workspace) < needed:
+            raise ValueError(f'Region travel build needs at least {needed / GIB:.1f} GiB free.')
+        return f'KCD2 {version}. Build region travel from {world}. Output requires manual installation; existing mods stay unchanged.'
     if action != 'build_only':
         if game_running(): raise ValueError('Close Kingdom Come before installing the mod.')
         order = target / 'Mods/mod_order.txt'
@@ -78,6 +90,10 @@ def preflight(config):
         if free_space(target) < needed:
             raise ValueError(f'KCD2 drive needs {needed / GIB:.1f} GiB free for staging; {free_space(target) / GIB:.1f} GiB available. Existing installs are backed up.')
     return f'KCD2 {version}. Build drive: {free_space(workspace) / GIB:.1f} GiB free. Mod destination: {target / "Mods" / MOD_ID}'
+
+
+def travel_world(config):
+    return Path(config['kcd2']).resolve() / 'Mods' / MOD_ID / 'Data/Levels/kcd1_rataje'
 
 
 def conversion_plan(library, build):
@@ -191,6 +207,17 @@ def worker(config_path):
         events.emit('log', message=preflight(config))
         os.chdir(job)
         with redirect_stdout(output), redirect_stderr(output):
+            if config['action'] == 'build_travel':
+                from region_travel import build
+                if cancel(): raise Cancelled('Cancelled before building region travel')
+                events.emit('stage', index=0, total=1, label='Build region travel, coachman and road arrivals')
+                events.emit('log', message='Reading both games and the installed converted world. Existing mods are not modified.')
+                destination = job / 'region-travel'
+                build(config['kcd1'], config['kcd2'], travel_world(config), destination)
+                if cancel(): raise Cancelled('Travel build retained; cancellation requested before completion')
+                events.emit('done', message='Travel package built. Close the game, back up any existing gluemappertravel folder, then copy the generated gluemappertravel folder into KCD2/Mods. Keep the base mod installed.',
+                            package=str(destination / 'gluemappertravel'))
+                return 0
             if config['action'] != 'install':
                 build = job / 'conversion'
                 (build / 'Data').mkdir(parents=True)

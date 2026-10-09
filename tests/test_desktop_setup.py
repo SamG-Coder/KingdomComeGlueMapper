@@ -9,7 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from game_paths import GameLibrary
 from steam_installations import discover, read_vdf
-from desktop_setup import Cancelled, conversion_plan, install_transaction, preflight
+from desktop_setup import Cancelled, conversion_plan, install_transaction, preflight, worker
 from setup_campaign import MOD_ID, RECEIPT, verify_package
 
 
@@ -105,6 +105,30 @@ class DesktopSetupTests(unittest.TestCase):
     def test_low_space_is_reported_before_build(self, *_):
         config = dict(kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), workspace=str(self.root / 'work'), action='build_only')
         with self.assertRaisesRegex(ValueError, '60.0 GiB'): preflight(config)
+
+    @patch('desktop_setup.validate_games', return_value='1.5.6')
+    @patch('desktop_setup.free_space', return_value=5 * 1024 ** 3)
+    def test_travel_preflight_requires_world_but_not_idle_game_or_owned_base(self, *_):
+        config = dict(kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), workspace=str(self.root / 'work'), action='build_travel')
+        with self.assertRaisesRegex(ValueError, 'installed converted world'): preflight(config)
+        world = self.root / 'b/Mods' / MOD_ID / 'Data/Levels/kcd1_rataje'
+        world.mkdir(parents=True)
+        for path in (world / 'level.pak', world / 'terrain.pak', self.root / 'a/Data/Levels/rataje/recast.pak', self.root / 'b/Data/Levels/trosecko/level.pak'):
+            path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')
+        with patch('desktop_setup.game_running', side_effect=AssertionError('Build must not require game shutdown')):
+            self.assertIn('manual installation', preflight(config))
+
+    @patch('desktop_setup.preflight', return_value='ready')
+    def test_travel_worker_builds_overlay_without_campaign_or_install(self, *_):
+        config = self.root / 'config.json'
+        config.write_text(json.dumps(dict(kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), workspace=str(self.root), action='build_travel')))
+        with patch('region_travel.build') as build, patch('desktop_setup.install_transaction') as install, patch('desktop_setup.build_campaign') as campaign:
+            self.assertEqual(worker(config), 0)
+            build.assert_called_once_with(str(self.root / 'a'), str(self.root / 'b'), (self.root / 'b/Mods' / MOD_ID / 'Data/Levels/kcd1_rataje').resolve(), self.root.resolve() / 'region-travel')
+            install.assert_not_called(); campaign.assert_not_called()
+        events = [json.loads(line) for line in (self.root / 'events.jsonl').read_text().splitlines()]
+        self.assertEqual(events[-1]['kind'], 'done')
+        self.assertIn('copy the generated', events[-1]['message'])
 
 
 if __name__ == '__main__': unittest.main()
