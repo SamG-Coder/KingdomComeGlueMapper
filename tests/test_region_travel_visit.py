@@ -44,16 +44,28 @@ class VisitDialogueTests(unittest.TestCase):
         root = ET.fromstring(dialogue('source-innkeeper'))
         body = root.find('Skald/FaderDialog/Dialogue')
         self.assertEqual(body.get('NonSpeakerRoles'), ROLE)
+        # Two explicit topics, without an implicit farewell or a directly
+        # exposed OpenShop action that retail executes without user selection.
+        self.assertEqual(body.get('AllowFarewell'), 'false')
         self.assertEqual(body.find('Decision').get('Priority'), 'General')
         self.assertEqual(body.find(f"SelectedSouls/SelectedSoul[@Role='{ROLE}']").get('Soul'), 'source-innkeeper')
         trade = body.find(".//Sequence[@Name='trade']")
-        self.assertEqual(trade.get('Type'), 'OpenShop')
-        self.assertEqual(trade.get('EndType'), 'EndDialogue')
+        self.assertEqual(trade.get('Type'), 'Shop')
+        self.assertEqual(trade.get('EndType'), 'Decision')
         self.assertEqual(trade.find('Elements/Response').get('Role'), 'HENRY')
-        self.assertIsNone(trade.find('Decision'))
+        action = trade.find('Decision/Sequences/Sequence')
+        self.assertEqual(action.get('Type'), 'OpenShop')
+        self.assertEqual(action.get('EndType'), 'EndDialogue')
+        self.assertEqual(action.find('Elements/Response').get('Role'), ROLE)
         self.assertIn('trade_selected', trade.get('ExitScript'))
         # A SelectedSoul alone cannot make Henry a runtime participant.
-        self.assertEqual({r.get('Role') for r in body.iter('Response')}, {'HENRY'})
+        self.assertEqual({r.get('Role') for r in body.iter('Response')}, {'HENRY', ROLE})
+        menu = body.find('.//Decision[@Name="services"]')
+        self.assertEqual(menu.get('Autoselect'), 'false')
+        self.assertEqual([s.get('Name') for s in menu.findall('Sequences/Sequence')], ['trade', 'leave'])
+        leave = menu.find('Sequences/Sequence[@Name="leave"]')
+        self.assertEqual(leave.find('UiPrompt').get('StringName'), 'ui_end_topic')
+        self.assertEqual(leave.get('EndType'), 'EndDialogue')
 
     def test_opening_talk_emits_completion_before_any_shop_choice(self):
         root = ET.fromstring(dialogue('source-innkeeper'))
@@ -66,7 +78,8 @@ class VisitDialogueTests(unittest.TestCase):
         self.assertIsNone(seqs[0].get('EntryCondition'))  # Also works on a second Talk.
         self.assertEqual(seqs[0].get('EndType'), 'Decision')
         self.assertEqual(seqs[0].find('Triggers/Port').get('Name'), 'dialog_started')
-        self.assertIsNotNone(seqs[0].find('Decision/Sequences/Sequence[@Type="OpenShop"]'))
+        self.assertIsNotNone(seqs[0].find('Decision/Sequences/Sequence[@Type="Shop"]'))
+        self.assertIsNone(seqs[0].find('Decision/Sequences/Sequence[@Type="OpenShop"]'))
         self.assertIsNone(seqs[0].find('Decision/Sequences/Sequence/Triggers'))
 
 

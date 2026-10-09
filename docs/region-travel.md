@@ -519,3 +519,86 @@ log records both `talk_started` and `trade_selected` four times, each with
 `shop=-1 query_ok=true`. Thus the action is executing, but the native shop
 lookup cannot resolve a shop for the dialogue participant. Shop registration
 and the menu behavior remain unresolved at this checkpoint.
+
+### Staffed shop activity and explicit services menu (local v26)
+
+The v25 log proves the silent conversation entry and shop action both execute,
+but the native keeper lookup returns -1. Comparing the native tavern scheduler
+reveals that owner/shopKeeper links are only part of merchant registration:
+its work hub also has `ElementInitializerOpenShop` and
+`ElementInitializerAddContext Context="shop_sellerReadyToSell"` for the
+innkeeper activity role. The previous imported leaning hub had neither.
+
+The reusable `character_person_shop` adapter now copies these two initializers
+and the empty shop terminal from the installed native scheduler, remaps the
+shop target and supplies the occupation role on the person's incoming work
+activity. The existing lean activity and other scheduler records remain intact.
+Compiled activity/effect links live in scheduler.xml; waitinglinks.xml retains
+the runtime owner, keeper and storage relationships. Both scheduler copies in
+the level/common packages are kept identical.
+
+Farewell is enabled again. The former single-action services decision logged
+trade_selected immediately after Talk rather than showing a choice. Enabling
+the ordinary End dialog alternative keeps the intended Trade/End dialog menu.
+The confirmed conversation-entry quest event and persistent state are unchanged.
+
+All 272 tests pass. The eight-record scheduler passes target validation and the
+official GeneratedDatabase.dll reader. The archive comparison limits changes
+to the innkeeper dialogue, entity/link metadata and scheduler plus its mirror.
+The v25 retail log and v26 validation/build receipts are retained under
+`outputs/region-travel-v26/`. Opening the shop and its stock still need retail
+confirmation; the next event log should resolve shop 20094 rather than -1.
+
+With retail closed, both changed packages were backed up and replaced. Their
+installed hashes match the v26 build (`installed-v26.json`). The pre-install
+level PAK had older ZIP metadata but byte-identical entries to the v25 rebuild;
+entry hashes were checked before replacement. The v25 quest-completion checkpoint
+is committed and pushed as `0e7d211`; v26 remains a local retail-test candidate.
+
+### Explicit topic menu and live shop-owner binding (local v28)
+
+The next user test confirms that v26 still exits on both the first and later
+Talks. Quest completion works. The retail log again pairs talk_started with
+trade_selected and reports shop=-1, so enabling AllowFarewell did not restore
+the menu and the scheduler additions did not resolve the keeper lookup.
+
+The dialogue now has an explicitly non-autoselected services decision with two
+real player topics: Trade (Type=Shop) and End dialog. OpenShop is a merchant
+action nested exclusively under Trade, following the native shop dialogue
+separation between a selectable topic and a terminal action. The silent entry
+still emits dialog_started and continues to services. Only choosing End dialog
+or the shop action reaches EndDialogue. Automatic farewell is disabled to avoid
+an additional implicit option; the explicit exit uses native ui_end_topic.
+
+The reusable shop adapter also follows the shipped
+`random_events/events_common/spawned_shop.xml` contract. A Level-owned state is
+activated by OnWake/OnLevelSwitched, feeding SetOwner and SetEntityContext.
+The ShopAsset is bound through an asset link on the destination LevelHolder;
+the SoulAsset resolves the imported person's original shared soul identity.
+The placed shop has bOwnerIsSpawned=1 as in native event-merchant shops. These
+bindings do not depend on the visit quest and do not reset stock or inventory.
+
+Event-only diagnostics distinguish talk_started, trade_selected, open_shop and
+leave_selected, and report the keeper name, shop entity presence, stock-linked
+shop ID and seller context. Shop correctness is still pending retail evidence:
+Talk must leave a menu open, End dialog must leave without attempting to trade,
+and only selecting Trade should log the handoff and open the shop.
+
+All 273 tests pass. Earlier v27/v27b build folders are intermediate outputs and
+were not installed; v28 is the final test candidate for this change.
+
+With retail closed, the installed v26 package hashes were checked, both changed
+PAKs were backed up, and v28 was installed with matching source/destination
+hashes. The comparison against v26 contains only two dialogue/level graphs and
+the destination entity/link metadata. Scheduler, visit quest, localization,
+terrain, navigation and Trosky resources are unchanged. The install receipt and
+validation summary are under `outputs/region-travel-v28/`; retail menu and shop
+acceptance remain pending.
+
+The subsequent retail test confirms that Talk now leaves the menu open and
+completes the visit quest. Trade is visible, but selecting it closes without a
+shop. Logs distinguish the selected Trade and OpenShop actions from End dialog.
+They report `shop=-1`, `shop_entity=true`, `stock_shop=20094`, and `ready=true`:
+the stock resolves to the registered shop and the seller context exists, but
+the live keeper-to-shop association is still missing. This checkpoint preserves
+the working menu and quest completion; shop opening remains unresolved.
