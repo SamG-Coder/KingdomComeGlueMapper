@@ -356,7 +356,7 @@ def build(source, target, world, output):
                     if n.lower().startswith('tables/'):
                         z.writestr(f'Mods/{MOD}/Data/Levels/{level}/{n}',read(levelpak,n))
     manifest=ET.Element('kcd_mod');info=ET.SubElement(manifest,'info')
-    for k,v in {'name':'KDC1 Region Travel','modid':MOD,'author':'SamG-Coder','version':'0.2.0-alpha.2',
+    for k,v in {'name':'KCD1 Region Travel','modid':MOD,'author':'SamG-Coder','version':'0.2.0-alpha.3',
                 'description':'Experimental native travel between Trosky and the imported KDC1 map.'}.items():ET.SubElement(info,k).text=v
     (package/'mod.manifest').write_bytes(xml(manifest))
     localization=package/'Localization';localization.mkdir()

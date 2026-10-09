@@ -17,7 +17,7 @@ import uuid
 from setup_campaign import MOD_ID, RECEIPT, build_campaign, validate_games, verify_package
 import setup_progress
 
-APP_VERSION = '0.2.0-alpha.2'
+APP_VERSION = '0.2.0-alpha.3'
 GIB = 1024 ** 3
 CONVERTERS = ('upgrade_map', 'build_vegetation_probe', 'build_water_probe',
               'build_buildings_probe', 'build_water_surface_probe', 'complete_instances',

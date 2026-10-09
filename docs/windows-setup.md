@@ -145,3 +145,29 @@ starts Tcl and checks all three Lua resources. This is packaging validation,
 not proof of a completed gameplay round trip. The alpha.1 conversion results
 above describe that historical build and are not claimed as a new full-world
 conversion test of alpha.2.
+
+## Release scope: 0.2.0-alpha.3
+
+This release includes the registered KCD1 region map, location icons and detail
+layers, plus the test quest **A visit to Rattay**. The quest directs the player
+to the inn outside Rattay's upper gate and completes when talking to its imported
+innkeeper. The dialogue remains open and its Trade option opens the native shop
+with stock imported from KCD1.
+
+The user confirmed the map and multiple detail levels, conversation-based quest
+completion, and successful buying in retail. The latest recording shows a beer
+purchase. Haggling is not implemented; selling, restocking and save/load coverage
+are not established by these checks. The complete KCD1 campaign remains unfinished.
+
+Use **Build region travel** to rebuild the overlay with these changes, then follow
+the [manual overlay installation steps](region-travel.md#building-from-the-windows-setup-release).
+The setup still requires both installed games and an installed converted base world.
+Generated game assets are not included in the release.
+
+Release checks: all 273 automated tests passed. The frozen EXE self-test passed
+for ten converter modules, Tcl startup and three Lua resources. Its actual
+**Build region travel** worker built the updated overlay from both installed
+games and the existing converted world in 34 seconds. All nine output file
+hashes and PAK CRC checks passed. This release check did not install or replay
+the newly generated overlay; the retail confirmations above are separate user
+tests of the working implementation.

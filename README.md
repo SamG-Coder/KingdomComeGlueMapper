@@ -25,13 +25,17 @@ and installs the retail mod with progress bars and a saved live log. No Python
 or modding-tools installation is required to run the EXE. See the
 [Windows setup guide](docs/windows-setup.md) for disk requirements and limitations.
 
-**New in v0.2.0-alpha.2:** [experimental region travel](docs/region-travel.md)
-adds **Travel to KDC1** to the Trosky coachman's dialogue, using your existing
-KCD2 character. The setup now offers **Build region travel** after the base world
-is installed; the resulting overlay is installed separately. The current build
-includes road-derived horse arrival positions and return-coachman registration.
-Horse calling, the corrected return Talk prompt and repeat trips still need
-verification. This does not complete the KCD1 campaign.
+**New in v0.2.0-alpha.3:** [experimental region travel](docs/region-travel.md)
+now includes the KCD1 map, location icons and detail layers, plus the test quest
+**A visit to Rattay**. Talk to the imported innkeeper outside Rattay's upper gate
+to complete the quest, then choose **Trade** to buy from his shop. Map display,
+quest completion and buying have been confirmed by the user in retail;
+**haggling is not implemented yet**.
+
+Travel from the Trosky coachman using your existing KCD2 character. Use
+**Build region travel** after installing the converted base world, then install
+the resulting overlay separately. Horse calling, repeat trips and full companion
+persistence still need further verification. This does not complete the KCD1 campaign.
 
 Work toward a retail **Play KDC1** mod has started. The [retail setup](docs/retail-setup.md)
 now audits the opening quest from installed KCD1 archives and builds a package
