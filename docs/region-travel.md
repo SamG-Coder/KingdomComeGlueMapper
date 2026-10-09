@@ -249,3 +249,52 @@ If `Mods/mod_order.txt` exists, retain its entries and include both mod IDs.
 Restart retail KCD2 and use an existing Trosky character and the coachman route.
 Do not select Play KDC1/New Game for this travel test. Save backups are advised
 for this experimental release. No generated game assets are distributed.
+
+## Rattay table-loading regression (local v19)
+
+The new upper-gate innkeeper package originally failed retail startup. The
+official modding tools' `GeneratedDatabase.dll` reader reproduced two errors:
+
+- Stock `PresetItem` entries had GUIDs but lacked the required native item `Name`.
+- The generated outfit `Armor` entry lacked eleven required fields, including
+  defence, noise, visibility, social class and `IconId`.
+
+Stock entries now carry the verified native item name and GUID. The outfit uses
+a complete native coat record with its own imported identity and clothing
+component; its inherited combat/appearance statistics are native coat values,
+not a conversion of the combined KCD1 garments' statistics. All table additions
+are collected into one `__gluemappertravel` patch per table, retaining both coach
+and merchant records. Renaming patches alone did not fix the startup failure.
+
+`region_travel_tables.py` rejects duplicate registration IDs and these missing
+required attributes before packaging. For a deeper offline serialization check
+against locally installed official tools, extract the package's `Libs/Tables`
+XML files and run:
+
+```powershell
+./tools/validate_database_tables.ps1 -ModToolsPath "D:/SteamLibrary/steamapps/common/KCD2Mod" -TablesPath "<extracted tables>"
+```
+
+All nine corrected table files passed that reader; 260 unit tests passed. The
+user's subsequent retail launch passed the previous fatal startup stage and
+began loading the existing Trosky save. This does not yet verify the new tavern
+quest, merchant interaction, trading or map UI in-game.
+
+### Map UI follow-up reported after the startup fix
+
+The user confirmed that the KCD1 map artwork now displays in retail. Their
+screenshot still shows Trosky's fast-travel and location markers over that
+artwork, and they report that the other levels are missing. This is an open
+issue, not a completed map conversion. The current importer registers the
+background tiles and map bounds only; it does not yet import KCD1's location,
+POI or fast-travel registrations. Follow-up must check the map's active-level
+selection and marker ownership, import the corresponding KCD1 registrations,
+and verify that the existing KCD2 regional maps remain accessible. Do not erase
+the player's Trosky discoveries to hide these incorrect markers.
+
+A second retail screenshot confirms that `A visit to Rattay` and its
+`Visit the Rattay tavern.` objective have started, but the journal shows
+`Different region` while the player is in KCD1. Quest activation is therefore
+visually verified; association with the destination region is not correct.
+Audit the quest's native level/region metadata alongside the map registration.
+The screenshots alone do not establish that those two symptoms have one cause.

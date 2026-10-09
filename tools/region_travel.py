@@ -26,6 +26,12 @@ from region_travel_ui import import_showroom
 from region_travel_companions import import_horse_scheduler, import_horse_scheduler_table, horse_recovery_resources
 from region_travel_navigation import package_navigation
 from region_travel_entry import register_entry
+from region_travel_map import resources as map_resources
+from region_travel_services import resolve_merchant, shop_resources
+from region_travel_merchant_character import build_appearance
+from region_travel_merchant import actor_resources, register_world
+from region_travel_visit import attach as attach_visit
+from region_travel_tables import managed_patches
 
 MOD = 'gluemappertravel'
 LEVEL = 'kcd1_travel'
@@ -232,6 +238,19 @@ def build(source, target, world, output):
         native_scheduler=read(z,'tables/ai/scheduler.xml')
         player=one((s for s in native_world.findall('./SoulList/Souls/Soul') if s.findtext('Player')=='1'), 'native player registration')
     package=output/MOD;data=package/'Data';data.mkdir(parents=True)
+    namespace='gluemapper_rattay'
+    print('Importing original Rattay upper-gate innkeeper and stock',flush=True)
+    merchant=resolve_merchant(source,'rato_innkeeper1')
+    merchant_files,shop_report=shop_resources(merchant,target,namespace)
+    character_directory=output/'merchant-character'
+    character_report=build_appearance(source,target,merchant,namespace,character_directory)
+    merchant_files.update(actor_resources(target,merchant,character_report,namespace))
+    dialogue_files.update(merchant_files)
+    travel_level,map_files,map_report=map_resources(source,level_registration(target,LEVEL,LEVEL_ID),LEVEL)
+    dialogue_files.update(map_files)
+    trade_strings=ET.Element('Table');row=ET.SubElement(trade_strings,'Row')
+    for value in ('ui_gmtravel_rattay_trade','(Trade)','(Trade)'):ET.SubElement(row,'Cell').text=value
+    dialogue_strings=merge_localization(dialogue_strings,xml(trade_strings))
     graphs={};stations={}
     needed={model.lower() for name,model,p,q in prefab_geometry(prefab) if name.startswith('wheel_')}
     wheel_bounds={}
@@ -297,6 +316,9 @@ def build(source, target, world, output):
                     replacements,entry_graphs,entry_report=register_entry(
                         replacements,blob,graph,entry_source,entry_scripts,LEVEL,LEVEL_ID,guid)
                 graphs.update(entry_graphs)
+                graphs,visit_strings=attach_visit(graphs,graph,LEVEL,player.findtext('SharedSoulGuid'))
+                replacements,graphs,merchant_world_report=register_world(
+                    replacements,graphs,graph,source,merchant,shop_report,guid)
             with zipfile.ZipFile(dest/'level.pak','x',zipfile.ZIP_STORED,allowZip64=False) as dst:
                 for info in z.infolist():
                     b=replacements.pop(info.filename.lower(),None)
@@ -310,11 +332,20 @@ def build(source, target, world, output):
             for f in base.iterdir():
                 if f.is_file() and f.suffix.lower()=='.pak' and f.name.lower() not in ('level.pak','recast.pak'):shutil.copy2(f,dest/f.name)
     dialogue_files.update(horse_recovery_resources(native_player,{LEVEL:stations['kcd1']['horse_road']}))
+    common_files = {
+        'Libs/Tables/LevelSwitch__'+MOD+'.xml': table,
+        'Libs/Tables/level__'+MOD+'.xml': travel_level,
+        **graphs, **dialogue_files,
+    }
+    for path in sorted(character_directory.rglob('*')):
+        if path.is_file():
+            name = path.relative_to(character_directory).as_posix()
+            if name in common_files:
+                raise ValueError('Duplicate packaged resource: ' + name)
+            common_files[name] = path.read_bytes()
+    common_files = managed_patches(common_files, MOD)
     with zipfile.ZipFile(data/(MOD+'.pak'),'x',zipfile.ZIP_STORED) as z:
-        z.writestr('Libs/Tables/LevelSwitch__'+MOD+'.xml',table)
-        z.writestr('Libs/Tables/level__'+MOD+'.xml',level_registration(target,LEVEL,LEVEL_ID))
-        for n,b in graphs.items():z.writestr(n,b)
-        for n,b in dialogue_files.items():z.writestr(n,b)
+        for n,b in common_files.items():z.writestr(n,b)
         for level in ('trosecko',LEVEL):
             with zipfile.ZipFile(data/'Levels'/level/'level.pak') as levelpak:
                 for n in levelpak.namelist():
@@ -325,10 +356,15 @@ def build(source, target, world, output):
                 'description':'Experimental native travel between Trosky and the imported KDC1 map.'}.items():ET.SubElement(info,k).text=v
     (package/'mod.manifest').write_bytes(xml(manifest))
     localization=package/'Localization';localization.mkdir()
+    with zipfile.ZipFile(target/'Localization/English_xml.pak') as z:
+        quest_strings=merge_localization(read(z,'text_ui_quest.xml'),visit_strings)
     with zipfile.ZipFile(localization/'English_xml.pak','x',zipfile.ZIP_STORED) as z:
         z.writestr('text_ui_dialog.xml',dialogue_strings)
+        z.writestr('text_ui_quest.xml',quest_strings)
     report={'schema':1,'mod':MOD,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
+        'map_ui':map_report,'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
+            character=character_report,source=merchant['provenance']),
         'driver_dialogue':{'option':'Travel to KDC1','original_destination_preserved':True,'new_voice_lines':False,'fare':0,'runtime_verified':False},
         'preservation_tests_pending':['player identity','inventory and equipped clothing','horse and saddle inventory','KDC2 quests','save/load in both maps'],
         'files':{f.relative_to(package).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in package.rglob('*') if f.is_file()}}

@@ -119,6 +119,10 @@ def asset_pack(stack, library, prefix, cache_dir=None):
             original = tex.get("File", "").replace("\\", "/").lower()
             if not original or original.startswith("$"):
                 continue
+            # CryEngine's nearest probe is a runtime texture token, not an
+            # asset filename (some KCD1 character materials omit the '$').
+            if original in ('nearest_cubemap', 'nearest_cubemap.dds'):
+                continue
             original = str(PurePosixPath(original).with_suffix(".dds"))
             if original not in index and original.startswith("data/") and original[5:] in index:
                 original = original[5:]
