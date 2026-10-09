@@ -8,6 +8,12 @@
 
 <img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/531e91e2-9eff-46da-bc7d-12e50ab1eaad" />
 
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/e601470d-dca1-4fbc-9d8f-26a2f3db0ac3" />
+
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/4f94a6ad-85fe-4117-98ea-b96bccdf8238" />
+
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/22ed5177-6a85-4365-858f-d8746db6bff6" />
+
 
 *User capture of the v20 full-map building build near Rattay. Buildings are rendering, but the visible stray water plane and missing river sections in this area remain known issues. The debug FPS is from this incomplete world, not a full-game benchmark.*
 
