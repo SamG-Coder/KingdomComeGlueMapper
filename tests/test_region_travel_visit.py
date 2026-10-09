@@ -22,7 +22,7 @@ class VisitDialogueTests(unittest.TestCase):
         parent = graphs['Quests/GlueTravel/GlueTravel_kcd1.xml']
         node = parent.find('Skald/Project/Nodes/' + QUEST)
         self.assertEqual([(e.get('From'), e.get('To')) for e in node],
-                         [('kcd1_travel.arrived', 'arrive'), ('rattay_innkeeper.BeforePlay', 'talked')])
+                         [('kcd1_travel.arrived', 'arrive'), ('rattay_innkeeper.dialog_started', 'talked')])
         state = graphs['Quests/GlueTravel/visit_rattay.xml']
         self.assertEqual([e.get('From') for e in state.iter('Edge') if e.get('To') == 'SetDone'],
                          ['spoke_to_innkeeper.True', 'progress.OnDone'])
@@ -40,7 +40,7 @@ class VisitDialogueTests(unittest.TestCase):
         asset = graphs['Quests/GlueTravel/GlueTravel_kcd1.xml'].find(f".//SoulAsset[@Name='{alias}']")
         self.assertEqual(asset.get('SharedSoulGuids'), 'source-innkeeper')
 
-    def test_talk_menu_keeps_native_open_shop_merchant_response(self):
+    def test_talk_menu_binds_player_and_merchant_before_native_shop_action(self):
         root = ET.fromstring(dialogue('source-innkeeper'))
         body = root.find('Skald/FaderDialog/Dialogue')
         self.assertEqual(body.get('NonSpeakerRoles'), ROLE)
@@ -48,7 +48,26 @@ class VisitDialogueTests(unittest.TestCase):
         self.assertEqual(body.find(f"SelectedSouls/SelectedSoul[@Role='{ROLE}']").get('Soul'), 'source-innkeeper')
         trade = body.find(".//Sequence[@Name='trade']")
         self.assertEqual(trade.get('Type'), 'OpenShop')
-        self.assertEqual(trade.find('Elements/Response').get('Role'), ROLE)
+        self.assertEqual(trade.get('EndType'), 'EndDialogue')
+        self.assertEqual(trade.find('Elements/Response').get('Role'), 'HENRY')
+        self.assertIsNone(trade.find('Decision'))
+        self.assertIn('trade_selected', trade.get('ExitScript'))
+        # A SelectedSoul alone cannot make Henry a runtime participant.
+        self.assertEqual({r.get('Role') for r in body.iter('Response')}, {'HENRY'})
+
+    def test_opening_talk_emits_completion_before_any_shop_choice(self):
+        root = ET.fromstring(dialogue('source-innkeeper'))
+        dialog = root.find('Skald/FaderDialog')
+        self.assertEqual(dialog.find("Ports/Port[@Name='dialog_started']").get('Direction'), 'Out')
+        entry = dialog.find('Dialogue/Decision')
+        self.assertEqual(entry.get('Autoselect'), 'true')
+        seqs = entry.findall('Sequences/Sequence')
+        self.assertEqual(len(seqs), 1)
+        self.assertIsNone(seqs[0].get('EntryCondition'))  # Also works on a second Talk.
+        self.assertEqual(seqs[0].get('EndType'), 'Decision')
+        self.assertEqual(seqs[0].find('Triggers/Port').get('Name'), 'dialog_started')
+        self.assertIsNotNone(seqs[0].find('Decision/Sequences/Sequence[@Type="OpenShop"]'))
+        self.assertIsNone(seqs[0].find('Decision/Sequences/Sequence/Triggers'))
 
 
 if __name__ == '__main__': unittest.main()

@@ -29,6 +29,11 @@ def quest_graph():
     state = ET.SubElement(nodes, 'State', Name='objective', TypeT=TYPE)
     ET.SubElement(state, 'Constant', Name='DefaultValue', Value='None')
     edge(state, 'progress.OnActive', 'SetActive'); edge(state, 'progress.OnDone', 'SetDone')
+    # Event-only diagnostics distinguish a missing dialogue event from a saved
+    # quest that is already done or has not become active. No polling or timers.
+    for name, event in [('talk_received', 'talked'), ('quest_completed', 'progress.OnDone')]:
+        trace = ET.SubElement(nodes, 'Trace', Name=name, TypeT='wh::questmodule::QuestProgress')
+        edge(trace, event, 'Exec'); edge(trace, 'progress.State', 'Value')
     edge(ET.SubElement(nodes, 'visit_inn', Name='journal'), 'objective.State', 'Progress')
     ET.SubElement(quest, 'QuestName', StringName='gmtravel_visit_title', Text='A visit to Rattay')
     obj = ET.SubElement(ET.SubElement(quest, 'Objectives'), 'Objective', Name='visit_inn', TypeT=TYPE)
@@ -56,7 +61,7 @@ def attach(graphs, graph_path, level, player_soul, target_soul):
     ET.SubElement(project.find('Definitions'), 'Definition', File='visit_rattay.xml')
     node = ET.SubElement(project.find('Nodes'), QUEST, Name=QUEST)
     edge(node, level + '.arrived', 'arrive')
-    edge(node, 'rattay_innkeeper.BeforePlay', 'talked')
+    edge(node, 'rattay_innkeeper.dialog_started', 'talked')
     types = ET.SubElement(project, 'Types')
     typ = ET.SubElement(types, 'Type', TypeName=TYPE)
     logs = ET.SubElement(project, 'ObjectiveValueTypes')

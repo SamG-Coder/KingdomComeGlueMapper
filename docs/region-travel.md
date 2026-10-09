@@ -448,3 +448,74 @@ remaining innkeeper issue is the missing Talk option: only Rob appears. The
 retail log also records destination arrival, horse placement and a normal
 ExitGame shutdown. This confirms entry after the scheduler repair, but does
 not confirm dialogue, trading or conversation-based quest completion.
+
+### Innkeeper Talk participant repair (local v24)
+
+The native BasicAIActions:ActorCanTalk calls actor:CanTalk(player.id) before
+adding the Talk action. The generated innkeeper dialogue contained only a
+merchant Response. Henry appeared in SelectedSouls, which is authoring metadata,
+but had no actual response/participant in the dialogue. The working return
+driver includes a Henry Response, and the native male merchant dialogue uses a
+player Shop topic followed by a merchant OpenShop action.
+
+The innkeeper now uses that structure: the visible Trade sequence is Type=Shop
+with a Henry Response and EndType=Decision, followed by an autoselected native
+OpenShop sequence with the merchant Response. This preserves the native Talk
+and shop path instead of overriding interaction predicates. The existing
+BeforePlay connection was intended to complete the visit quest when conversation
+starts; the subsequent retail test below showed that it did not.
+
+All 270 tests pass; the regression checks both runtime participant roles and
+the nested shop action. Full rebuild comparison shows exactly one changed
+common-archive resource, `Quests/GlueTravel/rattay_innkeeper.xml`. All other
+common resources, both level archives' contents and localization match the
+installed v23 build. Only the common PAK was replaced, after backing it up and
+verifying its installed hash. Receipts are in `outputs/region-travel-v24/`.
+Talk availability, quest completion and trading still need retail confirmation.
+
+### Talk confirmed; conversation-entry and shop-action repair (local v25)
+
+The user confirmed that v24 exposes Talk and opens the innkeeper dialogue, but
+selecting Trade does not open the shop and entering the conversation does not
+complete the quest. Those two behaviors were not established by the earlier
+static participant checks.
+
+The adapter now follows the shipped KCD2 travelling-merchant dialogue at
+`Quests/Final/Barbora/random_events/pocestny/event_pocestny/pocestny/traveling_merchant/traveling_merchant_man/obchodnik_na_ceste_muz.xml`:
+an autoselected, silent Henry entry sequence emits an explicit `dialog_started`
+output before entering the services decision. That event feeds the existing
+persistent quest's `talked` input. The Active guard and saved state paths remain
+unchanged, so walking into the area, buying an item or repeatedly speaking to an
+already completed quest cannot substitute for or restart the objective.
+
+Trade is now the visible `OpenShop` sequence with a Henry response, as in that
+same native dialogue. It no longer depends on a cosmetic `Shop` topic followed
+by an autoselected child action. The merchant remains a non-speaking participant.
+Shop owner/keeper/storage links were compared with native Procek and retain
+their native directions; no database, stock, character or scheduler changes
+are part of this repair.
+
+Event-only `GLUE_RATTAY_SHOP` lines record `talk_started` and `trade_selected`,
+including the native shop ID resolved from the actual dialogue participant
+(expected 20094). Queries are protected so logging cannot abort the action.
+Graph traces `talk_received` and `quest_completed` record the quest progress at
+those events. There is no timer or per-frame polling.
+
+All 271 tests pass, including automatic entry before topic selection, the
+explicit completion event, the native OpenShop choice, and the Active-only
+completion guard. Retail acceptance still requires opening Talk without buying
+anything and observing the completed quest, then selecting Trade and observing
+the actual shop inventory. Offline checks are not that runtime proof.
+
+The v25 rebuild changes only three common-archive graph resources: the project
+connection, the innkeeper dialogue and the visit state module. All level PAKs,
+tables, localization and character resources match v24. The common PAK was
+installed with the game closed after backing up v24 and verifying both hashes.
+Evidence and the installation receipt are under `outputs/region-travel-v25/`.
+
+The subsequent retail test confirms that opening Talk completes the quest.
+However, the conversation closes without displaying a Trade choice. The retail
+log records both `talk_started` and `trade_selected` four times, each with
+`shop=-1 query_ok=true`. Thus the action is executing, but the native shop
+lookup cannot resolve a shop for the dialogue participant. Shop registration
+and the menu behavior remain unresolved at this checkpoint.

@@ -10,19 +10,39 @@ ROLE = 'GMTRAVEL_RATTAY_INNKEEPER'
 DIALOG = 'rattay_innkeeper'
 
 
+def shop_trace(event):
+    """Log a dialogue action without letting a diagnostic abort that action."""
+    return ("local ok, result = pcall(function() "
+            f"local keeper = dc['{ROLE}']; "
+            "return keeper and Shops.GetShopDBIdByKeeper(keeper.id) or 'missing_participant' end); "
+            f"System.LogAlways('GLUE_RATTAY_SHOP event={event} shop=' .. tostring(result) .. ' query_ok=' .. tostring(ok))")
+
+
 def dialogue(person_name):
     root = ET.Element('Database', Name='brambora')
     dialog = ET.SubElement(ET.SubElement(root, 'Skald'), 'FaderDialog', Name=DIALOG)
-    body = ET.SubElement(dialog, 'Dialogue', TechnicalStatus='Enabled', Initiator='Player', NonSpeakerRoles=ROLE)
+    ET.SubElement(ET.SubElement(dialog, 'Ports'), 'Port', Name='dialog_started', Direction='Out', Type='trigger')
+    body = ET.SubElement(dialog, 'Dialogue', TechnicalStatus='Enabled', Initiator='Player', NonSpeakerRoles=ROLE,
+                         AllowGreeting='false', AllowFarewell='false')
     selected = ET.SubElement(body, 'SelectedSouls')
     ET.SubElement(selected, 'SelectedSoul', Role='HENRY', Voice='tomMcKay', Type='Wave', Language='ENG')
     ET.SubElement(selected, 'SelectedSoul', Role=ROLE, Soul=person_name, Type='Wave', Language='ENG')
-    choices = ET.SubElement(ET.SubElement(body, 'Decision', Name='services', Priority='General'), 'Sequences')
-    # OpenShop consumes the merchant response role, as in the native chat shop.
-    # No invented Lua shop API or inventory transfer is involved.
-    buy = ET.SubElement(choices, 'Sequence', Name='trade', EndType='EndDialogue', Type='OpenShop', GrayOutIfSequencesUsed='Never')
+    # Match the shipped traveling-merchant FaderDialog: a silent automatic
+    # entry emits dialog_started before offering topics. BeforePlay alone did
+    # not complete the objective in retail. No purchase or area visit is needed.
+    entry = ET.SubElement(body, 'Decision', Name='conversation_entry', Priority='General', Autoselect='true')
+    started = ET.SubElement(ET.SubElement(entry, 'Sequences'), 'Sequence', Name='begin_conversation',
+                            EndType='Decision', ExitScript=shop_trace('talk_started'))
+    ET.SubElement(ET.SubElement(started, 'Triggers'), 'Port', Name='dialog_started')
+    ET.SubElement(ET.SubElement(started, 'Elements'), 'Response', Role='HENRY')
+    choices = ET.SubElement(ET.SubElement(started, 'Decision', Name='services', Priority='General'), 'Sequences')
+    # Native obchodnik_na_ceste_muz has a visible OpenShop choice with an empty
+    # Henry response. Do not route a cosmetic Shop choice into an autoselected
+    # OpenShop child; that arrangement did not open the shop in retail.
+    buy = ET.SubElement(choices, 'Sequence', Name='trade', EndType='EndDialogue', Type='OpenShop',
+                        GrayOutIfSequencesUsed='Never', ExitScript=shop_trace('trade_selected'))
     ET.SubElement(buy, 'UiPrompt', StringName='ui_gmtravel_rattay_trade', Text='(Trade)')
-    ET.SubElement(ET.SubElement(buy, 'Elements'), 'Response', Role=ROLE)
+    ET.SubElement(ET.SubElement(buy, 'Elements'), 'Response', Role='HENRY')
     return xml(root)
 
 
@@ -77,6 +97,6 @@ def register_world(files, graphs, graph_path, source, target, merchant, shop, id
     return files, graphs, dict(npc=merchant['name'], position=point.get('Pos'), rotation=point.get('Rotate', '1,0,0,0'), entity=npc.get('EntityGuid'),
         soul=merchant['soul']['soul_id'], instance=merchant['instance'].findtext('Guid'),
         source_area=merchant['area'].get('Name'), source_activity=point.get('Name'), native_activity=helper,
-        compiled_scheduler_records=3, quest_completion='dialogue BeforePlay; no area trigger',
+        compiled_scheduler_records=3, quest_completion='dialog_started from automatic conversation entry; no area trigger',
         shop=shop['shop_name'], role=ROLE, runtime_verified=False,
         limitations=['Native merchant brain; original daily schedule and lodging service are not converted'])
