@@ -6,7 +6,8 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/Code-MIT-green)](LICENSE)
 
-![KCD1 castle and static buildings running in KCD2](docs/images/kcd1-buildings-in-kcd2.png)
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/531e91e2-9eff-46da-bc7d-12e50ab1eaad" />
+
 
 *User capture of the v20 full-map building build near Rattay. Buildings are rendering, but the visible stray water plane and missing river sections in this area remain known issues. The debug FPS is from this incomplete world, not a full-game benchmark.*
 
