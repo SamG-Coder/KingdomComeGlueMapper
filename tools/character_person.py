@@ -29,27 +29,40 @@ def unique(values, label):
     return values[0]
 
 
-def resolve_person(source, name, level='rataje'):
+def resolve_person(source, name, level='rataje', *, include_ai=True):
     with RetailSourceReader(source) as reader:
         tables = SourceTables(source, reader)
         soul = tables.row('rpg/soul', 'soul_name', name)
         evidence = {k: v['provenance'] for k, v in tables.cache.items()}
     with zipfile.ZipFile(Path(source) / 'Data/Levels' / level / 'level.pak') as archive:
         mission = read(archive, 'objects_mission0.xml')
+        actor_sources = {'objects_mission0.xml': hashlib.sha256(mission).hexdigest()}
         entities = list(ET.fromstring(mission).iter('Entity'))
+        if not any(e.get('Name') == name for e in entities):
+            for entry in archive.namelist():
+                if entry.lower().startswith('layers/') and entry.lower().endswith('.xml'):
+                    blob = read(archive, entry)
+                    if name.encode('utf-8') in blob:
+                        layer_entities = list(ET.fromstring(blob).iter('Entity'))
+                        entities.extend(layer_entities)
+                        if any(e.get('Name') == name for e in layer_entities):
+                            actor_sources[entry] = hashlib.sha256(blob).hexdigest()
         actor = unique((e for e in entities if e.get('Name') == name and
                         e.get('EntityClass') in ('NPC', 'NPC_Female')), 'source person')
         instance = unique((s for s in ET.fromstring(read(archive, 'whdata_0')).findall('./SoulList/Souls/Soul')
                            if s.findtext('Name') == name), 'source person instance')
     if instance.findtext('SharedSoulGuid') != soul['soul_id']:
         raise ValueError('Source person instance/table identity differs')
-    with RetailSourceReader(source) as reader:
-        tables = SourceTables(source, reader)
-        ai = capture_person_ai(tables, soul, actor, instance, entities)
-        evidence.update({k: v['provenance'] for k, v in tables.cache.items()})
+    ai = None
+    if include_ai:
+        with RetailSourceReader(source) as reader:
+            tables = SourceTables(source, reader)
+            ai = capture_person_ai(tables, soul, actor, instance, entities)
+            evidence.update({k: v['provenance'] for k, v in tables.cache.items()})
     return dict(name=name, soul=soul, actor=actor, instance=instance, source_level=level,
                 ai=ai,
-                provenance=dict(tables=evidence, mission_sha256=hashlib.sha256(mission).hexdigest()))
+                provenance=dict(tables=evidence, mission_sha256=hashlib.sha256(mission).hexdigest(),
+                                actor_sources=actor_sources))
 
 
 def register_person(add_entity, wh, person, placement=None):

@@ -212,7 +212,8 @@ def preprocess(payload, graph, level):
     return xml(root)
 
 
-def build(source, target, world, output, *, modid=MOD):
+def build(source, target, world, output, *, modid=MOD, test_person=None,
+          test_bandit_person=None, bandit_template='tpod_bandit_3'):
     source,target,world,output=map(Path,(source,target,world,output))
     if output.exists():raise FileExistsError('Choose a fresh output directory')
     # First version deliberately requires a static converted world. Never silently
@@ -254,6 +255,31 @@ def build(source, target, world, output, *, modid=MOD):
     theresa_character=build_appearance(source,target,theresa_person,theresa.NAMESPACE,theresa_directory)
     merchant_files,theresa_names=theresa.resources(target,source,theresa_person,theresa_character,merchant_files)
     dialogue_files.update(merchant_files)
+    character_directories=[character_directory,theresa_directory]
+    clone_report=None
+    bandit_report=None
+    if test_person:
+        from character_person import resolve_person
+        from character_native_clone import clone_world, clone_resources
+        clone_namespace='gmtravel_test_'+test_person
+        print('Importing native coachman clone appearance:',test_person,flush=True)
+        clone_person=resolve_person(source,test_person,include_ai=False)
+        clone_directory=output/'test-character'
+        clone_character=build_appearance(source,target,clone_person,clone_namespace,clone_directory)
+        character_directories.append(clone_directory)
+    if test_bandit_person:
+        from character_person import resolve_person
+        import character_bandit_clone as bandit_clone
+        bandit_namespace='gmtravel_bandit_'+test_bandit_person
+        print('Importing native bandit comparison:',test_bandit_person,bandit_template,flush=True)
+        bandit_source=resolve_person(source,test_bandit_person,include_ai=False)
+        bandit_native=bandit_clone.resolve_template(target,bandit_template)
+        bandit_directory=output/'bandit-character'
+        bandit_character=build_appearance(source,target,bandit_source,bandit_namespace,bandit_directory)
+        character_directories.append(bandit_directory)
+        dialogue_files,bandit_names=bandit_clone.resources(dialogue_files,source,bandit_source,
+            bandit_character,bandit_native,bandit_namespace)
+        theresa_names=merge_localization(theresa_names,bandit_names)
     travel_level,map_files,map_report=map_resources(source,level_registration(target,LEVEL,LEVEL_ID),LEVEL)
     dialogue_files.update(map_files)
     trade_strings=ET.Element('Table');row=ET.SubElement(trade_strings,'Row')
@@ -335,6 +361,25 @@ def build(source, target, world, output, *, modid=MOD):
                 replacements,location_files,location_strings,location_report=location_resources(
                     source,target,replacements,LEVEL_ID)
                 dialogue_files.update(location_files)
+                if test_person:
+                    actor=ET.fromstring(replacements['objects_mission0.xml']).find(f"Entity[@Name='{driver.NAME}']")
+                    x,y,_=map(float,actor.get('Pos').split(','))
+                    position=(x-3.,y-2.,ground(x-3.,y-2.)+.02)
+                    replacements,clone_report=clone_world(replacements,driver.NAME,clone_namespace,position)
+                    merged,clone_names=clone_resources({**dialogue_files,**graphs},source,clone_person,
+                        clone_character,clone_namespace,template_name=driver.NAME,template_role=driver.ROLE,
+                        template_dialogue=driver.GRAPH,target_graph=graph)
+                    graphs={k:merged.pop(k) for k in graphs}
+                    dialogue_files=merged
+                    theresa_names=merge_localization(theresa_names,clone_names)
+                    clone_report.update(source_person=test_person,character=clone_character)
+                if test_bandit_person:
+                    actor=ET.fromstring(replacements['objects_mission0.xml']).find(f"Entity[@Name='{driver.NAME}']")
+                    x,y,_=map(float,actor.get('Pos').split(','))
+                    position=(x-35.,y-18.,ground(x-35.,y-18.)+.02)
+                    replacements,bandit_report=bandit_clone.register_world(replacements,source,target,
+                        bandit_native,bandit_namespace,position)
+                    bandit_report.update(source_person=test_bandit_person,character=bandit_character)
             with zipfile.ZipFile(dest/'level.pak','x',zipfile.ZIP_STORED,allowZip64=False) as dst:
                 for info in z.infolist():
                     b=replacements.pop(info.filename.lower(),None)
@@ -353,9 +398,9 @@ def build(source, target, world, output, *, modid=MOD):
         'Libs/Tables/level__'+MOD+'.xml': travel_level,
         **graphs, **dialogue_files,
     }
-    for path in sorted([*character_directory.rglob('*'), *theresa_directory.rglob('*')]):
+    for path in sorted(p for directory in character_directories for p in directory.rglob('*')):
         if path.is_file():
-            owner = character_directory if path.is_relative_to(character_directory) else theresa_directory
+            owner = next(directory for directory in character_directories if path.is_relative_to(directory))
             name = path.relative_to(owner).as_posix()
             if name.startswith('Localization/'):
                 continue  # Localized source item names belong in the language PAK.
@@ -382,7 +427,7 @@ def build(source, target, world, output, *, modid=MOD):
             soul_strings=merge_localization(read(native_strings,'text_ui_soul.xml'),theresa_names)
         texts={'text_ui_dialog.xml':dialogue_strings,'text_ui_quest.xml':quest_strings,'text_ui_soul.xml':soul_strings}
         with zipfile.ZipFile(target/'Localization/English_xml.pak') as native_strings:
-            for character_dir in (character_directory, theresa_directory):
+            for character_dir in character_directories:
                 item_strings = character_dir/'Localization/English/text_ui_items.xml'
                 if item_strings.is_file():
                     base = texts.get('text_ui_items.xml', read(native_strings, 'text_ui_items.xml'))
@@ -392,7 +437,7 @@ def build(source, target, world, output, *, modid=MOD):
                 texts[name]=merge_missing_strings(base,blob)
         for name,blob in texts.items(): z.writestr(name,blob)
     report={'schema':1,'mod':modid,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
-        'person_world':person_world_report,
+        'person_world':person_world_report,'test_person':clone_report,'test_bandit':bandit_report,
         'theresa':dict(world=theresa_world,character=theresa_character,date_source_audit=theresa_audit),
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
         'map_ui':dict(map_report,registration=location_report),'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
@@ -408,5 +453,10 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--kcd1',type=Path,required=True);p.add_argument('--kcd2',type=Path,required=True)
     p.add_argument('--world',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args();r=build(a.kcd1,a.kcd2,a.world,a.output)
+    p.add_argument('--modid',default=MOD)
+    p.add_argument('--test-person',help='Optional KCD1 soul name; clone the return coachman with this appearance')
+    p.add_argument('--test-bandit-person',help='Optional KCD1 appearance on a native bandit combat template')
+    p.add_argument('--bandit-template',default='tpod_bandit_3',help='Native KCD2 soul name for the isolated bandit test')
+    a=p.parse_args();r=build(a.kcd1,a.kcd2,a.world,a.output,modid=a.modid,test_person=a.test_person,
+                           test_bandit_person=a.test_bandit_person,bandit_template=a.bandit_template)
     print(json.dumps({k:v for k,v in r.items() if k!='files'},indent=2))
