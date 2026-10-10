@@ -104,31 +104,96 @@ class DesktopSetupTests(unittest.TestCase):
     @patch('desktop_setup.free_space', return_value=1024 ** 3)
     def test_low_space_is_reported_before_build(self, *_):
         config = dict(kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), workspace=str(self.root / 'work'), action='build_only')
-        with self.assertRaisesRegex(ValueError, '60.0 GiB'): preflight(config)
+        with self.assertRaisesRegex(ValueError, '90.0 GiB'): preflight(config)
+
+    @patch('desktop_setup.game_running', return_value=False)
+    @patch('desktop_setup.free_space', return_value=100 * 1024 ** 3)
+    def test_combined_install_migrates_legacy_and_preserves_other_mod_order(self, *_):
+        target = self.target()
+        self.package(target/'Mods'/MOD_ID, b'old')
+        source = self.package(self.root/'package', b'new')
+        receipt = json.loads((source/RECEIPT).read_text())
+        receipt['travel_bridge'] = {'files': []}
+        (source/RECEIPT).write_text(json.dumps(receipt))
+        legacy = target/'Mods/gluemappertravel'; legacy.mkdir()
+        (legacy/'mod.manifest').write_text('<kcd_mod><info><modid>gluemappertravel</modid></info></kcd_mod>')
+        (legacy/'keep.pak').write_bytes(b'legacy')
+        order = target/'Mods/mod_order.txt'
+        original = b'# keep this comment\nother_mod\ngluemappertravel\n'
+        order.write_bytes(original)
+        result = install_transaction(source, target)
+        self.assertFalse(legacy.exists())
+        self.assertEqual((Path(result['legacy_backup'])/'keep.pak').read_bytes(), b'legacy')
+        self.assertEqual(Path(result['mod_order_backup']).read_bytes(), original)
+        self.assertEqual(order.read_text(), '# keep this comment\nother_mod\n'+MOD_ID+'\n')
+
+    @patch('desktop_setup.game_running', return_value=False)
+    @patch('desktop_setup.free_space', return_value=100 * 1024 ** 3)
+    def test_failed_combined_swap_restores_both_mods_and_order(self, *_):
+        target = self.target(); dest = self.package(target/'Mods'/MOD_ID, b'old')
+        source = self.package(self.root/'package', b'new')
+        receipt = json.loads((source/RECEIPT).read_text()); receipt['travel_bridge'] = {'files': []}
+        (source/RECEIPT).write_text(json.dumps(receipt))
+        legacy = target/'Mods/gluemappertravel'; legacy.mkdir()
+        (legacy/'mod.manifest').write_text('<kcd_mod><info><modid>gluemappertravel</modid></info></kcd_mod>')
+        order = target/'Mods/mod_order.txt'; order.write_text('gluemappertravel\n')
+        original = Path.rename
+        def fail_stage(path, to):
+            if path.parent.name.startswith('.gluemapper-install-'): raise OSError('simulated swap failure')
+            return original(path, to)
+        with patch.object(Path, 'rename', fail_stage):
+            with self.assertRaisesRegex(OSError, 'simulated'): install_transaction(source, target)
+        self.assertTrue(legacy.exists())
+        self.assertEqual(order.read_text(), 'gluemappertravel\n')
+        self.assertEqual((dest/f'Data/{MOD_ID}.pak').read_bytes(), b'old')
+
+    @patch('desktop_setup.preflight', return_value='ready')
+    def test_fresh_build_includes_travel_without_installed_world(self, *_):
+        for action in ('build_only', 'build_install'):
+            job = self.root/action; job.mkdir()
+            config = job/'job.json'
+            config.write_text(json.dumps(dict(kcd1='source', kcd2='target', workspace=str(job), action=action)))
+            with patch('desktop_setup.conversion_plan', return_value=[]), \
+                 patch('desktop_setup.build_campaign') as campaign, \
+                 patch('region_travel.build') as bridge, \
+                 patch('travel_bridge_package.combine', return_value=job/'package') as combine, \
+                 patch('desktop_setup.install_transaction', return_value={'installed': 'target'}) as install:
+                self.assertEqual(worker(config), 0)
+                campaign.assert_called_once_with('source', 'target', job/'conversion/Data', 'setup_world', job/'world-package', start_probe=False)
+                bridge.assert_called_once_with('source', 'target', job/'world-package/Data/Levels/kcd1_rataje', job/'region-travel', modid=MOD_ID)
+                combine.assert_called_once_with(job/'world-package', job/'region-travel'/MOD_ID, 'target', job/'package')
+                self.assertEqual(install.call_count, int(action=='build_install'))
+            events = [json.loads(line) for line in (job/'events.jsonl').read_text().splitlines()]
+            self.assertEqual(events[-1]['kind'], 'done')
+            self.assertIn('Trosky', events[-1]['message'])
 
     @patch('desktop_setup.validate_games', return_value='1.5.6')
-    @patch('desktop_setup.free_space', return_value=5 * 1024 ** 3)
-    def test_travel_preflight_requires_world_but_not_idle_game_or_owned_base(self, *_):
+    @patch('desktop_setup.free_space', return_value=100 * 1024 ** 3)
+    @patch('desktop_setup.game_running', return_value=False)
+    def test_travel_preflight_requires_owned_world_and_idle_game(self, *_):
         config = dict(kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), workspace=str(self.root / 'work'), action='build_travel')
         with self.assertRaisesRegex(ValueError, 'installed converted world'): preflight(config)
         world = self.root / 'b/Mods' / MOD_ID / 'Data/Levels/kcd1_rataje'
         world.mkdir(parents=True)
         for path in (world / 'level.pak', world / 'terrain.pak', self.root / 'a/Data/Levels/rataje/recast.pak', self.root / 'b/Data/Levels/trosecko/level.pak'):
             path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'fixture')
-        with patch('desktop_setup.game_running', side_effect=AssertionError('Build must not require game shutdown')):
-            self.assertIn('manual installation', preflight(config))
+        with patch('desktop_setup.verify_package', return_value={}):
+            self.assertIn('Build and install region travel', preflight(config))
+            with patch('desktop_setup.game_running', return_value=True):
+                with self.assertRaisesRegex(ValueError, 'Close Kingdom Come'): preflight(config)
 
     @patch('desktop_setup.preflight', return_value='ready')
-    def test_travel_worker_builds_overlay_without_campaign_or_install(self, *_):
+    def test_travel_worker_combines_and_installs_one_mod(self, *_):
         config = self.root / 'config.json'
         config.write_text(json.dumps(dict(kcd1=str(self.root / 'a'), kcd2=str(self.root / 'b'), workspace=str(self.root), action='build_travel')))
-        with patch('region_travel.build') as build, patch('desktop_setup.install_transaction') as install, patch('desktop_setup.build_campaign') as campaign:
+        with patch('region_travel.build') as build, patch('desktop_setup.install_transaction', return_value={'installed': 'destination'}) as install, patch('desktop_setup.build_campaign') as campaign, patch('travel_bridge_package.combine', return_value=self.root/'package') as combine:
             self.assertEqual(worker(config), 0)
-            build.assert_called_once_with(str(self.root / 'a'), str(self.root / 'b'), (self.root / 'b/Mods' / MOD_ID / 'Data/Levels/kcd1_rataje').resolve(), self.root.resolve() / 'region-travel')
-            install.assert_not_called(); campaign.assert_not_called()
+            build.assert_called_once_with(str(self.root / 'a'), str(self.root / 'b'), (self.root / 'b/Mods' / MOD_ID / 'Data/Levels/kcd1_rataje').resolve(), self.root.resolve() / 'region-travel', modid=MOD_ID)
+            combine.assert_called_once()
+            install.assert_called_once(); campaign.assert_not_called()
         events = [json.loads(line) for line in (self.root / 'events.jsonl').read_text().splitlines()]
         self.assertEqual(events[-1]['kind'], 'done')
-        self.assertIn('copy the generated', events[-1]['message'])
+        self.assertIn('Region travel installed', events[-1]['message'])
 
 
 if __name__ == '__main__': unittest.main()

@@ -6,6 +6,7 @@ HOST = 'Quests/Final/Barbora/trosecko/trosecko_levelswitch/trosecko_levelswitch_
 DIALOGUE = HOST[:-4] + '/prechod_z_trosecka_na_kutnohorsko.xml'
 PORT = 'gluemapper_travel_kcd1'
 STRING = 'ui_gluemapper_travel_kcd1'
+LABEL = '(Travel to the Rattay region)'
 
 
 def merge_localization(native, additions):
@@ -42,7 +43,7 @@ def patch(dialogue, host):
     ET.SubElement(dialog.find('Ports'),'Port',Name=PORT,Direction='Out',Type='trigger')
     choice=ET.Element('Sequence',Name=PORT,EndType='EndDialogue',GrayOutIfSequencesUsed='Never',
         EntryCondition="Port('kone_ziju') AND Port('kone_su_v_tabore') AND !Port('npc_videlo_crime') AND !Port('jindra_je_indisponovan')")
-    ET.SubElement(choice,'UiPrompt',StringName=STRING,Text='(Travel to KDC1)')
+    ET.SubElement(choice,'UiPrompt',StringName=STRING,Text=LABEL)
     ET.SubElement(ET.SubElement(choice,'Triggers'),'Port',Name=PORT)
     # Native menu-only responses use an empty HENRY response. Do not reuse a
     # spoken line naming Kuttenberg for a different destination.
@@ -57,5 +58,5 @@ def patch(dialogue, host):
     ET.SubElement(switch,'Constant',Name='LevelSwitching',Value='gluemappertravel_to_kcd1')
     ET.SubElement(switch,'Edge',From='gluemapper_prepare_travel.OnExec',To='Exec')
     strings=ET.Element('Table');row=ET.SubElement(strings,'Row')
-    for value in (STRING,'(Travel to KDC1)','(Travel to KDC1)'):ET.SubElement(row,'Cell').text=value
+    for value in (STRING,LABEL,LABEL):ET.SubElement(row,'Cell').text=value
     return {DIALOGUE:xml(d),HOST:xml(h)},xml(strings)

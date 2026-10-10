@@ -21,7 +21,7 @@ def main():
                '--specpath', str(repo / 'outputs'), '--paths', str(repo / 'tools'),
                '--add-data', f'{repo / "runtime"}:runtime', '--add-data', f'{repo / "LICENSE"}:.',
                '--add-data', f'{repo / "tools/region_travel_horse_recovery.lua"}:.',
-               '--exclude-module', 'PIL', '--exclude-module', 'lupa']
+               '--exclude-module', 'lupa']
     for module in CONVERTERS: command.extend(['--hidden-import', module])
     command.append(str(repo / 'tools/setup_app.py'))
     subprocess.run(command, cwd=repo, check=True)

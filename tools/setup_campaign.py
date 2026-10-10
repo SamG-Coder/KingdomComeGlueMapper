@@ -22,7 +22,7 @@ from setup_progress import progress
 from campaign_package import LEVEL, LEVEL_ID, level_registration, package_world, package_opening, write_asset_shards, add_level_tables, mounted_level_tables
 
 MOD_ID = 'kingdomcomegluemapper'
-VERSION = '0.1.0'
+VERSION = '0.2.0-alpha.4'
 RECEIPT = 'gluemapper-install.json'
 
 

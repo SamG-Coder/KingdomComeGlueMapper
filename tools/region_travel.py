@@ -212,7 +212,7 @@ def preprocess(payload, graph, level):
     return xml(root)
 
 
-def build(source, target, world, output):
+def build(source, target, world, output, *, modid=MOD):
     source,target,world,output=map(Path,(source,target,world,output))
     if output.exists():raise FileExistsError('Choose a fresh output directory')
     # First version deliberately requires a static converted world. Never silently
@@ -240,7 +240,7 @@ def build(source, target, world, output):
         native_mission=read(z,'objects_mission0.xml')
         native_scheduler=read(z,'tables/ai/scheduler.xml')
         player=one((s for s in native_world.findall('./SoulList/Souls/Soul') if s.findtext('Player')=='1'), 'native player registration')
-    package=output/MOD;data=package/'Data';data.mkdir(parents=True)
+    package=output/modid;data=package/'Data';data.mkdir(parents=True)
     namespace='gluemapper_rattay'
     print('Importing original Rattay upper-gate innkeeper and stock',flush=True)
     merchant=resolve_merchant(source,'rato_innkeeper1')
@@ -362,16 +362,16 @@ def build(source, target, world, output):
             if name in common_files:
                 raise ValueError('Duplicate packaged resource: ' + name)
             common_files[name] = path.read_bytes()
-    common_files = managed_patches(common_files, MOD)
+    common_files = managed_patches(common_files, modid)
     with zipfile.ZipFile(data/(MOD+'.pak'),'x',zipfile.ZIP_STORED) as z:
         for n,b in common_files.items():z.writestr(n,b)
         for level in ('trosecko',LEVEL):
             with zipfile.ZipFile(data/'Levels'/level/'level.pak') as levelpak:
                 for n in levelpak.namelist():
                     if n.lower().startswith('tables/'):
-                        z.writestr(f'Mods/{MOD}/Data/Levels/{level}/{n}',read(levelpak,n))
+                        z.writestr(f'Mods/{modid}/Data/Levels/{level}/{n}',read(levelpak,n))
     manifest=ET.Element('kcd_mod');info=ET.SubElement(manifest,'info')
-    for k,v in {'name':'KCD1 Region Travel','modid':MOD,'author':'SamG-Coder','version':'0.2.0-alpha.3',
+    for k,v in {'name':'KCD1 Region Travel','modid':modid,'author':'SamG-Coder','version':'0.2.0-alpha.3',
                 'description':'Experimental native travel between Trosky and the imported KDC1 map.'}.items():ET.SubElement(info,k).text=v
     (package/'mod.manifest').write_bytes(xml(manifest))
     localization=package/'Localization';localization.mkdir()
@@ -391,13 +391,13 @@ def build(source, target, world, output):
                 base=texts[name] if name in texts else read(native_strings,name)
                 texts[name]=merge_missing_strings(base,blob)
         for name,blob in texts.items(): z.writestr(name,blob)
-    report={'schema':1,'mod':MOD,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
+    report={'schema':1,'mod':modid,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
         'person_world':person_world_report,
         'theresa':dict(world=theresa_world,character=theresa_character,date_source_audit=theresa_audit),
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
         'map_ui':dict(map_report,registration=location_report),'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
             character=character_report,source=merchant['provenance']),
-        'driver_dialogue':{'option':'Travel to KDC1','original_destination_preserved':True,'new_voice_lines':False,'fare':0,'runtime_verified':False},
+        'driver_dialogue':{'option':'Travel to the Rattay region','original_destination_preserved':True,'new_voice_lines':False,'fare':0,'runtime_verified':False},
         'preservation_tests_pending':['player identity','inventory and equipped clothing','horse and saddle inventory','KDC2 quests','save/load in both maps'],
         'files':{f.relative_to(package).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in package.rglob('*') if f.is_file()}}
     (output/'travel-build.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

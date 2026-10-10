@@ -4,17 +4,16 @@ Download the Windows x64 **KingdomComeGlueMapper Setup** executable from
 [GitHub Releases](https://github.com/SamG-Coder/KingdomComeGlueMapper/releases).
 Python and the modding tools are not required on the user's machine.
 
-This is an **experimental world-import release**, tested against retail KCD2
-**1.5.6**. It installs the converted KCD1 map and the **Play KDC1** New Game entry.
-It does not yet implement original quests, the KCD1 intro, complete gameplay,
-or validated campaign save/load. Existing KCD1 saves are not converted.
+**v0.2.0-alpha.4** builds the converted world, coach travel, map registration
+and Rattay services in one run, and installs one `kingdomcomegluemapper` mod.
+It targets retail KCD2 **1.5.6** and requires installed copies of both games.
+Original quests, the KCD1 intro, complete gameplay and full companion persistence
+remain unfinished. Existing KCD1 saves are not converted.
 
-**Alpha.2 also includes Build region travel.** After installing the base world,
-this option builds an overlay for travel from Trosky with an existing KCD2
-character. It does not automatically install the overlay: follow the
-[region travel installation steps](region-travel.md#building-from-the-windows-setup-release).
-Horse calling, the corrected return-coachman Talk prompt and repeated trips
-remain under investigation. The base-world New Game route below is separate.
+Continue an existing Trosky save, talk to its coachman and choose **Travel to the
+Rattay region**. The original Kuttenberg choice and labels are preserved. The
+combined package removes the old **Play KDC1** startup menu. There is no separate
+travel build button or manual overlay-copy step.
 
 ## Install
 
@@ -23,7 +22,7 @@ remain under investigation. The base-world New Game route below is separate.
    both installations, including libraries on different drives. Use **Browse**
    if a game was not found or to select a different installation.
 3. Choose a **Build folder** outside both game directories. Allow at least
-   **60 GiB free** for the build. Installation also needs about **25 GiB free**
+   **90 GiB free** for the build. Installation also needs about **35 GiB free**
    on the KCD2 drive for staging. On the same drive these estimates are combined.
    These are conservative preflight estimates, not the final package size.
 4. Close either running Kingdom Come game, choose **Build and install**, then
@@ -32,8 +31,8 @@ remain under investigation. The base-world New Game route below is separate.
    duration: the overall bar counts stages, not an estimated time percentage.
    File packaging/copy/verification report measured progress; other stages show
    activity. A full conversion can take a while and creates many files.
-6. When setup completes, launch KCD2 normally and choose **Play KDC1 → Standard
-   Mode**. The original `spawnStart` places Henry beside his home in Skalitz.
+6. When setup completes, launch KCD2 normally, **Continue your Trosky save**,
+   and talk to the coachman. Select **Travel to the Rattay region**.
 
 The executable is unsigned. Setup requests no administrator elevation; the
 selected folders must be writable by the current Windows user.
@@ -43,15 +42,9 @@ selected folders must be writable by the current Windows user.
 - **Build package only** converts and verifies everything without changing the
   installed mod. It can run while the game is open. The resulting `package`
   folder can later be selected with **Install existing package**.
-- **Install existing package** verifies a previously generated campaign bundle
+- **Install existing package** verifies a previously generated complete world-and-travel bundle
   and installs it without repeating conversion. Both game locations are still
-  checked. A loader-only probe is not accepted as a campaign package.
-- **Build region travel** uses the installed static converted world and both
-  retail games to create a separate travel overlay, leaving installed mods alone.
-  Use **Open output folder** to find `region-travel/gluemappertravel` and its
-  build receipt. Close the game and install that folder manually as documented
-  in the region travel guide. This mode checks space against source archive
-  sizes rather than requiring another full 60 GiB world conversion.
+  checked. Older world-only packages are rejected; rebuild them with this setup.
 - **Cancel after current stage** waits for a conversion stage to finish. During
   file copying, cancellation stops before replacement of the installed mod.
   The saved build output and log remain available for diagnosis.
@@ -70,9 +63,12 @@ must match its receipt; unknown or locally modified files block replacement.
 The previous installation is moved into `<KCD2>/GlueMapper Backups/<run-id>`.
 If the final rename fails, setup restores the old installation automatically.
 
-Other mods, game archives and saves are preserved. If `Mods/mod_order.txt`
-exists, it must already include `kingdomcomegluemapper`; setup reports a missing
-entry rather than replacing another mod's load-order configuration.
+A recognized legacy `gluemappertravel` folder is also moved into GlueMapper
+Backups. Other mods, game archives and saves are preserved. If `Mods/mod_order.txt`
+exists, setup backs it up, retains other entries and comments, enables
+`kingdomcomegluemapper`, and removes the obsolete separate travel entry. A failed
+installation restores the previous mod folders. Unrecognized or redirected
+legacy folders are rejected before replacement.
 
 For manual rollback, close the game, move the current owned mod somewhere safe,
 then move the chosen backup back to `Mods/kingdomcomegluemapper`.
@@ -133,8 +129,9 @@ runtime. Conversion remains subject to the limitations in the
   acceptance test. Earlier retail world/menu validation is recorded separately.
 
 The full test suite uses `requirements-test.txt`, including Lupa for executable
-Lua lifecycle checks. Lupa and Pillow are excluded from the setup executable;
-NumPy is included for road geometry and cart grounding.
+Lua lifecycle checks. Lupa is excluded from the setup executable. From alpha.4,
+Pillow and NumPy are included for character textures, road geometry and cart
+grounding. The frozen self-test exercises an image encode/decode as well as imports.
 
 ## Release validation: 0.2.0-alpha.2
 
@@ -171,3 +168,19 @@ games and the existing converted world in 34 seconds. All nine output file
 hashes and PAK CRC checks passed. This release check did not install or replay
 the newly generated overlay; the retail confirmations above are separate user
 tests of the working implementation.
+
+
+## Release scope: 0.2.0-alpha.4
+
+The default build now performs all world conversion stages, builds travel from
+that freshly converted world, and combines both under one manifest. Package-only
+builds produce the same complete mod. The installer can migrate the previous
+separate travel mod and update an existing mod order while retaining backups.
+The UI no longer exposes a separate travel-build operation.
+
+The user confirmed the combined Trosky travel installation works in retail.
+All 297 automated tests pass, including fresh-build orchestration, repeat bridge
+builds without duplicate level rows, preservation of world files, legacy-mod
+migration and failed-install rollback. The frozen alpha.4 EXE self-test passes
+with Pillow, NumPy, the converters, Tcl and bundled Lua resources. An initial
+packaging check caught the old Pillow exclusion; the release build includes it.

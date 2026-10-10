@@ -25,17 +25,23 @@ and installs the retail mod with progress bars and a saved live log. No Python
 or modding-tools installation is required to run the EXE. See the
 [Windows setup guide](docs/windows-setup.md) for disk requirements and limitations.
 
-**New in v0.2.0-alpha.3:** [experimental region travel](docs/region-travel.md)
-now includes the KCD1 map, location icons and detail layers, plus the test quest
-**A visit to Rattay**. Talk to the imported innkeeper outside Rattay's upper gate
-to complete the quest, then choose **Trade** to buy from his shop. Map display,
-quest completion and buying have been confirmed by the user in retail;
-**haggling is not implemented yet**.
+**New in v0.2.0-alpha.4:** one setup run builds the world, coach travel and
+Rattay services, then installs **one mod**. Choose **Build and install**, then
+Continue your existing Trosky save and ask the coachman to **Travel to the Rattay
+region**. No second travel build or manual overlay installation is needed. The
+old Play KDC1 startup menu is removed from this package; the original Kuttenberg
+travel option remains available. Existing separate travel installations are
+backed up and retired during installation.
 
-Travel from the Trosky coachman using your existing KCD2 character. Use
-**Build region travel** after installing the converted base world, then install
-the resulting overlay separately. Horse calling, repeat trips and full companion
-persistence still need further verification. This does not complete the KCD1 campaign.
+The KCD1 map includes location icons and detail layers. **A visit to Rattay**
+completes when you talk to the innkeeper outside Rattay's upper gate, and his
+**Trade** option opens the shop. Map display, quest completion, buying and the
+corrected Trosky travel installation have been confirmed by the user in retail.
+**Haggling is not implemented yet.** Full companion persistence, original quests
+and the KCD1 campaign remain unfinished.
+
+The following describes the separate developer campaign experiments, not the
+current Windows setup route:
 
 Work toward a retail **Play KDC1** mod has started. The [retail setup](docs/retail-setup.md)
 now audits the opening quest from installed KCD1 archives and builds a package

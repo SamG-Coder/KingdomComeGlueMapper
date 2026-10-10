@@ -15,14 +15,24 @@ from steam_installations import discover
 
 def self_test(destination):
     import tkinter
+    from PIL import Image
+    import numpy as np
     from setup_campaign import runtime_directory
     for name in CONVERTERS: importlib.import_module(name)
+    from travel_bridge_package import combine, validate_bridge
     runtime = runtime_directory()
     for name in ('campaign_menu.lua', 'retail_diagnostics.lua'):
         if not (runtime / name).is_file(): raise RuntimeError('Missing bundled runtime: ' + name)
     import region_travel_companions
     hook = Path(region_travel_companions.__file__).with_name('region_travel_horse_recovery.lua')
     if b'GlueTravelHorseRecovery' not in hook.read_bytes(): raise RuntimeError('Missing bundled horse arrival hook')
+    # Exercise the bundled image codec and array extension, not just imports.
+    import io
+    stream = io.BytesIO()
+    Image.fromarray(np.full((2, 2, 4), 255, dtype=np.uint8)).save(stream, format='PNG')
+    stream.seek(0)
+    if Image.open(stream).getpixel((0, 0)) != (255, 255, 255, 255):
+        raise RuntimeError('Bundled image codec failed')
     result = {'version': APP_VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
               'tk': tkinter.Tcl().eval('info patchlevel'), 'converter_modules': len(CONVERTERS),
               'runtime_files': 3, 'status': 'passed'}
@@ -53,7 +63,7 @@ def launch_gui():
             tk.Label(header, text=f'SETUP  {APP_VERSION}   /   KCD1 world in the KCD2 engine', bg='#172c4b', fg='#bbd0ef', font=('Segoe UI', 11)).pack(anchor='w', pady=(4, 0))
             body = ttk.Frame(root, padding=(24, 14)); body.pack(fill='both', expand=True)
             ttk.Label(body, text='Experimental world import • Requires your own installed copies of both games.', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
-            ttk.Label(body, text='Import the world, or build region travel using an installed world. Quests and full companion transfer remain unfinished.').pack(anchor='w', pady=(3, 14))
+            ttk.Label(body, text='One build imports the world, adds coach travel and Rattay services, and installs one mod.').pack(anchor='w', pady=(3, 14))
             self.kcd1, self.kcd2 = tk.StringVar(), tk.StringVar()
             self.workspace = tk.StringVar(value=str(Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'KingdomComeGlueMapper/builds'))
             self.package = tk.StringVar()
@@ -67,7 +77,7 @@ def launch_gui():
                 button = ttk.Button(form, text='Browse…', command=lambda v=variable: self.browse(v)); button.grid(row=row, column=2)
                 self.controls.extend((entry, button))
             options = ttk.Frame(body); options.pack(fill='x', pady=(10, 4))
-            for label, value in (('Build and install', 'build_install'), ('Build package only', 'build_only'), ('Install existing package', 'install'), ('Build region travel', 'build_travel')):
+            for label, value in (('Build and install', 'build_install'), ('Build package only', 'build_only'), ('Install existing package', 'install')):
                 radio = ttk.Radiobutton(options, text=label, variable=self.action, value=value, command=self.mode_changed)
                 radio.pack(side='left', padx=(0, 22)); self.controls.append(radio)
             self.package_row = ttk.Frame(body); self.package_row.pack(fill='x', pady=(4, 4))
@@ -75,7 +85,7 @@ def launch_gui():
             self.package_entry = ttk.Entry(self.package_row, textvariable=self.package); self.package_entry.pack(side='left', fill='x', expand=True, padx=(0, 8))
             self.package_browse = ttk.Button(self.package_row, text='Browse…', command=lambda: self.browse(self.package)); self.package_browse.pack(side='left')
             self.controls.extend((self.package_entry, self.package_browse))
-            ttk.Label(body, text='Full builds need at least 60 GiB of temporary space. Existing GlueMapper installations are backed up before replacement.', foreground='#52637c').pack(anchor='w', pady=(6, 10))
+            ttk.Label(body, text='Full builds need at least 90 GiB of temporary space. Existing GlueMapper installations are backed up before replacement.', foreground='#52637c').pack(anchor='w', pady=(6, 10))
             self.status = tk.StringVar(value='Detecting Steam installations…')
             ttk.Label(body, textvariable=self.status, wraplength=985, font=('Segoe UI', 10, 'bold')).pack(anchor='w', pady=(0, 8))
             actions = ttk.Frame(body); actions.pack(fill='x')
@@ -110,7 +120,7 @@ def launch_gui():
             self.log.configure(state='disabled')
 
         def mode_changed(self):
-            labels = {'build_install': 'Build and install', 'build_only': 'Build package', 'install': 'Install package', 'build_travel': 'Build region travel'}
+            labels = {'build_install': 'Build and install', 'build_only': 'Build package', 'install': 'Install package', 'build_travel': 'Install region travel'}
             self.start.configure(text=labels[self.action.get()])
             state = 'normal' if self.action.get() == 'install' and not self.busy else 'disabled'
             self.package_entry.configure(state=state); self.package_browse.configure(state=state)

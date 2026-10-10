@@ -235,6 +235,16 @@ prompt, and repeated round trips remain explicit acceptance items.
 
 ## Building from the Windows setup release
 
+From **alpha.4**, use **Build and install** once. It converts the world, builds
+travel and installs the combined `kingdomcomegluemapper` package automatically.
+It validates the native coachman choice, localization, graph connection,
+level-switch record and mod table paths. Existing world and separate travel
+installations are backed up before replacement. The old startup menu is removed;
+use Continue and the coachman in Trosky. **Build package only** produces the same
+complete package without installing it.
+
+The following instructions describe the older published installer:
+
 In alpha.2, **Build region travel** reads the installed static world at
 `<KCD2>/Mods/kingdomcomegluemapper/Data/Levels/kcd1_rataje` and creates a separate
 `region-travel/gluemappertravel` folder in the setup job directory. Build/install
