@@ -126,6 +126,9 @@ def build_campaign(source, target, converted_data, source_level, output, diagnos
         stage = Path(temporary) / MOD_ID
         receipt = build_probe(source, target, stage, diagnostics=diagnostics, menu=True, start_probe=start_probe)
         world = package_world(converted_data, source_level, stage)
+        from upgrade_world_streaming import upgrade
+        world['scenery_streaming'] = upgrade(stage.parent,
+            {'source': str(source), 'target': str(target)}, Path(temporary) / 'streaming-work', travel_mode=False)
         level_pak = stage / f'Data/Levels/{LEVEL}/level.pak'
         tables_pak = level_pak.with_suffix('.tables.pak')
         spawn = opening_spawn(source)

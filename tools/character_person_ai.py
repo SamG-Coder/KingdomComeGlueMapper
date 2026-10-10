@@ -17,6 +17,7 @@ STATS = {'str': 'strength', 'agi': 'agility', 'vit': 'vitality', 'spc': 'speech'
          'charisma': 'charisma', 'shadiness': 'shadiness'}
 PROPERTIES = ('bWH_PerceptorObject', 'bWH_PerceptibleObject', 'bWH_ListenerObject')
 BRAIN_ADAPTERS = {'npc_daycycle': 'npc_basic', 'npc_dummyWait': 'npc_default',
+                  'Default': 'Default',
                   'npc_test_base': 'npc_default', 'npc_deadBody': 'kcd1_npc_deadBody',
                   'npc_invisible': 'gluemapper_npc_invisible'}
 FACTION_PATH = 'Libs/Tables/rpg/FactionTree__gluemapper_people.xml'

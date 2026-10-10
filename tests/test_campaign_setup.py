@@ -69,8 +69,10 @@ class CampaignSetupTests(unittest.TestCase):
         self.pak(self.target / 'Data/Tables.pak', {
             'Libs/Tables/level.xml': b'<database name="barbora"><levels version="1"><LevelData LevelId="2" LevelName="trosecko"/></levels></database>'})
         output = self.root / 'campaign'
-        with patch('setup_campaign.menu_assets', return_value=({}, {'synthetic': True})):
+        with patch('setup_campaign.menu_assets', return_value=({}, {'synthetic': True})), \
+                patch('upgrade_world_streaming.upgrade', return_value={'synthetic': True}) as scenery_upgrade:
             build_campaign(self.source, self.target, converted, 'probe', output)
+        self.assertFalse(scenery_upgrade.call_args.kwargs['travel_mode'])
         receipt = verify_package(output)
         self.assertEqual(receipt['campaign_level'], 'kcd1_rataje')
         self.assertFalse(receipt['ready_to_play'])

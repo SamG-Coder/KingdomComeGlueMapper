@@ -816,3 +816,139 @@ failure recovery and is then removed; it is not retained as an asset backup.
 If a process dies during promotion, inspect `BuildWork/previous` before retrying.
 Source changes belong in Git on the population branch. Saves and user-authored
 content are not managed or deleted by this build tool.
+
+### Conditional population conversion
+
+The population stage now visits conditional placements as well as residents.
+Appearance archives are independent of brain registration: an actor whose old
+combat subbrain still needs an adapter can retain its converted appearance
+without being counted as a registered NPC. KCD1 combat subbrain type 2 does not
+exist in the KCD2 database; copying that row or assigning a civilian brain is
+not a behavior conversion.
+
+The packager currently converts complete actor-only layers. It checks both the
+Objects XML and the compiled terrain object layers; an XML file containing only
+NPCs is not sufficient evidence if the same layer owns brushes or vegetation.
+Mixed entity layers remain dependencies of their source profiles. Converted
+actors, idle delegates and private home hubs remain in the same native layer.
+Shared home polygons, persistent SoulList records and compiled scheduler records
+are registered separately. Unloaded-layer entity IDs are reserved before new
+resident IDs are allocated.
+
+`registered-profiles.json` contains the actual destination profile names for the
+campaign compiler's `--registered` input. The compiler translates literal
+`EnableProfile` operations to native Skald Layer ownership and remaps
+`ProfileLoadedGate` to that same profile. Its State nodes retain activation state;
+there is no polling script or automatic enable-all operation. Source navigation
+and SVO-dependent profiles need their corresponding world conversion before
+registration. The current travel pack does not yet execute all original quest
+controllers, so profile registration alone does not activate those quests.
+
+For an intermediate gameplay checkpoint while appearance staging continues:
+
+```powershell
+.venv/Scripts/python.exe tools/current_build.py build --cached-only
+```
+
+This takes a separate `population-snapshot.json` from already published archives,
+leaves the live conversion checkpoint alone, and still requires every resident
+to be converted. The normal world/database checks run before CurrentBuild is
+replaced. Its package receipt records the exact resident and conditional
+placements, so subsequent cache progress cannot change the build's validation
+set. Do not combine `--cached-only` with either refresh option.
+
+Building does not update the retail installation. Close the game/editor, then
+install the validated checkpoint explicitly:
+
+```powershell
+.venv/Scripts/python.exe tools/install_current_build.py
+```
+
+For a controlled test with only the original coachman, innkeeper and Theresa:
+
+```powershell
+.venv/Scripts/python.exe tools/current_build.py build --population-profile services-only
+.venv/Scripts/python.exe tools/install_current_build.py
+```
+
+This is a build setting, not a removal of the population implementation. It keeps
+the existing CurrentBuild scenery, level assets, gameplay scripts and localization,
+but packages only TravelBase's NPC dependencies, persistent souls, schedules and
+layers. Population-only assets are omitted as well, so they cannot remain mounted
+and consume resources during the comparison. The installer removes obsolete
+managed shards. Player/horse and the three original services remain in the base.
+Validation checks both world registrations and globally mounted resources; merely
+hiding the extra entities does not pass.
+
+The selection is saved in `BuildCache/build-inputs.json` after a successful build.
+The converter and its full appearance cache remain untouched. Restore full
+population generation with:
+
+```powershell
+.venv/Scripts/python.exe tools/current_build.py build --population-profile full --cached-only
+.venv/Scripts/python.exe tools/install_current_build.py
+```
+
+Restart retail and travel from a Trosky save for the comparison. A save made in
+Rattay with the full population can retain serialized state from those actors.
+This setting isolates population load; it does not establish that scenery or
+material rendering is fixed.
+
+The installer checks every source file against `CurrentBuild/build.json`, stages
+only differing files on the workspace drive, and verifies every installed file.
+It refuses to replace packages while the game/editor is running and preserves
+unmanaged files. Replaced generated packages are held only during installation
+for rollback; they are not retained as redundant backups. An interrupted install
+leaves `BuildWork/install` for inspection. The successful installation receipt is
+`BuildLogs/current-build-installation.json`, including the build timestamp and
+installed hashes. This proves deployment, not live NPC behavior.
+
+Root mod PAKs use bounded ZIP32 archives (at most 1 GiB and 50,000 entries
+per generated shard). Retail rejected the earlier 12.91 GB population PAK with
+`Too big PAK file`, which also removed the travel dialogue because those records
+were in that same unmounted archive. Validation now reads all population shards
+and checks archive limits before promotion. Native exported terrain tile archives
+use a separate loading path and may exceed that root-archive entry budget.
+`repack_current_travel.py` can migrate a completed checkpoint without reconverting
+characters. Travel builds omit the old campaign prototype's main-menu override;
+the campaign prototype source remains available separately.
+
+After the root archives mounted correctly, retail hit its 32,768 shader-resource
+limit while loading Trosky. The population checkpoint contained 34,934 material
+files with 59,998 shader-bearing material entries, but only 2,284 distinct XML
+definitions (5,476 shader entries). `character_shared_materials.py` now shares
+exactly equivalent definitions at package time. It preserves material names,
+colours, textures, shader settings and submaterial order, rewrites character
+component paths and embedded mesh material-name chunks, and leaves geometry and
+skin weights untouched. `shared-materials.json` records the reduction. The
+validator checks emitted component assets and shared material textures. These
+counts measure package contents, not the engine's live resource allocation;
+successful retail loading remains a separate test.
+
+Installation removes obsolete files only when they belong to the previous
+installation receipt and still match their recorded hashes. This prevents old
+population shards from remaining mounted after a smaller repack. Modified or
+unmanaged files are preserved; removed files participate in installation rollback.
+
+The coach labels name the Rattay and Trosky regions. Both custom LevelSwitch rows
+set the native `WorldTimeDurationInHours` to 72; the original routes keep their
+own durations. Three days is a provisional historical travel estimate, not a
+measured medieval itinerary. The University of East Anglia's
+[Magna Carta Project](https://magnacarta.cmp.uea.ac.uk/read/magna_carta_1215/Clause_30?com=aca)
+estimates 20-25 miles (32-40 km) per day for a loaded horse cart. Weather, road
+conditions, stops and the chosen route would vary the actual duration.
+
+The destination retains the native time-of-day lighting profiles and now copies
+the native weather-condition table into both the level and its mounted table
+alias, replacing the empty bootstrap shell. Those condition rows gate weather
+effects; they are not themselves the sky's weather-selection controller. No
+permanent sunny or rainy override is applied. Time advance and changing weather
+still require live verification; restoring the table alone does not prove that
+the reported sunny-weather symptom is resolved.
+
+Test the resident population and existing travel services first: reactions to
+drawn weapons and hits, navigation, save/reload, and a trip out of the region and
+back. Conditional load/unload requires the corresponding native profile owner
+to be activated. These builds still use interruptible baseline scheduling; full
+source work/eat/sleep routines, battle controllers, non-outfit inventories and
+voice/dialogue dependencies are not yet fully converted or runtime verified.

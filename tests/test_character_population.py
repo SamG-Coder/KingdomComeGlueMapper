@@ -9,7 +9,7 @@ import xml.etree.ElementTree as E
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from character_population import placement_person, source_membership, migrate_texture_cache
+from character_population import placement_person, source_membership, migrate_texture_cache, stage
 from character_population_factions import register_catalog
 from character_person_ai import register_factions, FACTION_PATH
 from character_person_appearance import resolve_default_body, resolve_exported_variant
@@ -26,6 +26,20 @@ from character_source_clothing import garment_layout
 
 
 class PopulationTests(unittest.TestCase):
+    def test_cache_snapshot_has_its_own_lock_and_preserves_live_writer(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'population.lock').write_text('writer')
+            (root / 'population.json').write_text('live checkpoint')
+            with patch('character_population._stage', return_value={'snapshot': True}) as build:
+                result = stage('source', 'target', 'base', root, cached_only=True)
+                self.assertEqual(result, {'snapshot': True})
+                self.assertTrue(build.call_args.kwargs['cached_only'])
+            self.assertEqual((root / 'population.lock').read_text(), 'writer')
+            self.assertEqual((root / 'population.json').read_text(), 'live checkpoint')
+            self.assertFalse((root / 'population-snapshot.lock').exists())
+            with self.assertRaises(FileExistsError): stage('source', 'target', 'base', root)
+
     def test_retired_asset_suffix_and_named_dress_use_source_metadata(self):
         index = {'objects/characters/humans/hair/s1_hair_005.skin': None}
         part = dict(kind='hair', model='s1_hair_005_dontuse', material='s1_hair_005')
@@ -99,7 +113,7 @@ class PopulationTests(unittest.TestCase):
         self.assertEqual(first['source_name'], 'same')
 
     def test_placements_bind_to_native_souls_without_moving_existing_services(self):
-        files = {'objects_mission0.xml': b'<Objects><Entity Name="coach" EntityId="7" EntityGuid="a" Pos="4,5,6"/></Objects>',
+        files = {'objects_mission0.xml': b'<Objects><Entity Name="coach" EntityId="7" EntityGuid="0000000a-0000-0000" Pos="4,5,6"/></Objects>',
                  'whdata_0': b'<World><SoulList><Souls><Soul><Guid>existing</Guid><Name>coach</Name></Soul></Souls></SoulList></World>'}
         result = add_people(files, [placement_person(self.person())])
         mission = E.fromstring(result['objects_mission0.xml'])
@@ -121,6 +135,15 @@ class PopulationTests(unittest.TestCase):
             result = source_membership(td, 'rataje')
             self.assertTrue(result['abc']['resident'])
             self.assertFalse(result['def']['resident'])
+
+    def test_population_ids_respect_unloaded_layers_and_reserved_ids(self):
+        files = {'objects_mission0.xml': b'<Objects/>',
+                 'whdata_0': b'<World><SoulList><Souls/></SoulList></World>',
+                 'layers/other.xml': b'<Objects><Entity Name="other" EntityId="71" EntityGuid="0000000a-0000-0000"/></Objects>',
+                 'extractedlayerentityids.xml': b'<ReservedEntityIDsFromLayers><ReservedEntityID ID="99"/></ReservedEntityIDsFromLayers>'}
+        result = add_people(files, [placement_person(self.person())])
+        self.assertEqual(E.fromstring(result['objects_mission0.xml'])[0].get('EntityId'), '100')
+        self.assertEqual(result['layers/other.xml'], files['layers/other.xml'])
 
     def test_source_default_body_is_gender_checked_and_never_replaces_explicit(self):
         class Tables:

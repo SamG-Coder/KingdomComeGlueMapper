@@ -123,6 +123,7 @@ def preserve_edits(layout):
 
 def validate_build(layout, build, config):
     from validate_character_population import validate
+    from retail_pak import validate_paks
     build = Path(build)
     world = build / 'Mods/kingdomcomegluemapper'
     travel = build / 'Mods/gluemappertravel'
@@ -134,6 +135,7 @@ def validate_build(layout, build, config):
     tables = layout['work'] / 'tables'
     remove_generated(tables, layout['work'])
     checks = validate(layout['cache'] / 'Population', travel, tables)
+    checks['retail_archives'] = validate_paks(build / 'Mods')
     layout['logs'].mkdir(parents=True, exist_ok=True)
     with (layout['logs'] / 'native-tables.log').open('w', encoding='utf-8') as log:
         subprocess.run([config.get('powershell', 'pwsh'), '-NoProfile', '-File',
@@ -163,6 +165,7 @@ def promote(layout):
 def publish(layout, config):
     checks = validate_build(layout, layout['next'], config)
     receipt = dict(schema=1, generated=True, checked_at=datetime.now(timezone.utc).isoformat(),
+                   population_profile=checks.get('population_profile', 'full'),
                    tools_sha256_at_validation=source_digest(), validation=checks,
                    mods=['kingdomcomegluemapper', 'gluemappertravel'],
                    files=file_manifest(layout['next']),
@@ -174,12 +177,19 @@ def publish(layout, config):
     return receipt
 
 
-def build(layout, config, refresh_base=False, refresh_population=False):
+def build(layout, config, refresh_base=False, refresh_population=False, cached_only=False):
     from character_population import stage
     from package_character_population import assemble
     base = layout['cache'] / 'TravelBase'
     population = layout['cache'] / 'Population'
     world = layout['cache'] / 'World/kingdomcomegluemapper'
+    profile = config.get('population_profile', 'full')
+    if profile not in ('full', 'services-only'):
+        raise ValueError('Unknown population build profile: ' + profile)
+    if profile == 'services-only' and (refresh_base or refresh_population):
+        raise ValueError('The services-only test preserves cached inputs; select full for a refresh')
+    if cached_only and (refresh_base or refresh_population):
+        raise ValueError('A read-only cached test build cannot refresh its inputs')
     if refresh_population:
         remove_generated(population, layout['cache'])
     if refresh_base or not (base / 'gluemappertravel/mod.manifest').is_file():
@@ -189,13 +199,36 @@ def build(layout, config, refresh_base=False, refresh_population=False):
         travel_build(config['source'], config['target'], world / 'Data/Levels/kcd1_rataje', candidate)
         remove_generated(base, layout['cache'])
         candidate.rename(base)
-    stage(Path(config['source']), Path(config['target']), base / 'gluemappertravel', population)
+    if profile == 'services-only':
+        from population_build_profile import assemble as assemble_services
+        remove_generated(layout['next'], layout['work'])
+        mods = layout['next'] / 'Mods'
+        mods.mkdir(parents=True)
+        current_mods = layout['current'] / 'Mods'
+        existing = (current_mods / 'gluemappertravel' / 'mod.manifest').is_file()
+        # A population A/B test must retain the currently tested scenery. Fresh
+        # builds can still generate the same profile from the cached base.
+        scenery = current_mods / world.name if existing else world
+        shutil.copytree(scenery, mods / world.name)
+        assemble_services(base / 'gluemappertravel',
+                          (current_mods if existing else base) / 'gluemappertravel',
+                          mods / 'gluemappertravel', target=config['target'])
+        if not existing:
+            from upgrade_world_streaming import upgrade
+            upgrade(mods, config, layout['work'])
+        return publish(layout, config)
+    stage(Path(config['source']), Path(config['target']), base / 'gluemappertravel', population,
+          include_conditional=True, cached_only=cached_only)
     remove_generated(layout['next'], layout['work'])
     mods = layout['next'] / 'Mods'
     mods.mkdir(parents=True)
     # Real copies isolate the installed/current world from subsequent cache edits.
     shutil.copytree(world, mods / world.name)
-    assemble(population, mods / 'gluemappertravel')
+    from travel_world_package import prepare_world_for_travel
+    prepare_world_for_travel(mods / world.name)
+    assemble(population, mods / 'gluemappertravel', snapshot=cached_only)
+    from upgrade_world_streaming import upgrade
+    upgrade(mods, config, layout['work'])
     return publish(layout, config)
 
 
@@ -206,18 +239,26 @@ def main():
     parser.add_argument('--refresh-base', action='store_true')
     parser.add_argument('--refresh-population', action='store_true',
                         help='Regenerate the appearance cache after changing conversion policy')
+    parser.add_argument('--cached-only', action='store_true', help='Package completed source conversions for the next in-game checkpoint')
+    parser.add_argument('--population-profile', choices=('full', 'services-only'),
+                        help='Build with the full population or only original service NPCs; remembered after a successful build')
     args = parser.parse_args()
     layout = paths(args.outputs)
     config = json.loads((layout['cache'] / 'build-inputs.json').read_text())
+    if args.population_profile:
+        if args.action != 'build': parser.error('--population-profile applies to build only')
+        config['population_profile'] = args.population_profile
     if args.action == 'status':
         receipt = layout['current'] / 'build.json'
         print(json.dumps(dict(paths={k: str(v) for k, v in layout.items()},
                               current=json.loads(receipt.read_text()) if receipt.exists() else None), indent=2))
         return
     with working_environment(layout):
-        if args.action == 'build': result = build(layout, config, args.refresh_base, args.refresh_population)
+        if args.action == 'build': result = build(layout, config, args.refresh_base, args.refresh_population, args.cached_only)
         elif args.action == 'publish': result = publish(layout, config)
         else: result = validate_build(layout, layout['current'], config)
+        if args.action == 'build' and args.population_profile:
+            write_json(layout['cache'] / 'build-inputs.json', config)
     print(json.dumps(result, indent=2))
 
 

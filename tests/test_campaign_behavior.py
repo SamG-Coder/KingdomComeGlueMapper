@@ -32,6 +32,26 @@ class ItemImporter:
 
 
 class CampaignBehaviorTests(unittest.TestCase):
+    def test_link_search_and_movement_keep_destination_references_and_loop(self):
+        m = source('''<Root><Behavior><Sequence>
+          <GraphSearch Origin="&quot;this.id&quot;" Borders="&quot;&quot;" depth="&quot;1&quot;" EdgePruning="&quot;parent,inventory&quot;" failOnEmpty="&quot;true&quot;">
+            <LinkTagFilter tag="&quot;routePoint&quot;" Child="&quot;point&quot;" Parent="&quot;&quot;" Data="&quot;&quot;"/>
+            <Nodalyzer Quantifiers="&quot;ForAll&quot;" Child="&quot;points&quot;"/>
+          </GraphSearch>
+          <ForEach array="&quot;points&quot;" value="&quot;point&quot;" iterator="&quot;index&quot;" startIndex="&quot;0&quot;" step="&quot;1&quot;" break="&quot;&quot;">
+            <Move destinationSpecification="&quot;point&quot;" destinationSpecification2="&quot;&quot;" destinationSpecification3="&quot;&quot;" speed="&quot;Walk&quot;" stopWithinDistance="&quot;0.2&quot;"/>
+          </ForEach>
+          </Sequence></Behavior></Root>''')
+        files, _, report = convert_behaviors([m], 'Imported', catalog())
+        self.assertEqual(report['whole_trees_emitted'], 1)
+        root = E.fromstring(next(iter(files.values())))
+        self.assertEqual(root.find('.//GraphSearch').get('Origin'), '$this.id')
+        self.assertEqual(root.find('.//LinkTagFilter').get('tag'), "'routePoint'")
+        self.assertEqual(root.find('.//Nodalyzer').get('Child'), '$points')
+        self.assertEqual(root.find('.//ForEach').get('array'), '$points')
+        self.assertEqual(root.find('.//ForEach/Move').get('destinationSpecification'), '$point')
+        self.assertEqual(root.find('.//Move').get('speed'), 'Walk')
+
     def test_branch_order_and_item_registration_are_preserved(self):
         for quest in ('q_test','completely_different'):
             m=source('''<Root OneTimeOnly="&quot;true&quot;" FailState="&quot;Error&quot;" saveVersion="2"><Behavior canSkip="1"><Sequence>

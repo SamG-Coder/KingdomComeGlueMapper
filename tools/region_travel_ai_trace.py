@@ -8,10 +8,17 @@ import xml.etree.ElementTree as ET
 from upgrade_map import read, xml
 
 
-def event(label):
+def event(label, loaded=None):
+    if label.startswith('human_host:') and loaded is None:
+        # Native simulation objects can execute OnInit without a streamed body.
+        # Query the engine's gate rather than inferring this from an entity ID.
+        gate = ET.Element('IsLoadedGate', saveVersion='2')
+        ET.SubElement(gate, 'Then', canSkip='1').append(event(label, True))
+        ET.SubElement(gate, 'Else', canSkip='1').append(event(label, False))
+        return gate
     return ET.Element('ExecuteLua', code=(
         'if GlueTravelAITrace then pcall(GlueTravelAITrace,entity,' +
-        json.dumps(label) + ') end'))
+        json.dumps(label) + (',' + str(loaded).lower() if loaded is not None else '') + ') end'))
 
 
 def wrap(parent, child, label):
@@ -64,17 +71,20 @@ def resources(scripts, level):
     # Loaded by the existing Player lifecycle hook. Separate counters per actor
     # and phase, with a hard session cap; no scans, timers, input hooks or moves.
     lua = '''
-local glueTraceCounts,glueTraceTotal={},0
-function GlueTravelAITrace(entity,phase)
+local glueTraceCounts,glueTraceTotal,glueHostTotal={},0,0
+function GlueTravelAITrace(entity,phase,loaded)
     local map=tostring(System.GetCVar('sv_map')):lower():gsub('\\\\','/'):gsub('/+$',''):match('([^/]+)$')
-    if map~=LEVEL or glueTraceTotal>=400 then return end
+    if map~=LEVEL then return end
+    local host=phase:sub(1,11)=='human_host:'
+    if (host and glueHostTotal>=40) or (not host and glueTraceTotal>=400) then return end
     local name=entity and entity:GetName() or 'none'
     local key=tostring(entity and entity.id)..':'..phase
     local count=(glueTraceCounts[key] or 0)+1
     if count>8 then return end
-    glueTraceCounts[key]=count;glueTraceTotal=glueTraceTotal+1
+    glueTraceCounts[key]=count
+    if host then glueHostTotal=glueHostTotal+1 else glueTraceTotal=glueTraceTotal+1 end
     local p=entity and entity:GetWorldPos() or {x=0,y=0,z=0}
-    System.LogAlways(string.format('GLUE_AI_TRACE phase=%s actor=%s position=%.2f,%.2f,%.2f count=%d',phase,name,p.x,p.y,p.z,count))
+    System.LogAlways(string.format('GLUE_AI_TRACE phase=%s actor=%s position=%.2f,%.2f,%.2f count=%d engine_loaded=%s',phase,name,p.x,p.y,p.z,count,tostring(loaded)))
 end
 System.LogAlways('GLUE_AI_TRACE installed; bounded native command/reaction tracing')
 '''.replace('LEVEL', json.dumps(level))

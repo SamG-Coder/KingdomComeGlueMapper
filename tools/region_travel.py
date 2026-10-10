@@ -37,6 +37,7 @@ from character_person_appearance import build_appearance
 from region_travel_merchant import actor_resources, register_world
 from region_travel_visit import attach as attach_visit
 from region_travel_tables import managed_patches
+from region_travel_policy import JOURNEY_HOURS, LABELS
 import region_travel_theresa as theresa
 
 MOD = 'gluemappertravel'
@@ -96,7 +97,7 @@ def switch_table(native):
         if any(r.get('Name') == name for r in rows):
             raise ValueError('LevelSwitch name collision')
         ET.SubElement(result, 'LevelSwitchData', Name=name, TargetLevelId=str(target),
-                      TargetLocationEntity=marker)
+                      TargetLocationEntity=marker, WorldTimeDurationInHours=str(JOURNEY_HOURS))
     return xml(output)
 
 
@@ -357,6 +358,8 @@ def build(source, target, world, output, trace_ai=False):
         if side=='kcd1':
             for f in base.iterdir():
                 if f.is_file() and f.suffix.lower()=='.pak' and f.name.lower() not in ('level.pak','recast.pak'):shutil.copy2(f,dest/f.name)
+            from upgrade_world_streaming import retarget_if_upgraded
+            retarget_if_upgraded(dest)
     dialogue_files.update(horse_recovery_resources(native_player,{LEVEL:stations['kcd1']['horse_road']}))
     if trace_ai:
         with zipfile.ZipFile(target/'Data/Scripts.pak') as scripts:
@@ -421,7 +424,7 @@ def build(source, target, world, output, trace_ai=False):
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
         'map_ui':dict(map_report,registration=location_report),'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
             character=character_report,source=merchant['provenance']),
-        'driver_dialogue':{'option':'Travel to KDC1','original_destination_preserved':True,'new_voice_lines':False,'fare':0,'runtime_verified':False},
+        'driver_dialogue':{'option':LABELS['ui_gluemapper_travel_kcd1'],'journey_hours':JOURNEY_HOURS,'original_destination_preserved':True,'new_voice_lines':False,'fare':0,'runtime_verified':False},
         'preservation_tests_pending':['player identity','inventory and equipped clothing','horse and saddle inventory','KDC2 quests','save/load in both maps'],
         'files':{f.relative_to(package).as_posix():hashlib.sha256(f.read_bytes()).hexdigest() for f in package.rglob('*') if f.is_file()}}
     (output/'travel-build.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

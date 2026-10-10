@@ -136,7 +136,7 @@ class RegionTravelTests(unittest.TestCase):
         switch=nodes.find("Function[@Name='gluemapper_switch_to_kcd1']")
         self.assertEqual(switch.find('Edge').get('From'),'gluemapper_prepare_travel.OnExec')
         self.assertEqual(nodes.find('SceneFinishedWaiter/Edge').get('From'),'prechod_z_trosecka_na_kutnohorsko.'+PORT)
-        self.assertEqual(ET.fromstring(strings).findall('Row/Cell')[2].text,'(Travel to KDC1)')
+        self.assertEqual(ET.fromstring(strings).findall('Row/Cell')[2].text,'(Buy transport to the Rattay region)')
         with self.assertRaises(ValueError):patch(files[DIALOGUE],files[HOST])
 
     def test_routes_preserve_native_rows_and_do_not_use_new_game(self):

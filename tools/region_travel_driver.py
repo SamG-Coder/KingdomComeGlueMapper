@@ -3,6 +3,7 @@ import copy
 import uuid
 import xml.etree.ElementTree as ET
 from upgrade_map import xml
+from region_travel_policy import LABELS
 
 NAME='gmtravel_return_driver'
 SOUL=str(uuid.uuid5(uuid.NAMESPACE_URL,'gluemappertravel/return-driver-soul'))
@@ -50,12 +51,12 @@ def resources(souls, storm, original_dialogue, role_table):
     body.append(selected)
     choices=ET.SubElement(ET.SubElement(body,'Decision',Name='destinations',Priority='General'),'Sequences')
     travel=ET.SubElement(choices,'Sequence',Name='travel',EndType='EndDialogue',GrayOutIfSequencesUsed='Never')
-    ET.SubElement(travel,'UiPrompt',StringName=STRING,Text='(Travel to Trosky)')
+    ET.SubElement(travel,'UiPrompt',StringName=STRING,Text=LABELS[STRING])
     ET.SubElement(ET.SubElement(travel,'Triggers'),'Port',Name='travel')
     ET.SubElement(ET.SubElement(travel,'Elements'),'Response',Role='HENRY')
     # The runtime supplies End dialog, as in the native driver's top decision.
     strings=ET.Element('Table');row=ET.SubElement(strings,'Row')
-    for v in (STRING,'(Travel to Trosky)','(Travel to Trosky)'):ET.SubElement(row,'Cell').text=v
+    for v in (STRING,LABELS[STRING],LABELS[STRING]):ET.SubElement(row,'Cell').text=v
     return {'Libs/Tables/rpg/soul__gluemappertravel.xml':xml(root),
             'Libs/Tables/rpg/role__gluemappertravel.xml':xml(role_root),
             'Libs/Storm/roles/world/levelSwitch.xml':storm_output,GRAPH:xml(d)},xml(strings)

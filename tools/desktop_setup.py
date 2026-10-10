@@ -21,7 +21,7 @@ APP_VERSION = '0.2.0-alpha.3'
 GIB = 1024 ** 3
 CONVERTERS = ('upgrade_map', 'build_vegetation_probe', 'build_water_probe',
               'build_buildings_probe', 'build_water_surface_probe', 'complete_instances',
-              'build_entity_probe', 'build_landscape_surface_probe', 'repair_tree_materials',
+              'build_entity_probe', 'build_landscape_surface_probe',
               'region_travel')
 
 
@@ -111,7 +111,6 @@ def conversion_plan(library, build):
         ('Roads and ground decals', 'build_landscape_surface_probe', common + ['--base-level', 'setup_instances', '--level', 'setup_roads', '--all']),
         ('Landscape rocks and riverbeds', 'build_buildings_probe', common + ['--base-level', 'setup_roads', '--level', 'setup_landscape', '--all', '--landscape-designers-only']),
         ('Doors and additional object visuals', 'build_entity_probe', common + ['--base-level', 'setup_landscape', '--level', 'setup_world', '--character-visuals']),
-        ('Tree material compatibility', 'repair_tree_materials', ['--data', str(data), '--backup', str(Path(build).parent / 'tree-material-backup'), '--apply']),
     ]
 
 

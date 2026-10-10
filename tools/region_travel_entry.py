@@ -73,6 +73,9 @@ def register_entry(files, graph, graph_path, native_level, native_scripts,
     Native profile IDs are local to this level; all entity IDs remain unique.
     """
     files = dict(files)
+    # Native weather conditions are region-independent (rain/wind/time), unlike
+    # scheduler and quest rows. Keep them instead of the empty probe shell.
+    files['tables/weatherprofiles.xml'] = read(native_level, 'tables/weatherprofiles.xml')
     # Static terrain probes explicitly disable layer activation. Native region
     # entry relies on it; registering a profile alone leaves that gate closed.
     mission_settings = ET.fromstring(files['mission_mission0.xml'])

@@ -31,6 +31,7 @@ class EntryTests(unittest.TestCase):
     def fixture(self):
         proxy, default = '00000001-0000-0001', '00000002-0000-0001'
         native = archive({
+            'tables/weatherprofiles.xml': b'<database><WeatherProfiles><WeatherProfile Name="weather_heavy_rain"><RainIntensity Min="0.6" Max="1"/></WeatherProfile></WeatherProfiles></database>',
             'mission_mission0.xml': b'<Mission><Environment><EnvState UseLayersActivation="1"/></Environment></Mission>',
             'objects_mission0.xml': f'''<Objects>
             <Entity Name="playerProxy" EntityId="1" EntityGuid="{proxy}" EntityClass="TagPoint"><EntityLinks>

@@ -43,6 +43,31 @@ CONTRACTS = {
                            'FailSubtMissing': 'value', 'saveVersion': 'value'},
     'Wait': {'duration': 'string_expression', 'timeType': 'value', 'doFail': 'value',
              'variation': 'string_expression', 'skipInLOD': 'value'},
+    'ProfileLoadedGate': {'LayerName': 'profile', 'NegateTo': 'value', 'RunLogic': 'value'},
+    'IsLoadedGate': {'saveVersion': 'value'},
+    'ForEach': {'startIndex': 'expression', 'step': 'expression', 'array': 'reference',
+                'iterator': 'reference', 'value': 'reference', 'break': 'reference'},
+    'GraphSearch': {'Origin': 'reference', 'Borders': 'reference', 'depth': 'expression',
+                    'selection': 'value', 'SearchPattern': 'value', 'EdgePruning': 'string_expression',
+                    'AllowedEdges': 'string_expression', 'SubGraph': 'string_expression',
+                    'AllowSubtraph': 'value', 'includeOrigin': 'value', 'excludeOrigin': 'value',
+                    'failOnEmpty': 'expression', 'SetOperationChoice': 'value', 'errorOnEmpty': 'value',
+                    'shortCircuit': 'value', 'skipTraversed': 'value', 'id': 'value'},
+    'LinkTagFilter': {'tag': 'string_expression', 'prune': 'value', 'negprune': 'value',
+                      'Parent': 'reference', 'Child': 'reference', 'Data': 'reference'},
+    'EntityClassFilter': {'Class': 'value', 'Source': 'value', 'prune': 'value', 'negprune': 'value',
+                          'Parent': 'reference', 'Child': 'reference', 'id': 'value'},
+    'Nodalyzer': {'Quantifiers': 'value', 'Parent': 'reference', 'Child': 'reference',
+                  'saveVersion': 'value', 'id': 'value'},
+    'GetSpatialInfo': {'In': 'reference', 'Out': 'reference', 'What': 'value'},
+    'SetSpatialInfo': {'In': 'reference', 'Val': 'reference', 'What': 'value'},
+    'Move': {'stopWithinDistance': 'expression', 'stopDistanceVariation': 'expression',
+              'rayCasteFlee': 'expression', 'successDistance': 'expression',
+              'destinationSpecification': 'reference', 'destinationSpecification2': 'reference',
+              'destinationSpecification3': 'reference', 'speed': 'expression',
+              'additionalParams': 'reference', 'pathFindingParams': 'reference',
+              'staminaPolicy': 'reference', 'pathInfo': 'string_expression',
+              'AnimationToPlay': 'string_expression', 'AnimationContext': 'string_expression'},
     'CreateItem': {'ItemGUID': 'string_expression', 'Amount': 'expression',
                    'CreatedItem': 'reference', 'Target': 'reference', 'NotifyUI': 'value'},
     'EquipItem': {'item': 'reference', 'Target': 'reference'},
@@ -129,6 +154,8 @@ class BehaviorCompiler:
         self.registered = registered or {}
         self.importer = importer
         self.bridge = QuestBridge(models, namespace)
+        from campaign_profile_bridge import ProfileBridge
+        self.profile_bridge = ProfileBridge(self.namespace, self.registered.get('profiles', {}))
         self.models = {m['quest']: m for m in models}
         self.records = {}
         self.converted = Counter()
@@ -204,7 +231,9 @@ class BehaviorCompiler:
         op, attrs = source['op'], source['attributes']
         site = dict(owner=owner, document=document, tree=tree, path=path, operation=op, arguments=attrs)
         try:
-            if op in OPERATIONS:
+            if op == 'EnableProfile':
+                node = self.profile_bridge.lower(source)
+            elif op in OPERATIONS:
                 converted = self.bridge.lower(source, owner)
                 node = ET.Element(converted['op'], converted['attributes'])
             else:
@@ -224,6 +253,11 @@ class BehaviorCompiler:
                         value = self.typed_expression(raw)
                     elif kind == 'string_expression':
                         value = self.typed_expression(raw) if value.startswith('$') else (quote(value) if value else '')
+                    elif kind == 'profile':
+                        target = self.registered.get('profiles', {}).get(value)
+                        if not target:
+                            raise UnsupportedOperation('Profile dependencies need conversion: ' + value)
+                        value = quote(target)
                     elif kind == 'include_file':
                         if value.startswith('$'):
                             raise UnsupportedOperation('Dynamic behavior include needs runtime dispatch')
@@ -317,6 +351,7 @@ class BehaviorCompiler:
             record['native_emitted'] = True
         files = {name: xml(root) for name, root in documents.items()}
         bridge_files, wiring = self.bridge.emit()
+        bridge_files = self.profile_bridge.attach(bridge_files)
         return files, bridge_files, dict(schema=1, namespace=self.namespace, trees=list(self.records.values()),
             converted_operations=dict(self.converted), whole_trees_emitted=sum(r['native_emitted'] for r in self.records.values()),
             blocked_trees=len(blocked), wiring=wiring, executable=False, runtime_validated=False,
