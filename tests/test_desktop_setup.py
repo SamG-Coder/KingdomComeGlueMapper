@@ -150,7 +150,7 @@ class DesktopSetupTests(unittest.TestCase):
     @patch('desktop_setup.preflight', return_value='ready')
     def test_fresh_build_includes_travel_without_installed_world(self, *_):
         for action in ('build_only', 'build_install'):
-            job = self.root/action; job.mkdir()
+            job = (self.root/action).resolve(); job.mkdir()
             config = job/'job.json'
             config.write_text(json.dumps(dict(kcd1='source', kcd2='target', workspace=str(job), action=action)))
             with patch('desktop_setup.conversion_plan', return_value=[]), \
