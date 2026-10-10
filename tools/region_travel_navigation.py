@@ -11,6 +11,32 @@ import zipfile
 from upgrade_map import read
 
 
+def mounted_navigation(level_directory, ai_level_path):
+    """Expose navigation at the AI LevelPath as well as the mod level mount.
+
+    A custom level archive mounts below Mods/<id>/Data/Levels/<level>, whereas
+    its exported AI LevelPath may still be Data/Levels/<level>. Root mod PAKs
+    mount below Data, so publish the same bytes at that declared virtual path.
+    Never substitute another world's mesh or change the original tile data.
+    """
+    level_directory = Path(level_directory)
+    parts = ai_level_path.replace('\\', '/').strip('/').split('/')
+    if (len(parts) < 3 or parts[0].lower() != 'data' or
+            any(p in ('', '.', '..') for p in parts)):
+        raise ValueError('Expected a safe Data-relative AI LevelPath')
+    prefix = '/'.join(parts[1:])
+    with zipfile.ZipFile(level_directory / 'level.pak') as level:
+        for name in ('ubernav.tmm', 'areasmission0.bai'):
+            yield prefix + '/' + name, read(level, name)
+    with zipfile.ZipFile(level_directory / 'recast.pak') as nav:
+        for name in nav.namelist():
+            normalized = name.replace('\\', '/')
+            if (not normalized.startswith('recast/') or
+                    any(p in ('', '.', '..') for p in normalized.split('/'))):
+                raise ValueError('Unexpected navigation resource path: ' + name)
+            yield prefix + '/' + normalized, read(nav, name)
+
+
 def validate_mesh(header, mesh, native_settings, native_version):
     if len(mesh) < 60 or mesh[:56] != native_settings:
         raise ValueError('Navigation settings differ from the installed target format')

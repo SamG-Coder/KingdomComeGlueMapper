@@ -23,8 +23,14 @@ def merge_missing_strings(base, additions):
     from region_travel_dialogue import merge_localization
     existing = {r.findtext('Cell') for r in ET.fromstring(base).findall('Row')}
     extra = ET.fromstring(additions)
+    incoming = {}
     for row in list(extra):
-        if row.findtext('Cell') in existing: extra.remove(row)
+        key = row.findtext('Cell')
+        value = tuple(c.text for c in row.findall('Cell'))
+        if key in incoming and incoming[key] != value:
+            raise ValueError('Conflicting incoming localization: ' + str(key))
+        if key in existing or key in incoming: extra.remove(row)
+        incoming[key] = value
     return merge_localization(base, xml(extra))
 
 

@@ -328,7 +328,7 @@ def upgrade_skin(blob, target_skeleton, *, variant=None, clear_hiding=True, bone
 
 def canonicalize_skin_skeletons(blobs):
     """Unify bone palettes by name before combining different source garments."""
-    skins=[CompiledSkin(b) for b in blobs];records={};parents={};rank={};required=set()
+    skins=[CompiledSkin(b) for b in blobs];records={};parents={};rank={};required_by_skin=[];used_records=set()
     # The engine resolves joint/controller names case-insensitively. Boots and
     # dresses can spell the same face helper FV_* / fv_*; two such entries in
     # the combined palette cause a fatal duplicated-CRC error at load time.
@@ -341,18 +341,26 @@ def canonicalize_skin_skeletons(blobs):
             if b['parent'] is not None:b['parent']=canonical[b['parent'].casefold()]
     for skin in skins:
         bones=skin.info['bones']
+        required=set()
         for index in np.unique(skin.ids[skin.weights>0]):
             while index is not None:
                 b=bones[int(index)];required.add(b['name']);index=b['parent_index']
-    for skin in skins:
+        required_by_skin.append(required)
+    for skin,required in zip(skins,required_by_skin):
         for b in skin.info['bones']:
             name=b['name'];o=32+584*b['index'];record=bytearray(skin.bones.data[o:o+584])
             record[312:568]=name.encode('ascii').ljust(256,b'\0');record=bytes(record)
             if name in records:
-                if name in required and parents[name]!=b['parent']:raise ValueError('Conflicting bone parent: '+name)
-                if name in required and not np.allclose(np.frombuffer(records[name][216:312],dtype='<f4'),np.frombuffer(record[216:312],dtype='<f4'),rtol=0,atol=1e-5):
+                if name in required and name in used_records and parents[name]!=b['parent']:raise ValueError('Conflicting bone parent: '+name)
+                if name in required and name in used_records and not np.allclose(np.frombuffer(records[name][216:312],dtype='<f4'),np.frombuffer(record[216:312],dtype='<f4'),rtol=0,atol=1e-5):
                     raise ValueError('Conflicting bind pose: '+name)
+                if name in required and name not in used_records:
+                    # Boots may contain stale, unused shoulder-plate joints.
+                    # A garment that actually weights that joint defines its
+                    # bind pose; two weighted owners must still agree.
+                    records[name]=record;parents[name]=b['parent']
             else:records[name]=record;parents[name]=b['parent'];rank[name]=len(rank)
+            if name in required:used_records.add(name)
     children=defaultdict(list)
     for name,parent in parents.items():children[parent].append(name)
     if len(children[None])!=1:raise ValueError('Expected one skin root')

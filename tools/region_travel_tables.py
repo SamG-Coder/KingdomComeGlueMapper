@@ -15,6 +15,10 @@ KEYS = {
     'locations': 'location_id', 'poi_types': 'poi_type_id',
     'ui_map_labels': 'ui_map_label_id', 'ui_local_mapss': 'ui_local_map_id',
     'FactionTree': 'Name',
+    'brains': 'brain_id', 'subbrains': 'subbrain_id',
+    'subbrain_behaviour_trees': 'subbrain_id',
+    'brain2subbrains': ('brain_id', 'subbrain_id'),
+    'brain2mailboxs': ('brain_id', 'mailbox_id'),
 }
 
 # RequiredAttribute fields from KCD2Mod's GeneratedDatabase reader. The XML
@@ -62,8 +66,9 @@ def managed_patches(files, modid):
         if rows.tag != table.tag or rows.attrib != table.attrib:
             raise ValueError('Incompatible table versions in ' + name)
         for row in table:
-            key = row.get(KEYS[table.tag])
-            if key is None or key in seen:
+            fields = KEYS[table.tag]
+            key = tuple(row.get(k) for k in fields) if isinstance(fields, tuple) else row.get(fields)
+            if key is None or (isinstance(key, tuple) and None in key) or key in seen:
                 raise ValueError('Missing or duplicate primary key in ' + name + ': ' + str(key))
             if table.tag == 'FactionTree':
                 # Faction names are global even when nested under different

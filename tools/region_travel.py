@@ -24,8 +24,11 @@ from region_travel_road import road_spawn_points
 import region_travel_driver as driver
 from region_travel_ui import import_showroom
 from region_travel_companions import import_horse_scheduler, import_horse_scheduler_table, horse_recovery_resources
-from region_travel_navigation import package_navigation
+from region_travel_navigation import package_navigation, mounted_navigation
+from region_travel_ai_trace import resources as ai_trace_resources
 from character_person_world import register_person_world
+from character_world_services import register_world_services
+from character_world_dependencies import discover as discover_world_dependencies
 from region_travel_entry import register_entry
 from region_travel_map import resources as map_resources
 from region_travel_locations import resources as location_resources, merge_missing_strings
@@ -212,7 +215,7 @@ def preprocess(payload, graph, level):
     return xml(root)
 
 
-def build(source, target, world, output):
+def build(source, target, world, output, trace_ai=False):
     source,target,world,output=map(Path,(source,target,world,output))
     if output.exists():raise FileExistsError('Choose a fresh output directory')
     # First version deliberately requires a static converted world. Never silently
@@ -241,6 +244,9 @@ def build(source, target, world, output):
         native_scheduler=read(z,'tables/ai/scheduler.xml')
         player=one((s for s in native_world.findall('./SoulList/Souls/Soul') if s.findtext('Player')=='1'), 'native player registration')
     package=output/MOD;data=package/'Data';data.mkdir(parents=True)
+    print('Resolving the complete source NPC dependency graph',flush=True)
+    _,world_dependency_report=discover_world_dependencies(source)
+    (output/'world-npc-dependencies.json').write_text(json.dumps(world_dependency_report,indent=2),encoding='utf-8')
     namespace='gluemapper_rattay'
     print('Importing original Rattay upper-gate innkeeper and stock',flush=True)
     merchant=resolve_merchant(source,'rato_innkeeper1')
@@ -331,6 +337,10 @@ def build(source, target, world, output):
                     replacements,graphs,graph,LEVEL,player.findtext('SharedSoulGuid'),theresa_person)
                 replacements,person_world_report=register_person_world(
                     replacements,[merchant,theresa_person],source,target)
+                helper_path='smartobjecthelpersetanimations.xml'
+                if helper_path in names and helper_path not in replacements:
+                    replacements[helper_path]=read(z,names[helper_path])
+                replacements,world_service_report=register_world_services(replacements,source,target,guid)
                 visit_strings=merge_localization(visit_strings,theresa_strings)
                 replacements,location_files,location_strings,location_report=location_resources(
                     source,target,replacements,LEVEL_ID)
@@ -348,6 +358,11 @@ def build(source, target, world, output):
             for f in base.iterdir():
                 if f.is_file() and f.suffix.lower()=='.pak' and f.name.lower() not in ('level.pak','recast.pak'):shutil.copy2(f,dest/f.name)
     dialogue_files.update(horse_recovery_resources(native_player,{LEVEL:stations['kcd1']['horse_road']}))
+    if trace_ai:
+        with zipfile.ZipFile(target/'Data/Scripts.pak') as scripts:
+            trace_files, trace_lua = ai_trace_resources(scripts, LEVEL)
+        dialogue_files.update(trace_files)
+        dialogue_files['Scripts/Entities/actor/player.lua'] += trace_lua
     common_files = {
         'Libs/Tables/LevelSwitch__'+MOD+'.xml': table,
         'Libs/Tables/level__'+MOD+'.xml': travel_level,
@@ -365,6 +380,12 @@ def build(source, target, world, output):
     common_files = managed_patches(common_files, MOD)
     with zipfile.ZipFile(data/(MOD+'.pak'),'x',zipfile.ZIP_STORED) as z:
         for n,b in common_files.items():z.writestr(n,b)
+        with zipfile.ZipFile(data/'Levels'/LEVEL/'level.pak') as levelpak:
+            ai_path=ET.fromstring(read(levelpak,'whdata_0')).findtext('AI/LevelPath')
+        navigation_mounts=[]
+        for name,blob in mounted_navigation(data/'Levels'/LEVEL,ai_path):
+            z.writestr(name,blob)
+            navigation_mounts.append(name)
         for level in ('trosecko',LEVEL):
             with zipfile.ZipFile(data/'Levels'/level/'level.pak') as levelpak:
                 for n in levelpak.namelist():
@@ -392,7 +413,10 @@ def build(source, target, world, output):
                 texts[name]=merge_missing_strings(base,blob)
         for name,blob in texts.items(): z.writestr(name,blob)
     report={'schema':1,'mod':MOD,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
+        'ai_trace_enabled':trace_ai,'navigation_ai_path':ai_path,'navigation_mounts':navigation_mounts,
         'person_world':person_world_report,
+        'world_services':world_service_report,
+        'population_dependencies':{k:world_dependency_report[k] for k in ('people','resident','conditional','counts','complete')},
         'theresa':dict(world=theresa_world,character=theresa_character,date_source_audit=theresa_audit),
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
         'map_ui':dict(map_report,registration=location_report),'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
@@ -408,5 +432,6 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--kcd1',type=Path,required=True);p.add_argument('--kcd2',type=Path,required=True)
     p.add_argument('--world',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args();r=build(a.kcd1,a.kcd2,a.world,a.output)
+    p.add_argument('--trace-ai',action='store_true',help='Bounded passive native horse/NPC reaction diagnostics')
+    a=p.parse_args();r=build(a.kcd1,a.kcd2,a.world,a.output,a.trace_ai)
     print(json.dumps({k:v for k,v in r.items() if k!='files'},indent=2))

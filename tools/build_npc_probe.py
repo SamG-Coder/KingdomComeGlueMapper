@@ -62,6 +62,14 @@ def asset_path(index, part, field, extension):
     exact = value + extension
     if exact in index:
         return exact
+    if field == 'model' and value.endswith('_dontuse'):
+        # Obsolete source records can retain the authoring-only suffix while
+        # retail ships the same base model and material without it. Resolve
+        # only that exact asset identity, never a similar-looking hairstyle.
+        base = value.removesuffix('_dontuse')
+        if part.get('material', '').lower() == base:
+            replacement = dict(part, model=base)
+            return asset_path(index, replacement, field, extension)
     candidates = [p for p in index if p.startswith('objects/characters/humans/')
                   and p.endswith('/' + value + extension)]
     preferred = [p for p in candidates if '/' + part['kind'] + '/' in p]

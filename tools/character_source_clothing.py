@@ -14,6 +14,11 @@ def garment_layout(part):
     name = PurePosixPath(part['model'].replace('\\', '/')).stem
     match = re.match(r's([12])_p([1-4])_l(\d+)_', name, re.I)
     if not match:
+        # Named bespoke dresses do not encode a p/l tuple in their filename.
+        # Their source armor archetype still defines the body-cloth role.
+        archetype = part.get('armor_archetype_name', '')
+        if part.get('gender_id') == '2' and archetype.startswith('BodyClothShirt'):
+            return 2, 2, 1
         raise ValueError('Unsupported source garment layout: ' + name)
     sex, region, layer = map(int, match.groups())
     return sex, region, layer
@@ -77,6 +82,11 @@ def source_item(tables, source_id, namespace, component, template, source_string
     for old, new in [('ui_name', 'UIName'), ('ui_info', 'UIInfo')]:
         key = rows['player_item'].get(old)
         if not key:
+            if old == 'ui_info':
+                # Many original NPC garments have no description. UIInfo is
+                # optional in KCD2; don't inherit unrelated template prose.
+                result.attrib.pop(new, None)
+                continue
             raise ValueError('Source clothing has no ' + old + ': ' + source_id)
         matches = [r for r in source_strings.findall('Row') if (r.findtext('Cell') or '').lower() == key.lower()]
         if len(matches) != 1:

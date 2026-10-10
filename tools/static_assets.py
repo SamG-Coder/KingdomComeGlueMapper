@@ -61,7 +61,7 @@ class StagedAssets(dict):
         super().__setitem__(name, path)
 
 
-def asset_pack(stack, library, prefix, cache_dir=None):
+def _asset_library(stack, library):
     shader_maps = []
     for game in ("KingdomComeDeliverance", "KingdomComeDeliverance2"):
         features = {}
@@ -88,16 +88,30 @@ def asset_pack(stack, library, prefix, cache_dir=None):
         if name.endswith(('.cgf','.mtl')) or '.dds' in name:
             index['%level%/'+name] = (level_archive,entry)
 
-    def asset_read(name):
-        archive,entry = index[name]
-        return read(archive,entry.filename)
-
-    emitted = StagedAssets(cache_dir) if cache_dir is not None else {}
     families = {}
     for member in index:
         match = re.fullmatch(r"(.+\.dds)(\.(?:a|[0-9]+a?))?", member)
         if match:
             families.setdefault(match[1], []).append((member, match[2] or ""))
+    return index, shader_maps, families
+
+
+def asset_pack(stack, library, prefix, cache_dir=None, *, library_cache=None, texture_cache=None):
+    """Optionally reuse archive indexes and texture files across a population.
+
+    The owner must keep stack and the shared texture directory alive until every
+    character has been written. Material files remain local to each conversion.
+    """
+    if library_cache is None:
+        index, shader_maps, families = _asset_library(stack, library)
+    else:
+        if 'library' not in library_cache:
+            library_cache['library'] = _asset_library(stack, library)
+        index, shader_maps, families = library_cache['library']
+    def asset_read(name):
+        archive, entry = index[name]
+        return read(archive, entry.filename)
+    emitted = StagedAssets(cache_dir) if cache_dir is not None else {}
     texture_names = {}
     material_names = {}
 
@@ -131,9 +145,26 @@ def asset_pack(stack, library, prefix, cache_dir=None):
                 # recognize normal/gloss textures; preserve the basename.
                 if original not in index:
                     raise FileNotFoundError(original)
-                texture_names[original] = prefix + "t" + str(len(texture_names)) + "_" + PurePosixPath(original).name
-                for member, suffix in families.get(original, []):
-                    emitted[texture_names[original]+suffix] = asset_read(member)
+                if texture_cache is None:
+                    texture_names[original] = prefix + "t" + str(len(texture_names)) + "_" + PurePosixPath(original).name
+                    for member, suffix in families.get(original, []):
+                        emitted[texture_names[original]+suffix] = asset_read(member)
+                elif hasattr(texture_cache, 'source_family'):
+                    target_texture, payloads = texture_cache.source_family(original, families.get(original, []), asset_read)
+                    texture_names[original] = target_texture
+                    for target_name, data in payloads.items():
+                        emitted[target_name] = data
+                else:
+                    import hashlib
+                    target_texture = 'objects/characters/gluepopulation/textures/' + hashlib.sha256(original.encode()).hexdigest()[:20] + '_' + PurePosixPath(original).name
+                    texture_names[original] = target_texture
+                    for member, suffix in families.get(original, []):
+                        dest = texture_cache / (target_texture + suffix)
+                        if not dest.exists():
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            dest.write_bytes(asset_read(member))
+                        # A shared disk reference, not another texture allocation.
+                        dict.__setitem__(emitted, target_texture + suffix, dest)
             tex.set("File",texture_names[original])
         emitted[target+".mtl"] = xml(doc)
         material_names[name] = target

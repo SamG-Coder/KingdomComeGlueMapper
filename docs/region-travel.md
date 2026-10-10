@@ -69,6 +69,30 @@ its equipment and saddle inventory remain visible in the destination inventory.
 Calling the horse still failed with the v6 package. Adding the native horse
 scheduler proxy and default smart object alone did not fix it.
 
+### Navigation mount and passive retail trace (v35)
+
+The destination's exported `AI/LevelPath` is `data/levels/kcd1_travel`,
+while the retail log mounts its level/recast archives under
+`mods/gluemappertravel/data/levels/kcd1_travel`. The builder now also exposes
+the original navigation graph, areas, mesh indices, tiles and state groups at
+the declared AI path through the root mod PAK. These are byte-identical aliases,
+not a new mesh or a change to horse ownership. All 738 navigation resources
+are present at the additional address. Whether this resolves autonomous
+movement still requires a retail test; matching binary versions alone does not
+prove usable navigation or quest-dependent state selection.
+
+`--trace-ai` adds an optional passive trace to the installed native horse-command,
+animal interrupt-host, horse movement, human interrupt-host and hit/flee paths.
+Look for `GLUE_AI_TRACE` in `kcd.log`. `horse_command:begin` shows receipt of the
+native ComeToMe command; `horse_host:success` shows that its service search
+succeeded; `horse_move:begin` and `horse_move:failure/success` distinguish movement
+execution from command delivery. A missing phase alone does not prove its cause.
+The trace runs only in the imported map, caps each actor/phase at eight entries
+and the session at 400 events, and makes no input, ownership or movement calls.
+It is disabled in ordinary builds. The original conditions, actions and return
+statuses are preserved. Retail behavior remains unverified until the user tests
+X and NPC reactions in this build.
+
 The static map used by v6 omitted all navigation: no recast.pak, ubernav.tmm or
 areasmission0.bai. The builder now packages the original Rataje navigation,
 including state variants. It checks source mesh settings against installed KDC2,
@@ -641,3 +665,154 @@ is Talk -> quest completion with the menu retained -> Trade -> purchase.
 This validates basic buying; it does not verify every stock entry, selling,
 restocking or save/load behavior. Haggling is not implemented yet and remains
 a separate outstanding part of the merchant integration.
+## Whole-world NPC dependencies and service registration
+
+The importer now reads all human placements from the source mission and layers,
+and joins their SoulList records by persistent entity GUID. The installed KCD1
+export has 2,387 human placements (952 resident and 1,435 conditional). Shared
+names are not identities. Source instance overrides and inline souls without a
+SharedSoulGuid are retained, including overnight schedules written as 24:xx.
+
+`tools/character_world_dependencies.py` discovers the transitive entity graph and
+typed soul, faction, superfaction, brain, class, inventory, clothing, weapon and
+appearance dependencies. It retains inventory selection rules rather than rolling
+them during conversion. Entity allocation and graph binding are separate phases,
+so owner/home cycles do not cause duplicate creation. An unconverted dependency
+marks every dependent NPC incomplete. Each travel build writes the source graph
+to `world-npc-dependencies.json`; this is not evidence of full native conversion.
+
+Two source mapping errors were corrected: `faction.superfaction_id` refers to the
+separate superfaction table, not another faction; and KCD1 soldier social classes
+with crime role 2 map to KCD2 `soldier_crimeAuthority`, not its non-authority
+`soldier` class. Imported civilian settlements extend the native civilians tree
+while retaining its full existing contents. The native Storm guard selector adds
+the imported region to its region gate while keeping the social-class gate.
+
+`tools/character_world_services.py` adds the resident source parking points (57),
+five level exits, 89 hangover points and their hub, eight town-refuge destinations,
+the native flutist controller and player-link router. Both EntityLinks and the
+compiled waiting-link network are written. Horse parking includes the native
+horse-drink animation-helper collection. Emergency destinations currently use
+source town shelter anchors; retail movement to them is unverified. Conditional
+parking camps are not made permanent, and native quest horse overrides are not
+assigned to the player's horse.
+
+Full population/system conversion remains incomplete. Native punishment scenes,
+their actors, the open-world crime concept module, guard bundles, source daily
+activities, non-daycycle brains and quest-controlled layer activation still need
+creation adapters. The build receipt explicitly reports these dependencies and
+does not mark all services registered. Do not describe the source census, serializer
+checks, or a successfully spawned model as proof of working crime, fleeing,
+horse summoning, or a complete population. No retail behavior is verified by this
+offline conversion pass.
+
+## Resident population upgrader
+
+The `codex/kcd1-population-import` branch adds a resumable bulk conversion using
+the same person importer as the merchant and side quest. The October 10 source
+run converted all **950 additional resident humans**, preserving the two people
+already present in the base package. This is **952 source resident placements**
+with no resident conversion failures. It is not a claim that the population has
+been observed in retail or that every AI system has been converted.
+
+```powershell
+.venv/Scripts/python.exe tools/character_population.py `
+  --source 'D:/SteamLibrary/steamapps/common/KingdomComeDeliverance' `
+  --target 'D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2' `
+  --base-package outputs/BuildCache/TravelBase/gluemappertravel `
+  --output outputs/BuildCache/Population
+
+.venv/Scripts/python.exe tools/package_character_population.py `
+  --stage outputs/BuildCache/Population `
+  --output '<fresh-folder>/gluemappertravel'
+```
+
+The input base must be a built travel package with the native services, map and
+existing quest characters. The output is a separate package; these commands do
+not install it or operate the game. Cached conversions are keyed by source
+placement and instance data. Use a fresh stage after changing conversion policy;
+an interrupted run with unchanged policy can resume without rebuilding finished
+people. DDS families are compressed and shared across appearances while person
+records, meshes and material assignments remain independently namespaced.
+
+The upgrader now handles omitted source bodies, case-insensitive morph names,
+fixed exports with stale variant references, retired authoring suffixes whose
+exact base asset still exists, unnamed helpers, empty outfits, inventory-only
+jewelry, and bespoke female dresses classified from source armor metadata.
+Missing morph channels preserve the exported mesh rather than inventing a shape;
+the receipt records the unavailable channel. Different source skin exports can
+have uniform internal/render offsets, which are normalized without changing the
+rendered surface. Skeleton palette merging takes a joint's bind pose from a
+garment that actually weights it, ignoring stale unused copies in other garments.
+
+Every source faction/superfaction and its directed relationships is created, with
+missing location dependencies added. Instance souls receive distinct stable IDs
+so shared source souls cannot overwrite each other's overrides. Homes use source
+persistent IDs and compiled float32 geometry; repeated work/ownership links to
+the same polygon are deduplicated. Existing native services and shop activities
+are retained.
+
+`npc_dummyWait` and `npc_test_base` use the native idle-only `npc_default` brain.
+`npc_invisible` is upgraded from its source behavior tree with native expression
+syntax, mailbox registration and existing native buff dependencies. Empty native
+appearance components preserve its renderless purpose in place of the removed
+source `LODLock`. This helper conversion still needs a runtime LOD/save-load test.
+Helpers without a source faction stay unaffiliated and use the native `none`
+social class rather than being assigned to a town.
+
+The 1,435 conditional human placements are inventoried separately and are **not
+yet converted by this resident pass**. Their source layer activation, battle and
+pursuit controllers, quest contexts and dependencies remain further conversion
+work; they must not all be activated as permanent residents. Ordinary residents
+currently have an interruptible native scheduler baseline with source homes.
+Full source daily activities, non-outfit inventory/weapons, voices/dialogues,
+crime dependencies and gameplay behavior still require their respective adapters
+and live tests. `population.json` and `population-package.json` keep
+`all_people_loaded`, `runtime_verified` and `systems_verified` false until those
+acceptance boundaries have actually been tested.
+
+## Current build and storage
+
+The complete current mod set lives at `outputs/CurrentBuild/Mods`: both
+`kingdomcomegluemapper` (converted world/assets) and `gluemappertravel` (travel,
+map, quests, merchant and population). This is a build directory, not a second
+game installation or a mounted C: directory. `build.json` records file hashes
+and the validation results. A built package does not imply it is installed.
+
+`tools/current_build.py` uses this layout relative to the repository:
+
+| Path | Purpose | Retention |
+| --- | --- | --- |
+| `outputs/CurrentBuild` | One complete checked build | Replaced after the next build passes validation |
+| `outputs/BuildCache/World` | Converted base world | Rebuildable with the existing setup converter |
+| `outputs/BuildCache/TravelBase` | Generated travel overlay before bulk population | Rebuilt with `--refresh-base` |
+| `outputs/BuildCache/Population` | Resumable person archives and shared DDS families | Rebuilt with `--refresh-population` |
+| `outputs/BuildCache/build-inputs.json` | Local source/target/mod-tools paths | Keep this small build configuration |
+| `outputs/BuildWork` | Candidate package, table extraction and temporary files | Generated scratch; do not clear during a build |
+| `outputs/BuildLogs` | Latest native table validation log | Small diagnostic evidence |
+| `backups/CurrentBuild/<UTC timestamp>` | Files changed or added manually to the previous build | Preserve; unchanged generated assets are never copied here |
+
+```powershell
+.venv/Scripts/python.exe tools/current_build.py status
+.venv/Scripts/python.exe tools/current_build.py build
+.venv/Scripts/python.exe tools/current_build.py validate
+# After changes to the travel generator or appearance conversion policy:
+.venv/Scripts/python.exe tools/current_build.py build --refresh-base --refresh-population
+```
+
+The local `build-inputs.json` contains `source`, `target`, `mod_tools`, and
+optionally `powershell` (the PowerShell 7 executable). The base world cache is
+seeded from the already converted world mod, not the original game PAKs; to
+recreate it from scratch, run the setup world's conversion/build workflow and
+place the resulting `kingdomcomegluemapper` package in `BuildCache/World`.
+Current-build assembly does not yet invoke that terrain pipeline itself.
+
+All Python and child-process temporary output is redirected into `BuildWork/temp`
+on the workspace drive. A working lock rejects concurrent builds. A candidate
+must pass world/texture/identity validation and the official GeneratedDatabase
+serializer before promotion. Failed validation leaves the current build intact.
+The previous generated build exists only during directory promotion for rename
+failure recovery and is then removed; it is not retained as an asset backup.
+If a process dies during promotion, inspect `BuildWork/previous` before retrying.
+Source changes belong in Git on the population branch. Saves and user-authored
+content are not managed or deleted by this build tool.

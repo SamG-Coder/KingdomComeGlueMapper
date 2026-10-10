@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import math
+import struct
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import zipfile
@@ -10,6 +11,14 @@ from campaign_entity_links import append_links, guid_value, native_guid
 from campaign_trigger_areas import TriggerArea, read_areas, write_areas
 from character_person_activity import validate_scheduler_targets
 from upgrade_map import read, xml
+
+
+def same_area_geometry(left, right):
+    """Compare at the compiled format's float32 precision, including height."""
+    def encoded(area):
+        values = [area.height, *(v for point in area.points for v in point)]
+        return struct.pack('<' + 'f' * len(values), *values)
+    return len(left.points) == len(right.points) and encoded(left) == encoded(right)
 
 
 def source_home_geometry(entity):
@@ -109,6 +118,9 @@ def register_person_world(files, people, source, target):
             if container is None: container = ET.SubElement(row, 'Links')
             container.append(link);connect(npc, anchor, '_,schedulerWait')
         homes = [l for l in person['ai']['links'] if l['label'].split(',')[0] == 'Home']
+        # One source area may be linked for both ownership and work. Those are
+        # separate roles on the same polygon, not two competing homes.
+        homes = list({ET.fromstring(l['source_xml']).get('EntityGuid'): l for l in homes}.values())
         if len(homes) > 1: raise ValueError('Ambiguous source home for ' + person['name'])
         home_report = None
         if homes:
@@ -121,15 +133,19 @@ def register_person_world(files, people, source, target):
                     source_shapes[level] = {a.guid: a for a in read_areas(read(z, 'triggerareas.fubar'))['areas']}
             area = next((e for e in mission if e.get('EntityGuid') == native_guid(area_guid)), None)
             if area is None:
-                area = create(src.get('Name'), 'TriggerArea', src.get('Pos'), native_guid(area_guid))
+                # Source home names (notably "banditCamp") repeat in different
+                # settlements. Persistent identity, not that display name,
+                # identifies an ownership polygon in the destination world.
+                area = create('gm_person_home_area_' + format(area_guid, '016x'),
+                              'TriggerArea', src.get('Pos'), native_guid(area_guid))
                 if src.get('Rotate'): area.set('Rotate', src.get('Rotate'))
                 # Ownership geometry is separate from crime/trespass zoning.
                 ET.SubElement(area, 'Properties', bSaved_by_game='0')
-            elif area.get('EntityClass') != 'TriggerArea':
+            elif area.get('EntityClass') not in ('TriggerArea', 'SmartAreaShape'):
                 raise ValueError('Source home identity has an incompatible destination entity')
             geometry = source_shapes[level].get(area_guid)
             if geometry is None: geometry = source_home_geometry(src)
-            if area_guid in areas and areas[area_guid].points != geometry.points:
+            if area_guid in areas and not same_area_geometry(areas[area_guid], geometry):
                 raise ValueError('Existing home polygon differs from source')
             areas[area_guid] = geometry
             hub_guid = native_guid(int.from_bytes(hashlib.sha256(('person-home/' + guid).encode()).digest()[:8], 'little'))

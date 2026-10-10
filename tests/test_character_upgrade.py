@@ -44,6 +44,17 @@ def target_skin(source, rotate=False, child_translation=0):
 
 
 class SkinUpgradeTests(unittest.TestCase):
+    def test_unused_palette_joint_does_not_override_weighted_garment_bind(self):
+        unused = sample_skin()
+        weighted = target_skin(sample_skin(extra=True), child_translation=.002)
+        output = canonicalize_skin_skeletons([unused, weighted])
+        self.assertAlmostEqual(CompiledSkin(output[0]).info['bones'][1]['bind'][3], .002)
+        self.assertEqual(CompiledSkin(output[1]).streams[0].data, CompiledSkin(weighted).streams[0].data)
+        # Different binds on two garments that actually use the joint remain
+        # an error; the adapter must not hide a genuine skinning conflict.
+        with self.assertRaisesRegex(ValueError, 'Conflicting bind pose'):
+            canonicalize_skin_skeletons([sample_skin(extra=True), weighted])
+
     def test_identity_bind_keeps_surface_weights_uvs_and_morph_bytes(self):
         source=sample_skin(morph=True);out,report=upgrade_skin(source,source)
         a,b=CompiledSkin(source),CompiledSkin(out)

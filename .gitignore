@@ -3,6 +3,7 @@
 /.deps/
 /reports/
 /outputs/
+/backups/
 *.pak
 *.dds
 *.dds.*
