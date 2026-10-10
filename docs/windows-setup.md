@@ -184,3 +184,10 @@ builds without duplicate level rows, preservation of world files, legacy-mod
 migration and failed-install rollback. The frozen alpha.4 EXE self-test passes
 with Pillow, NumPy, the converters, Tcl and bundled Lua resources. An initial
 packaging check caught the old Pillow exclusion; the release build includes it.
+
+The frozen alpha.4 worker also completed a clean, end-to-end package-only build
+from both installed games: all 15 stages passed in 920.5 seconds, with 79,301
+imported world assets and a 31-file combined package (19,289,827,365 bytes).
+All 15 generated database tables passed the official GeneratedDatabase reader.
+This run did not modify the installed game or replay the fresh package in retail.
+The installer downloaded back from the draft release matched its SHA-256.
