@@ -103,3 +103,41 @@ destination services remain candidates. Spawning and partial combat response
 are confirmed; uninterrupted combat, autonomous aggression and full behavior
 dependency conversion are not verified. Do not present this commit as a fix
 for the combat lock.
+
+## Crime/faction audit and destination bandit requirements
+
+The user subsequently observed the criminal/hare tutorial during the Fritz
+test. The exact tutorial and crime-state transition were not captured, so this
+does not independently prove the assault was classified as a crime.
+
+Inspection of the installed records confirmed social class 38 (`bandit`,
+crime role 3). His faction is
+`trosecko_enemies_poachers_campPodseminsko`, below `trosecko_enemies_poachers`
+and `trosecko_enemies`. The latter carries `Labels="publicEnemy"` and
+`LevelId="2"`. The camp carries Trosky LocationId
+`e2771416-6e56-4543-9079-ac3973a1c0b3`, which is absent from the KCD1
+destination's registered location memberships. These are confirmed source-map
+dependencies; their effect on runtime hostility and the combat lock is not
+yet verified. The current clone does not rebind them.
+
+A complete destination bandit adapter must:
+
+1. Create independent destination faction branches, preserving native enemy
+   labels and relationship semantics while remapping region and camp location
+   references. Keep the original KCD2 factions untouched.
+2. Bind the new camp to a registered KCD1 location and actual smart-area
+   geometry; assign the cloned soul to that destination faction.
+3. Convert the bandit's home/camp scheduler and required guard/patrol, rest,
+   healing and movement targets. Relocate the dependency graph coherently;
+   retain the isolated idle profile only as a separately named test mode.
+4. Resolve the behavior's actual flee/surrender/crime dependencies, including
+   local guard/reporting or level-exit targets where those paths require them.
+   Do not satisfy references with unrelated Trosky entities or globally disable
+   surrender to conceal missing services.
+5. Validate the final package's cross-references, then verify in retail: enemy
+   recognition, attack/crime classification, on-foot and mounted combat,
+   disengagement/flee/surrender, and save/load plus return visits.
+
+The immediate next scope is destination faction/location binding and a
+controlled aggression/crime test. This document records the required work;
+it does not claim that the destination bandit adapter is implemented.
