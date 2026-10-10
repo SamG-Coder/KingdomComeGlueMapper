@@ -38,7 +38,9 @@ class EntryTests(unittest.TestCase):
               <Link TargetId="999" Name="_,quest_action"/>
             </EntityLinks></Entity>
             <Entity Name="so_player_scheduler" EntityId="2" EntityGuid="{default}" EntityClass="SmartObjectHolder"><Properties guidSmartObjectType="native-player"/></Entity>
-            <Entity Name="sa_land" EntityId="3" EntityGuid="00000003-0000-0001" EntityClass="SmartAreaShape"><Properties guidSmartAreaTemplate="native-land"/><EntityLinks><Link TargetId="999" Name="punishment"/></EntityLinks></Entity>
+            <Entity Name="sa_land" EntityId="3" EntityGuid="00000003-0000-0001" EntityClass="SmartAreaShape"><Properties guidSmartAreaTemplate="native-land"/><EntityLinks><Link TargetId="999" Name="punishment"/><Link TargetId="4" Name="mrkev"/><Link TargetId="5" Name="redkev"/></EntityLinks></Entity>
+            <Entity Name="human_interrupt" EntityId="4" EntityGuid="00000004-0000-0001" EntityClass="GeomEntity"><Properties guidSmartObjectType="human"/></Entity>
+            <Entity Name="animal_interrupt" EntityId="5" EntityGuid="00000005-0000-0001" EntityClass="SmartObjectHolder"><Properties guidSmartObjectType="animal"/></Entity>
             </Objects>''',
             'tables/ai/scheduler.xml': f'''<database><Schedulers version="1">
               <C_SmartHub EntityGuid="{guid_value(proxy)}"><Links>

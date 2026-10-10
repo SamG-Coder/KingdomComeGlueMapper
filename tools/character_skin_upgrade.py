@@ -162,7 +162,7 @@ def encode_morphs(chunk, records, linear, internal_linear):
 
 
 def upgrade_skin(blob, target_skeleton, *, variant=None, clear_hiding=True, bone_mapping=None,
-                 discard_unused_variants=False, morph_weights=None, geometry_mode='preserve'):
+                 discard_unused_variants=False, morph_weights=None, geometry_mode='preserve', geometry_field=None):
     """Return upgraded bytes and evidence; source buffers are never modified.
 
     ``variant`` is the authored source garment shape, baked once before reposing.
@@ -175,8 +175,12 @@ def upgrade_skin(blob, target_skeleton, *, variant=None, clear_hiding=True, bone
     additionally moves the geometry by the target/source bind transform blend;
     this is useful for explicit pose conversion, but can separate independently
     weighted clothing and body seams when the target has different proportions.
+    ``geometry_field`` instead uses one anatomical field shared by all parts;
+    its Jacobian updates normals, tangents and retained morph deltas together.
     """
     if geometry_mode not in ('preserve','repose'):raise ValueError('Unknown geometry mode')
+    if geometry_field is not None and geometry_mode != 'preserve':
+        raise ValueError('Shared geometry field cannot be combined with weighted reposing')
     skin=CompiledSkin(blob);source=skin.info['bones'];target_chunks=read_chunks(target_skeleton)
     target=bone_table(target_chunks);native={b['name']:b for b in target}
     if not target:raise ValueError('Missing native skeleton')
@@ -221,6 +225,8 @@ def upgrade_skin(blob, target_skeleton, *, variant=None, clear_hiding=True, bone
         if np.any(m['ids']>=skin.n):raise ValueError('Variant vertex out of range')
         vertices[m['ids']]+=m['delta']*weight
     updated=np.einsum('nij,nj->ni',linear,vertices)+blended[:,:3,3]
+    if geometry_field is not None:
+        updated, linear = geometry_field.transform(vertices)
     moved=np.linalg.norm(updated-skin.vertices,axis=1)
     geometry_changed=bool(np.any(moved>1e-7))
     # Repose render and internal geometry as a pair, retaining influence records.
@@ -311,7 +317,8 @@ def upgrade_skin(blob, target_skeleton, *, variant=None, clear_hiding=True, bone
         raise AssertionError('Bind conversion changed skin influences')
     if not np.array_equal(checked.faces,skin.faces):raise AssertionError('Bind conversion changed topology')
     return output,dict(vertices=skin.n,triangles=len(skin.faces),variant=variant,baked_morphs=shapes,
-        geometry_mode=geometry_mode,
+        geometry_mode='anatomical_landmarks' if geometry_field is not None else geometry_mode,
+        anatomical_landmarks=len(geometry_field.source) if geometry_field is not None else 0,
         bone_mapping=mapping,extra_influenced_vertices=skin.info['extra_influenced_vertices'],
         moved_vertices=int(np.count_nonzero(moved>1e-7)),maximum_displacement_mm=float(moved.max()*1000),
         morph_quantization_error_mm=quantization_error*1000,

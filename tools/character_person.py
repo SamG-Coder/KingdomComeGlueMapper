@@ -14,6 +14,8 @@ from campaign_dependency_adapters import SourceTables
 from campaign_sources import RetailSourceReader
 from campaign_entity_links import native_guid
 from upgrade_map import read, xml
+from character_person_ai import (capture_person_ai, native_brain_and_class,
+                               stat_operations, apply_person_properties, receipt, register_factions)
 
 
 def native_xml(blob):
@@ -41,7 +43,12 @@ def resolve_person(source, name, level='rataje'):
                            if s.findtext('Name') == name), 'source person instance')
     if instance.findtext('SharedSoulGuid') != soul['soul_id']:
         raise ValueError('Source person instance/table identity differs')
+    with RetailSourceReader(source) as reader:
+        tables = SourceTables(source, reader)
+        ai = capture_person_ai(tables, soul, actor, instance, entities)
+        evidence.update({k: v['provenance'] for k, v in tables.cache.items()})
     return dict(name=name, soul=soul, actor=actor, instance=instance, source_level=level,
+                ai=ai,
                 provenance=dict(tables=evidence, mission_sha256=hashlib.sha256(mission).hexdigest()))
 
 
@@ -57,6 +64,7 @@ def register_person(add_entity, wh, person, placement=None):
         raise ValueError('Person is already registered: ' + person['name'])
     npc = add_entity(person['name'], actor.get('EntityClass'), pose.get('Pos'),
                      native_guid(int(actor.get('EntityGuid'), 16)), pose.get('Rotate'))
+    apply_person_properties(npc, actor)
     soul = ET.SubElement(souls, 'Soul', version='8')
     for key, value in dict(SharedSoulGuid=person['soul']['soul_id'], Guid=identity,
                            EntityGuid=npc.get('EntityGuid'), Name=person['name']).items():
@@ -73,13 +81,21 @@ def actor_resources(target, person, character, namespace, *, role_name, native_s
         template = next(e for e in native.iter('soul') if e.get('soul_name') == native_soul_name)
         roles = native_xml(read(archive, 'Libs/Tables/rpg/role.xml'))
         role = copy.deepcopy(next(e for e in roles.iter('role') if e.get('role_name') == native_role_name))
+        brains = native_xml(read(archive, 'Libs/Tables/ai/brain.xml'))
+        classes = native_xml(read(archive, 'Libs/Tables/rpg/social_class.xml'))
     root = ET.Element('database', name='barbora')
     soul = ET.SubElement(ET.SubElement(root, 'souls', version='2'), 'soul', dict(template.attrib))
     soul.set('soul_id', person['soul']['soul_id']); soul.set('soul_name', person['name'])
     soul.set('soul_archetype_id', character['archetype'])
     soul.attrib.pop('skald_character_name', None)
-    # The caller selects the native brain. Importing appearance does not imply
-    # conversion of the source person's daily schedule or quest behaviors.
+    brain, social = native_brain_and_class(person['ai'], brains, classes)
+    soul.set('brain_id', brain)
+    soul.set('social_class_id', social)
+    soul.set('factionName', register_factions(files, person['ai']))
+    for key in ('xp_multiplier', 'digestion_multiplier', 'initial_clothing_dirt'):
+        if person['soul'].get(key) not in ('', None): soul.set(key, person['soul'][key])
+    # Source VIP IDs are quest-specific; a matching integer in KCD2 can name a
+    # different character. Keep the neutral template VIP until explicitly mapped.
     role.set('role_name', role_name)
     role_root = ET.Element('database', name='barbora')
     ET.SubElement(role_root, 'roles', version='1').append(role)
@@ -98,6 +114,7 @@ def actor_resources(target, person, character, namespace, *, role_name, native_s
         'names': [('setUiName', dict(name=person['instance'].findtext('StaticData/NameStringId')))],
         'appearance': [('set' + k.title(), dict(name=v)) for k, v in character['appearance'].items()],
         'equipment': [('setInventory', dict(preset=character['inventory']))],
+        'abilities': stat_operations(person['soul']),
     }
     for task, steps in operations.items():
         filename = task + '/' + namespace + '.xml'
@@ -111,5 +128,6 @@ def actor_resources(target, person, character, namespace, *, role_name, native_s
         for name, attributes in steps: ET.SubElement(ops, name, attributes)
         files['Libs/Storm/' + filename] = xml(rules)
     files['Libs/Storm/storm.xml'] = xml(storm)
+    files['Libs/GlueMapper/PersonImport/' + namespace + '.json'] = receipt(person, soul, namespace)
     return files
 

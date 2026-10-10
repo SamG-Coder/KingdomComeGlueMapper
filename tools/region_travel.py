@@ -25,6 +25,7 @@ import region_travel_driver as driver
 from region_travel_ui import import_showroom
 from region_travel_companions import import_horse_scheduler, import_horse_scheduler_table, horse_recovery_resources
 from region_travel_navigation import package_navigation
+from character_person_world import register_person_world
 from region_travel_entry import register_entry
 from region_travel_map import resources as map_resources
 from region_travel_locations import resources as location_resources, merge_missing_strings
@@ -33,6 +34,7 @@ from character_person_appearance import build_appearance
 from region_travel_merchant import actor_resources, register_world
 from region_travel_visit import attach as attach_visit
 from region_travel_tables import managed_patches
+import region_travel_theresa as theresa
 
 MOD = 'gluemappertravel'
 LEVEL = 'kcd1_travel'
@@ -246,6 +248,11 @@ def build(source, target, world, output):
     character_directory=output/'merchant-character'
     character_report=build_appearance(source,target,merchant,namespace,character_directory)
     merchant_files.update(actor_resources(target,merchant,character_report,namespace))
+    print('Importing Theresa and registering the arrival side quest',flush=True)
+    theresa_person,theresa_audit=theresa.resolve(source)
+    theresa_directory=output/'theresa-character'
+    theresa_character=build_appearance(source,target,theresa_person,theresa.NAMESPACE,theresa_directory)
+    merchant_files,theresa_names=theresa.resources(target,source,theresa_person,theresa_character,merchant_files)
     dialogue_files.update(merchant_files)
     travel_level,map_files,map_report=map_resources(source,level_registration(target,LEVEL,LEVEL_ID),LEVEL)
     dialogue_files.update(map_files)
@@ -320,6 +327,11 @@ def build(source, target, world, output):
                 graphs,visit_strings=attach_visit(graphs,graph,LEVEL,player.findtext('SharedSoulGuid'),merchant['soul']['soul_id'])
                 replacements,graphs,merchant_world_report=register_world(
                     replacements,graphs,graph,source,target,merchant,shop_report,guid)
+                replacements,graphs,theresa_strings,theresa_world=theresa.register_world(
+                    replacements,graphs,graph,LEVEL,player.findtext('SharedSoulGuid'),theresa_person)
+                replacements,person_world_report=register_person_world(
+                    replacements,[merchant,theresa_person],source,target)
+                visit_strings=merge_localization(visit_strings,theresa_strings)
                 replacements,location_files,location_strings,location_report=location_resources(
                     source,target,replacements,LEVEL_ID)
                 dialogue_files.update(location_files)
@@ -341,9 +353,12 @@ def build(source, target, world, output):
         'Libs/Tables/level__'+MOD+'.xml': travel_level,
         **graphs, **dialogue_files,
     }
-    for path in sorted(character_directory.rglob('*')):
+    for path in sorted([*character_directory.rglob('*'), *theresa_directory.rglob('*')]):
         if path.is_file():
-            name = path.relative_to(character_directory).as_posix()
+            owner = character_directory if path.is_relative_to(character_directory) else theresa_directory
+            name = path.relative_to(owner).as_posix()
+            if name.startswith('Localization/'):
+                continue  # Localized source item names belong in the language PAK.
             if name in common_files:
                 raise ValueError('Duplicate packaged resource: ' + name)
             common_files[name] = path.read_bytes()
@@ -363,13 +378,22 @@ def build(source, target, world, output):
     with zipfile.ZipFile(target/'Localization/English_xml.pak') as z:
         quest_strings=merge_localization(read(z,'text_ui_quest.xml'),visit_strings)
     with zipfile.ZipFile(localization/'English_xml.pak','x',zipfile.ZIP_STORED) as z:
-        texts={'text_ui_dialog.xml':dialogue_strings,'text_ui_quest.xml':quest_strings}
         with zipfile.ZipFile(target/'Localization/English_xml.pak') as native_strings:
+            soul_strings=merge_localization(read(native_strings,'text_ui_soul.xml'),theresa_names)
+        texts={'text_ui_dialog.xml':dialogue_strings,'text_ui_quest.xml':quest_strings,'text_ui_soul.xml':soul_strings}
+        with zipfile.ZipFile(target/'Localization/English_xml.pak') as native_strings:
+            for character_dir in (character_directory, theresa_directory):
+                item_strings = character_dir/'Localization/English/text_ui_items.xml'
+                if item_strings.is_file():
+                    base = texts.get('text_ui_items.xml', read(native_strings, 'text_ui_items.xml'))
+                    texts['text_ui_items.xml'] = merge_localization(base, item_strings.read_bytes())
             for name,blob in location_strings.items():
                 base=texts[name] if name in texts else read(native_strings,name)
                 texts[name]=merge_missing_strings(base,blob)
         for name,blob in texts.items(): z.writestr(name,blob)
     report={'schema':1,'mod':MOD,'level':LEVEL,'level_id':LEVEL_ID,'departure':evidence,'stations':stations,
+        'person_world':person_world_report,
+        'theresa':dict(world=theresa_world,character=theresa_character,date_source_audit=theresa_audit),
         'requires_converted_asset_mod':'kingdomcomegluemapper','runtime_verified':False,'round_trip_verified':False,
         'map_ui':dict(map_report,registration=location_report),'rattay_inn':dict(world=merchant_world_report,shop=shop_report,
             character=character_report,source=merchant['provenance']),

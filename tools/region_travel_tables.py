@@ -9,10 +9,12 @@ from upgrade_map import xml
 KEYS = {
     'souls': 'soul_id', 'roles': 'role_name', 'Shops': 'shop_id',
     'InventoryPresets': 'Name', 'CharacterComponents': 'Name',
+    'ClothingMaterials': 'Name',
     'clothing_presets': 'clothing_preset_id', 'ItemClasses': 'Id',
     'levels': 'LevelId', 'LevelSwitches': 'Name',
     'locations': 'location_id', 'poi_types': 'poi_type_id',
     'ui_map_labels': 'ui_map_label_id', 'ui_local_mapss': 'ui_local_map_id',
+    'FactionTree': 'Name',
 }
 
 # RequiredAttribute fields from KCD2Mod's GeneratedDatabase reader. The XML
@@ -63,7 +65,15 @@ def managed_patches(files, modid):
             key = row.get(KEYS[table.tag])
             if key is None or key in seen:
                 raise ValueError('Missing or duplicate primary key in ' + name + ': ' + str(key))
-            seen.add(key)
+            if table.tag == 'FactionTree':
+                # Faction names are global even when nested under different
+                # parents. Validate the whole subtree, not only its root.
+                keys = [e.get('Name') for e in row.iter('Faction')]
+                if None in keys or len(keys) != len(set(keys)) or seen.intersection(keys):
+                    raise ValueError('Missing or duplicate nested faction name in ' + name)
+                seen.update(keys)
+            else:
+                seen.add(key)
             rows.append(copy.deepcopy(row))
     result.update({name: xml(root) for name, (root, _, _) in groups.items()})
     return result

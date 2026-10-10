@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from campaign_entity_links import append_links, guid_value
 from campaign_trigger_areas import TriggerArea, read_areas, write_areas
 from upgrade_map import read, xml
+from character_world_ai import register_interrupt_services
 
 
 STREAMING_SOURCE = 'Quests/Final/Barbora/utils/streaming/streamprofileshandling.xml'
@@ -150,6 +151,7 @@ def register_entry(files, graph, graph_path, native_level, native_scripts,
     bottom = -50.0
     height = maximum - bottom + 50.0
     land.set('Pos', f'0,0,{bottom}')
+    world_ai = register_interrupt_services(source, by_name['sa_land'], land, place, waiting)
     area = ET.SubElement(land, 'Area', Id='0', Group='0', Proximity='0', Priority='0', Height=str(height))
     points = ((0., 0., bottom), (size, 0., bottom), (size, size, bottom), (0., size, bottom))
     point_xml = ET.SubElement(area, 'Points')
@@ -299,6 +301,7 @@ def register_entry(files, graph, graph_path, native_level, native_scripts,
     return files, resources, {'level_id': level_id, 'level_module': level, 'profile': profile,
         'profile_entities': len(layer), 'station_streaming': station_streaming, 'layer_activation': True, 'root_ai_area': land.get('EntityGuid'),
         'root_ai_bounds': [0, 0, size, size], 'player_scheduler_links': scheduler_links,
+        'world_ai': world_ai,
         'streaming_source': STREAMING_SOURCE, 'streaming_sha256': hashlib.sha256(streaming).hexdigest(),
         'entry_events': ['OnWake', 'OnLevelSwitched'], 'creates_companion': False,
         'changes_ownership': False, 'runtime_verified': False}
