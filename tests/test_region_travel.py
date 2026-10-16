@@ -29,6 +29,33 @@ class RegionTravelTests(unittest.TestCase):
         broken=native.replace(('TargetGuid="'+default+'"').encode(),b'TargetGuid="999"')
         with self.assertRaises(ValueError):import_horse_scheduler_table(destination,broken,mission)
 
+    def test_compiled_horse_scheduler_rejects_unverified_link_children(self):
+        mission=b'<Objects><Entity Name="playerHorseProxy" EntityGuid="835d5a78-de68-48f5"/><Entity Name="playerHorseDefaultSmartObject" EntityGuid="54932c15-1938-4949"/></Objects>'
+        proxy=str(guid_value('835d5a78-de68-48f5'));default=str(guid_value('54932c15-1938-4949'))
+        activity=f'<S_ActivityLink TargetGuid="{default}" PositioningDelegate="0"><Parameters BehaviorName="use"/></S_ActivityLink>'
+        header=f'<database><Schedulers version="1"><C_SmartHub EntityGuid="{proxy}"><Links>'
+        footer=f'</Links></C_SmartHub><C_SmartHub EntityGuid="{default}"/></Schedulers></database>'
+        destination=b'<database><Schedulers version="1"><C_SmartHub EntityGuid="123"/></Schedulers></database>'
+        for bad in (f'<S_ActivityLink TargetGuid="{default}" PositioningDelegate="0"/>',
+                    f'<S_ActivityLink TargetGuid="{default}" PositioningDelegate="0"><Parameters/></S_ActivityLink>',
+                    f'<S_ActivityLink TargetGuid="999" PositioningDelegate="0"><Parameters BehaviorName="use"/></S_ActivityLink>',
+                    f'<S_ActivityLink TargetGuid="{default}" PositioningDelegate="999"><Parameters BehaviorName="use"/></S_ActivityLink>'):
+            with self.assertRaises(ValueError):import_horse_scheduler_table(destination,(header+activity+bad+footer).encode(),mission)
+
+    def test_compiled_horse_scheduler_tolerates_a_resolvable_unmodelled_child(self):
+        # A native record may carry terminal children this importer was never
+        # taught to model; a resolvable unknown tag is tolerated, not rejected.
+        mission=b'<Objects><Entity Name="playerHorseProxy" EntityGuid="835d5a78-de68-48f5"/><Entity Name="playerHorseDefaultSmartObject" EntityGuid="54932c15-1938-4949"/></Objects>'
+        proxy=str(guid_value('835d5a78-de68-48f5'));default=str(guid_value('54932c15-1938-4949'))
+        links=(f'<S_ActivityLink TargetGuid="{default}" PositioningDelegate="0"><Parameters BehaviorName="use"/></S_ActivityLink>'
+               f'<S_TerminalChild TargetGuid="{default}" PositioningDelegate="0"><Parameters BehaviorName="use"/></S_TerminalChild>')
+        native=(f'<database><Schedulers version="1"><C_SmartHub EntityGuid="{proxy}"><Links>'+links+
+                f'</Links></C_SmartHub><C_SmartHub EntityGuid="{default}"/></Schedulers></database>').encode()
+        destination=b'<database><Schedulers version="1"><C_SmartHub EntityGuid="123"/></Schedulers></database>'
+        blob,report=import_horse_scheduler_table(destination,native,mission)
+        self.assertEqual(report['compiled_scheduler_records'],2)
+        self.assertEqual(len(ET.fromstring(blob).find('.//C_SmartHub/Links')),2)
+
     def test_navigation_rejects_wrong_version_offsets_and_truncation(self):
         settings=bytes(56)
         tile=struct.pack('<4I',0x444e4156,14,12,34)

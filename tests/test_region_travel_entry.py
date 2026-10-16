@@ -10,6 +10,7 @@ from region_travel import guid, travel_graph
 from region_travel_entry import register_entry, STREAMING_SOURCE
 from campaign_entity_links import guid_value
 from campaign_trigger_areas import read_areas, write_areas
+from upgrade_map import xml
 
 
 def archive(files):
@@ -152,6 +153,39 @@ class EntryTests(unittest.TestCase):
         self.assertIsNone(project.find('.//InteractionTriggerNode'))
         self.assertEqual(graphs['Quests/entry/streamprofileshandling.xml'], scripts.read(STREAMING_SOURCE))
         self.assertIsNone(root.find('.//Timer'))
+
+    def test_ready_port_is_declared_unconsumed_when_no_graph_consumes_it(self):
+        files, native, scripts = self.fixture()
+        _, graphs, report = self.package(files, native, scripts)
+        producers = [(name, port) for name, blob in graphs.items()
+                     for port in ET.fromstring(blob).iter('Port')
+                     if port.get('Name') == 'ready' and port.get('Direction') == 'Out']
+        self.assertEqual([name for name, _ in producers], ['Quests/entry/destination.xml'])
+        sources = {e.get('From') for blob in graphs.values() for e in ET.fromstring(blob).iter('Edge')}
+        self.assertNotIn('destination.ready', sources)
+        self.assertEqual(report['ready_port'], 'destination.ready')
+        self.assertEqual(report['ready_port_consumers'], 0)
+
+    def test_ready_gate_is_wired_only_to_a_real_consumer_node(self):
+        files, native, scripts = self.fixture()
+        graph = ET.fromstring(travel_graph('Travel', 'to_trosky'))
+        nodes = graph.find('Skald/Project/Nodes')
+        ET.SubElement(nodes, 'Edge', From='destination.ready', To='travel.IsActive')
+        trigger = ET.SubElement(nodes, 'InteractionTriggerNode', Name='use_cart')
+        ET.SubElement(trigger, 'Edge', From='stale.native', To='IsActive')
+        _, graphs, report = register_entry(files, xml(graph), 'Quests/Travel.xml', native, scripts,
+                                           'destination', 42, guid, station_streaming=True)
+        trigger = ET.fromstring(graphs['Quests/Travel.xml']).find(".//InteractionTriggerNode[@Name='use_cart']")
+        self.assertEqual(trigger.find("Edge[@To='IsActive']").get('From'), 'destination.ready')
+        self.assertEqual(report['ready_port_consumers'], 1)
+
+    def test_stale_interaction_entity_is_left_resident(self):
+        files, native, scripts = self.fixture()
+        result, _, report = self.package(files, native, scripts)
+        layer = next(k for k in result if k.startswith('layers/'))
+        streamed = {e.get('Name') for e in ET.fromstring(result[layer]).findall('Entity')}
+        self.assertNotIn('gmtravel_interact_kcd1', streamed)
+        self.assertEqual(report['profile_entities'], len(streamed))
 
 
 if __name__ == '__main__':

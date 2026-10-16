@@ -36,6 +36,7 @@ def entry_graph(level, profile):
     host = ET.SubElement(ET.SubElement(root, 'Skald'), 'Level',
                          Name=level, HibernateMode='Auto')
     ports = ET.SubElement(host, 'Ports')
+    # Kept for a future activation gate: no shipped graph consumes this port yet.
     ET.SubElement(ports, 'Port', Name='ready', Direction='Out', Type='bool')
     if profile is None:
         nodes = ET.SubElement(host, 'Nodes')
@@ -223,7 +224,7 @@ def register_entry(files, graph, graph_path, native_level, native_scripts,
         for entity in list(mission):
             name = entity.get('Name', '')
             if (name.startswith('gmtravel_kcd1_') or name in
-                    {'gmtravel_interact_kcd1', 'gmtravel_return_driver', 'gmtravel_return_driver_home'}):
+                    {'gmtravel_return_driver', 'gmtravel_return_driver_home'}):
                 mission.remove(entity)
                 entity.set('Layer', layer_name)
                 layer.append(entity)
@@ -292,10 +293,17 @@ def register_entry(files, graph, graph_path, native_level, native_scripts,
         definitions = ET.SubElement(project, 'Definitions')
     ET.SubElement(definitions, 'Definition', File='entry/' + level + '.xml')
     ET.SubElement(project.find('Nodes'), level, Name=level)
+    # No shipped graph creates the 'use_cart' interaction node this gate was
+    # written for, so '<level>.ready' had no consumer and the old rewrite was a
+    # silent no-op. Wire a gate only for a consumer that really exists, and let
+    # the receipt state whether the port is consumed. Offline structural
+    # correction: the gate still needs a real consumer and in-game acceptance.
+    ready = level + '.ready'
+    consumers = [e for e in root.iter('Edge') if e.get('From') == ready]
     trigger = project.find("Nodes/InteractionTriggerNode[@Name='use_cart']")
-    if station_streaming and trigger is not None:
+    if station_streaming and consumers and trigger is not None:
         for edge in trigger.findall("Edge[@To='IsActive']"):
-            edge.set('From', level + '.ready')
+            edge.set('From', ready)
     parent = graph_path.rsplit('/', 1)[0]
     streaming = read(native_scripts, STREAMING_SOURCE)
     helper = ET.fromstring(streaming).find('Skald/Module')
@@ -306,7 +314,7 @@ def register_entry(files, graph, graph_path, native_level, native_scripts,
     return files, resources, {'level_id': level_id, 'level_module': level, 'profile': profile,
         'profile_entities': len(layer), 'station_streaming': station_streaming, 'layer_activation': True, 'root_ai_area': land.get('EntityGuid'),
         'root_ai_bounds': [0, 0, size, size], 'player_scheduler_links': scheduler_links,
-        'world_ai': world_ai,
+        'world_ai': world_ai, 'ready_port': ready, 'ready_port_consumers': len(consumers),
         'streaming_source': STREAMING_SOURCE, 'streaming_sha256': hashlib.sha256(streaming).hexdigest(),
         'entry_events': ['OnWake', 'OnLevelSwitched'], 'creates_companion': False,
         'changes_ownership': False, 'runtime_verified': False}

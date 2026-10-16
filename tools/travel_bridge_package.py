@@ -18,6 +18,9 @@ MENU_FILES = {
 }
 LEVEL_TABLE = f'Libs/Tables/level__{MOD_ID}.xml'
 BRIDGE_PAK = 'Data/gluemappertravel.pak'
+PLAYER_HOOK = 'Scripts/Entities/actor/player.lua'
+
+HORSE_HOOK_MARKERS = (b'GlueTravelHorseRecovery', b'GluePlayerAnimationUpdates')
 
 
 def validate_bridge(package):
@@ -33,6 +36,14 @@ def validate_bridge(package):
             if name.lower().startswith('libs/tables/') and '__' in name:
                 if not name.endswith('__'+MOD_ID+'.xml'):
                     raise ValueError('Bridge table suffix does not match manifest: '+name)
+        if PLAYER_HOOK not in names:
+            raise ValueError('Bridge is missing the shipped player hook: ' + PLAYER_HOOK)
+        player = read(pak, PLAYER_HOOK)
+        for marker in HORSE_HOOK_MARKERS:
+            if marker not in player:
+                raise ValueError('Bridge player hook marker is missing: ' + marker.decode())
+        if b'GlueTravelHorseRoadArrivals=' not in player:
+            raise ValueError('Bridge player hook is missing the horse road arrivals table')
         dialogue = ET.fromstring(read(pak, DIALOGUE))
         choices = dialogue.findall('./Skald/FaderDialog/Dialogue/Decision/Sequences/Sequence')
         if not any(c.find(f"UiPrompt[@StringName='{STRING}']") is not None for c in choices):
@@ -103,7 +114,9 @@ def combine(base, bridge, target, output):
     bridge_pak = output/BRIDGE_PAK
     with zipfile.ZipFile(bridge_pak) as pak:
         entries = [(i, read(pak, i.filename)) for i in pak.infolist()]
-    new_level = next(blob for info, blob in entries if info.filename == LEVEL_TABLE)
+    new_level = next((blob for info, blob in entries if info.filename == LEVEL_TABLE), None)
+    if new_level is None:
+        raise ValueError('Bridge package is missing ' + LEVEL_TABLE)
     levels = managed_patches({LEVEL_TABLE: level_registration(target),
                               'Libs/Tables/level__bridge.xml': new_level}, MOD_ID)[LEVEL_TABLE]
     with zipfile.ZipFile(unlinked(bridge_pak), 'w', zipfile.ZIP_STORED) as pak:

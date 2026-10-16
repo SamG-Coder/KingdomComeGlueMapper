@@ -119,13 +119,22 @@ level omitted. `tools/region_travel_entry.py` now packages the following togethe
 
 - A `LevelHolder` with the registered destination ID, a matching Skald `Level`
   definition, and its `ConceptModules` registration.
-- `OnWake` and `OnLevelSwitched` feed the native streaming helper. A ready flag
-  resets on entry and becomes true only after its `onloaded` acknowledgement.
-  The cart interaction is gated by this ready flag. This also covers reloads and
-  subsequent visits without a timer or per-frame script.
+- `OnWake` and `OnLevelSwitched` feed the native streaming helper, and the entry
+  module declares a `ready` output. With optional station streaming enabled that
+  flag resets on entry and becomes true only after the helper's `onloaded`
+  acknowledgement; in normal builds streaming is off and the port is the
+  constant `true`. Nothing is gated by it today: the shipped travel graph creates
+  no `use_cart`/`InteractionTriggerNode` consumer, so the port is generated but
+  unconsumed, which the build receipt now records as `ready_port_consumers: 0`.
+  This is an offline/structural correction; connecting a real gate still needs a
+  consumer and in-game acceptance. No inventory or map input gate exists in this
+  overlay, so issue #3 remains open and unimplemented. Entry and revisit rely on
+  `OnWake`/`OnLevelSwitched`, with no timer or per-frame script.
 - A `GameProfileManager` arrival profile, its layer metadata, entity ID
-  reservations and layer payload. The existing cart, return driver, home and
-  interaction move into this profile with their identities preserved.
+  reservations and layer payload. The existing cart, return driver and home move
+  into this profile with their identities preserved. The stale
+  `gmtravel_interact_kcd1` entity is no longer streamed: direct cart triggers were
+  removed and the builder never emits that name.
 - `UseLayersActivation` is enabled in the mission environment, matching native
   Trosecko. The static probe had explicitly disabled it. This is the engine's
   per-level gate for [layer streaming](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1114113/pages/1048824);
