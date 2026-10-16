@@ -131,20 +131,29 @@ contains the converter, interface and Python/Tk runtime, not game assets.
 
 ## Build the executable from source
 
-On Windows x64 with Python 3.14:
+On Windows x64 with Python 3.13:
 
 ```powershell
-python -m venv .venv
+py -3.13 -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements-setup.txt
 .venv/Scripts/python.exe -m pip install -r requirements-test.txt
 .venv/Scripts/python.exe -m unittest discover -s tests -v
 .venv/Scripts/python.exe tools/build_setup_exe.py
 ```
 
+Python 3.14 cannot install `xatlas==0.0.11`: that release publishes no cp314
+wheel, so `pip` builds it from source and needs the Visual Studio C++ Build
+Tools. The install then aborts as a whole, so NumPy, Pillow and PyInstaller are
+not installed either. `xatlas` is part of the bundled runtime and is exercised by
+the frozen self-test, so use 3.13 rather than dropping it.
+
 The build writes the EXE, `SHA256SUMS.txt` and frozen-runtime `self-test.json` to
 `outputs/release`. The self-test checks bundled converter imports, Tcl startup
 and the Lua resources. It does not run the games. The tag/dispatch GitHub Actions
 workflow also builds and uploads these artifacts without access to game files.
+
+See [contributing](../CONTRIBUTING.md) for the test suite and the checks to run
+before opening a pull request.
 
 The setup uses [PyInstaller](https://pyinstaller.org/en/stable/) to bundle the
 runtime. Conversion remains subject to the limitations in the

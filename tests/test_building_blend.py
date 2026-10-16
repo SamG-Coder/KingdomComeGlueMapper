@@ -1,4 +1,5 @@
 """Synthetic source/target blend equivalence and binary preservation checks."""
+import importlib.util
 import io
 from pathlib import Path
 import struct
@@ -139,6 +140,8 @@ class BuildingBlendTests(unittest.TestCase):
             decode_texture(bytes(header)+block,{'1':block})
 
     def test_chart_repack_preserves_geometry_and_physics(self):
+        if importlib.util.find_spec('xatlas') is None:
+            self.skipTest('optional xatlas backend not installed')
         original=triangle_mesh()
         converted,triangles,size=reatlas(original,0,resolution=64)
         old={c.id:c.data for c in read_chunks(original)};new={c.id:c.data for c in read_chunks(converted)}
