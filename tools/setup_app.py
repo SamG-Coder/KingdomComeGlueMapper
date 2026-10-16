@@ -13,6 +13,10 @@ from desktop_setup import APP_VERSION, CONVERTERS, preflight, worker
 from steam_installations import discover
 
 
+# The bundled runtime scripts the frozen self-test must find and report.
+RUNTIME_FILES = ('campaign_menu.lua', 'retail_diagnostics.lua')
+
+
 def self_test(destination):
     import tkinter
     from PIL import Image
@@ -31,7 +35,7 @@ def self_test(destination):
         compiler(Path(__file__).parent)  # Verify the bundled, pinned HDR compiler.
     from travel_bridge_package import combine, validate_bridge
     runtime = runtime_directory()
-    for name in ('campaign_menu.lua', 'retail_diagnostics.lua'):
+    for name in RUNTIME_FILES:
         if not (runtime / name).is_file(): raise RuntimeError('Missing bundled runtime: ' + name)
     import region_travel_companions
     hook = Path(region_travel_companions.__file__).with_name('region_travel_horse_recovery.lua')
@@ -45,7 +49,7 @@ def self_test(destination):
         raise RuntimeError('Bundled image codec failed')
     result = {'version': APP_VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
               'tk': tkinter.Tcl().eval('info patchlevel'), 'converter_modules': len(CONVERTERS),
-              'runtime_files': 3, 'status': 'passed'}
+              'runtime_files': len(RUNTIME_FILES), 'status': 'passed'}
     Path(destination).write_text(json.dumps(result, indent=2), encoding='utf-8')
 
 

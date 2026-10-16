@@ -8,11 +8,14 @@ from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
 
+from lupa import LuaRuntime
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from compare_packages import compare
+from region_travel_companions import horse_recovery_resources
 from region_travel_dialogue import patch as patch_dialogue
 from setup_campaign import MOD_ID, RECEIPT, verify_package
-from travel_bridge_package import combine, validate_bridge, LEVEL_TABLE, BRIDGE_PAK
+from travel_bridge_package import combine, validate_bridge, LEVEL_TABLE, BRIDGE_PAK, PLAYER_HOOK
 
 
 def pak(path, files):
@@ -49,6 +52,10 @@ class BridgePackageTests(unittest.TestCase):
         files[LEVEL_TABLE] = b'<database><levels version="1"><level LevelId="1001"/></levels></database>'
         files[f'Libs/Tables/LevelSwitch__{MOD_ID}.xml'] = b'<database><LevelSwitches><LevelSwitchData Name="gluemappertravel_to_kcd1" TargetLevelId="1001"/></LevelSwitches></database>'
         files[f'Mods/{MOD_ID}/Data/Levels/kcd1_travel/tables/ai/scheduler.xml'] = b'<database/>'
+        # The shipped player hook is what carries the bounded horse arrival code.
+        files.update(horse_recovery_resources(
+            b'function Player:OnInit() end\nfunction Player:OnLoadAI(saved) end\n',
+            {'kcd1_travel': {'arrival': (1., 2., 3.), 'candidates': [{'position': (4., 5., 6.)}]}}))
         pak(self.bridge/BRIDGE_PAK, files)
         from region_travel_dialogue import merge_localization
         strings = merge_localization(b'<Table><Row><Cell>ui_prechod_z_seq1_Gr38</Cell><Cell>Original</Cell><Cell>Original</Cell></Row></Table>', strings)
@@ -138,6 +145,38 @@ class BridgePackageTests(unittest.TestCase):
         water.assert_called_once_with(output, 'source')
         self.assertEqual(result['travel_bridge']['water_layers']['removed_water_volumes'], 4)
         self.assertEqual(result['travel_bridge']['brush_registration']['changed_brushes'], 7)
+
+
+    def test_bridge_pak_ships_the_player_hook_markers_and_road_table(self):
+        with zipfile.ZipFile(self.bridge/BRIDGE_PAK) as z:
+            self.assertIn(PLAYER_HOOK, z.namelist())
+            player = z.read(PLAYER_HOOK)
+        for marker in (b'GlueTravelHorseRecovery', b'GluePlayerAnimationUpdates'):
+            self.assertIn(marker, player)
+        table = next(line for line in player.split(b'\n') if line.startswith(b'GlueTravelHorseRoadArrivals='))
+        arrivals = LuaRuntime(unpack_returned_tuples=True).execute(table.decode()+'\nreturn GlueTravelHorseRoadArrivals')
+        self.assertEqual(list(arrivals.keys()), ['kcd1_travel'])
+        self.assertEqual(arrivals['kcd1_travel']['arrival'].x, 1.)
+        self.assertEqual(arrivals['kcd1_travel']['positions'][1].y, 5.)
+
+    def test_validate_bridge_requires_the_player_hook(self):
+        with zipfile.ZipFile(self.bridge/BRIDGE_PAK) as z:
+            entries = [(info, z.read(info.filename)) for info in z.infolist()]
+        with zipfile.ZipFile(self.bridge/BRIDGE_PAK, 'w', zipfile.ZIP_STORED) as z:
+            for info, blob in entries:
+                if info.filename != PLAYER_HOOK: z.writestr(info, blob)
+        with self.assertRaisesRegex(ValueError, 'player hook'):
+            validate_bridge(self.bridge)
+
+    def test_bridge_without_level_table_raises_value_error(self):
+        with zipfile.ZipFile(self.bridge/BRIDGE_PAK) as z:
+            entries = [(info, z.read(info.filename)) for info in z.infolist()]
+        with zipfile.ZipFile(self.bridge/BRIDGE_PAK, 'w', zipfile.ZIP_STORED) as z:
+            for info, blob in entries:
+                if info.filename != LEVEL_TABLE: z.writestr(info, blob)
+        with patch('travel_bridge_package.level_registration', return_value=self.native_level):
+            with self.assertRaisesRegex(ValueError, 'missing'):
+                combine(self.base, self.bridge, 'target', self.root/'combined')
 
 
 if __name__ == '__main__': unittest.main()

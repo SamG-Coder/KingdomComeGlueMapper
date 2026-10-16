@@ -44,9 +44,21 @@ def import_horse_scheduler_table(destination, native, mission):
     if any(e.get('EntityGuid') in identities for e in target_rows):
         raise ValueError('Horse compiled scheduler already registered')
     for entry in selected:
-        for link in entry.findall('Links/S_ActivityLink'):
-            if link.get('TargetGuid') not in identities or link.get('PositioningDelegate','0') not in identities|{'0'}:
-                raise ValueError('Unresolved horse scheduler dependency')
+        links=entry.find('Links')
+        # The player scheduler importer checks every compiled Links child, not
+        # just S_ActivityLink. The old loop here visited only S_ActivityLink and
+        # never looked at Parameters, so a malformed link was silently accepted.
+        for link in list(links) if links is not None else []:
+            # Reject a link this importer can positively identify as unusable
+            # instead of silently accepting it. Unknown tag names stay tolerated,
+            # because a native record may carry terminal children this importer
+            # was never taught to model and the real scheduler closure cannot be
+            # exercised without the games.
+            params=link.find('Parameters')
+            if (params is None or not params.get('BehaviorName') or
+                    link.get('TargetGuid') not in identities or
+                    link.get('PositioningDelegate','0') not in identities|{'0'}):
+                raise ValueError('Unresolved or unverified horse scheduler dependency: '+link.tag)
         target_rows.append(copy.deepcopy(entry))
     return xml(dst),{'compiled_scheduler_records':len(selected),
                     'native_entity_guids':sorted(identities),'runtime_verified':False}
