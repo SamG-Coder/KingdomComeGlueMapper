@@ -21,6 +21,38 @@ from build_horse_trader_test import rewrite
 from upgrade_map import read, xml
 
 
+ACTOR_PAK_LIMIT = 900 * 1024**2
+
+
+def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
+    """Pack objects/ into ZIP32 shards; return (paks, Libs/ files for resources)."""
+    libs, paks, pak = {}, [], None
+    used = 0
+    try:
+        for p in sorted(appearance.rglob('*')):
+            if not p.is_file(): continue
+            name = p.relative_to(appearance).as_posix()
+            if name.startswith('Libs/'): libs[name] = p.read_bytes()
+            if not name.startswith('objects/'): continue
+            size = p.stat().st_size + 2 * len(name.encode()) + 128
+            if size > limit: raise ValueError('Actor asset exceeds ZIP32 shard limit: ' + name)
+            if pak is not None and used + size > limit:
+                pak.close(); pak = None
+            if pak is None:
+                suffix = '' if not paks else '_%02d' % len(paks)
+                paks.append(data_dir / (namespace + suffix + '.pak'))
+                pak = zipfile.ZipFile(paks[-1], 'x', zipfile.ZIP_STORED, allowZip64=False)
+                used = 0
+            pak.write(p, name)
+            used += size
+        if not paks:
+            paks.append(data_dir / (namespace + '.pak'))
+            pak = zipfile.ZipFile(paks[0], 'x', zipfile.ZIP_STORED, allowZip64=False)
+    finally:
+        if pak is not None: pak.close()
+    return paks, libs
+
+
 def build(a):
     if a.output.exists(): raise FileExistsError('Choose a fresh stage')
     a.output.mkdir(parents=True)
@@ -124,12 +156,7 @@ def build(a):
             native_soul_name='ttac_procek', native_role_name='PREVOZNIK_TROSECKO', resources=resources)
         # Keep each actor's geometry in its own ZIP32 archive. The shared world
         # archive is already large and must not grow past the engine's limit.
-        with zipfile.ZipFile(package / 'Data' / (namespace + '.pak'), 'x', zipfile.ZIP_STORED, allowZip64=False) as actor_pak:
-            for p in appearance.rglob('*'):
-                if not p.is_file(): continue
-                name = p.relative_to(appearance).as_posix()
-                if name.startswith('objects/'): actor_pak.write(p, name)
-                elif name.startswith('Libs/'): resources[name] = p.read_bytes()
+        resources.update(write_actor_paks(appearance, package / 'Data', namespace)[1])
         strings = appearance / 'Localization/English/text_ui_items.xml'
         if strings.exists(): item_tables.append(strings.read_bytes())
         with zipfile.ZipFile(a.source / 'Localization/English_xml.pak') as z:
