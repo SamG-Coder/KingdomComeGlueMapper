@@ -7,6 +7,7 @@ import argparse
 from datetime import date
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -34,6 +35,18 @@ def runtime_directory():
 def digest(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def hash_workers():
+    return min(32, os.cpu_count() or 4)
+
+
+def digests(paths):
+    """SHA-256 of many files at once; hashlib releases the GIL while it hashes."""
+    from concurrent.futures import ThreadPoolExecutor
+    paths = list(paths)
+    with ThreadPoolExecutor(max_workers=hash_workers()) as pool:
+        return dict(zip(paths, pool.map(digest, paths)))
 
 
 def game_version(game):
@@ -186,16 +199,20 @@ def verify_package(package, hashes=True):
     total = sum((package / relative).stat().st_size for relative in receipt['files']
                 if (package / relative).resolve().is_relative_to(package))
     checked = 0
-    for relative, expected in receipt['files'].items():
+    for relative in receipt['files']:
         path = package / relative
         if not path.resolve().is_relative_to(package) or path.is_symlink():
             raise ValueError(f'Invalid package path: {relative}')
-        if not hashes:
-            continue
-        if digest(path) != expected:
-            raise ValueError(f'Package changed: {relative}')
-        checked += path.stat().st_size
-        progress('Verifying package', checked, total, relative)
+    if hashes:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=hash_workers()) as pool:
+            pending = {pool.submit(digest, package / relative): relative for relative in receipt['files']}
+            for done in as_completed(pending):
+                relative = pending[done]
+                if done.result() != receipt['files'][relative]:
+                    raise ValueError(f'Package changed: {relative}')
+                checked += (package / relative).stat().st_size
+                progress('Verifying package', checked, total, relative)
     actual = {p.relative_to(package).as_posix() for p in package.rglob('*') if p.is_file()}
     if actual != set(receipt['files']) | {RECEIPT}:
         raise ValueError('Unexpected files in package')

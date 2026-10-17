@@ -42,7 +42,8 @@ def main():
         command.extend(['--add-binary' if resource.endswith('.dll') else '--add-data',
                         f'{gpu / resource}:bake-gpu'])
     # Raster signatures read their own sources, including GPU sources.
-    for resource in ('world_surface_scene.py','world_surface_landscape.py','stage_world_surfaces.py','world_surface_tiles.py','voxel_surfaces.py','voxel_raster_fast.py','voxel_raster_cuda.py','voxel_raster_cuda.cu','voxel_optix_shared.h','voxel_optix_device.cu','voxel_optix_host.h','geometry_opacity.py','world_surface_coverage.py'):
+    # The setup's lighting cache folder is keyed by lighting_cubemaps.py.
+    for resource in ('lighting_cubemaps.py','world_surface_scene.py','world_surface_landscape.py','stage_world_surfaces.py','world_surface_tiles.py','voxel_surfaces.py','voxel_raster_fast.py','voxel_raster_cuda.py','voxel_raster_cuda.cu','voxel_optix_shared.h','voxel_optix_device.cu','voxel_optix_host.h','geometry_opacity.py','world_surface_coverage.py'):
         command.extend(['--add-data',f'{repo / "tools" / resource}:.'])
     command.extend(['--hidden-import','voxel_raster_fast','--collect-all','numba','--collect-all','llvmlite'])
     for module in CONVERTERS: command.extend(['--hidden-import', module])

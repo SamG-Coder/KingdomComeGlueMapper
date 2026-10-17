@@ -9,7 +9,7 @@ import zipfile
 from campaign_package import level_registration
 from region_travel_dialogue import DIALOGUE, HOST, PORT, STRING
 from region_travel_tables import managed_patches
-from setup_campaign import MOD_ID, RECEIPT, VERSION, digest, verify_package
+from setup_campaign import MOD_ID, RECEIPT, VERSION, digest, digests, verify_package
 from upgrade_map import read, xml
 
 MENU_FILES = {
@@ -152,7 +152,8 @@ def combine(base, bridge, target, output):
         rewritten.add('probe-activation-repair.json')
         rewritten.add('Data/Levels/kcd1_travel/terrain.pak')
     names = [p.relative_to(output).as_posix() for p in sorted(output.rglob('*')) if p.is_file() and p.name != RECEIPT]
-    receipt['files'] = {n: base_files[n] if n in base_files and n not in rewritten else digest(output/n) for n in names}
+    fresh = digests(output/n for n in names if n not in base_files or n in rewritten)
+    receipt['files'] = {n: base_files[n] if n in base_files and n not in rewritten else fresh[output/n] for n in names}
     unlinked(output/RECEIPT).write_text(json.dumps(receipt, indent=2), encoding='utf-8')
     validate_bridge(output)
     verify_package(output)

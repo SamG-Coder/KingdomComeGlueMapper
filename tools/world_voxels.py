@@ -4,12 +4,17 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 
+from bounded_pool import ordered_map, worker_count
 from entity_visuals import initial_layer
 from upgrade_map import read
 from voxel_lighting import convert_tile, validate_pair
 
+# Measured peak for the largest source tile is about 110 MB of conversion
+# memory; allow for each worker process's own interpreter and numpy as well.
+TILE_WORKER_BYTES = 256 * 1024**2
 
-def build(source, destination, tile=None):
+
+def build(source, destination, tile=None, workers=None):
     source = Path(source)
     dest = Path(destination)
     dest.mkdir(parents=True, exist_ok=True)
@@ -24,14 +29,22 @@ def build(source, destination, tile=None):
         names = [n for n in src.namelist() if n.endswith('.dat') and (tile is None or Path(n).stem == tile)]
         if not names:
             raise ValueError('No source voxel tiles selected')
+        grid = []
+        for name in names:
+            match = re.fullmatch(r'(\d+)_(\d+)_(\d+)_(\d+)\.dat', Path(name).name)
+            if not match:
+                raise ValueError('Unexpected source voxel name')
+            *center, extent = map(int, match.groups())
+            grid.append((center, extent))
+        # Read each tile only when a worker slot frees up, so at most a few
+        # decompressed tiles exist at once rather than the whole source set.
+        jobs = ((read(src, name), center, extent, active_layers) for name, (center, extent) in zip(names, grid))
+        if workers is None:
+            workers = worker_count(len(names), TILE_WORKER_BYTES, 'GLUEMAPPER_VOXEL_WORKERS')
         shard = None
+        # Tiles are independent; results arrive in source order, so shards are identical.
         try:
-            for number, name in enumerate(names):
-                match = re.fullmatch(r'(\d+)_(\d+)_(\d+)_(\d+)\.dat', Path(name).name)
-                if not match:
-                    raise ValueError('Unexpected source voxel name')
-                *center, extent = map(int, match.groups())
-                idx, vox = convert_tile(read(src, name), center, extent, active_layers)
+            for number, (name, (idx, vox)) in enumerate(zip(names, ordered_map(_tile, jobs, workers))):
                 if shard is None or shard.fp.tell()+len(idx)+len(vox) > 800*1024**2:
                     if shard is not None:
                         shard.close()
@@ -45,6 +58,10 @@ def build(source, destination, tile=None):
             if shard is not None:
                 shard.close()
     return report
+
+
+def _tile(job):
+    return convert_tile(*job)
 
 
 def configure_environment(blob, *, surface_channels=False):

@@ -3,6 +3,7 @@ import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import itertools
 import math
+import os
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -184,8 +185,13 @@ def build(files, source, target, level, guid, work):
                 if e.get('EntityClass')=='EnvironmentLight' and e.get('Name')=='level_global_probe':parent.remove(e)
         next_id=max((int(e.get('EntityId','0')) for e in root.iter('Entity')),default=0)+1
         mapped={};resources={};archive_names={n.lower():n for n in world.namelist()}
-        cubes=Cubemaps(source,work/'cubemaps')
-        workers=ThreadPoolExecutor(max_workers=4)
+        # Conversions are content-addressed and verified, so setup can keep
+        # them in its workspace (GLUEMAPPER_LIGHTING_CACHE) across builds.
+        cubes=Cubemaps(source,Path(os.environ.get('GLUEMAPPER_LIGHTING_CACHE') or work/'cubemaps'))
+        # Each job runs texconv (BC6H) and Pillow. Measured on 1,033 Rataje
+        # probes (12-core CPU): 4 threads ~515 s, 16 threads ~355 s, identical output.
+        default=str(min(16, os.cpu_count() or 4))
+        workers=ThreadPoolExecutor(max_workers=int(os.environ.get('GLUEMAPPER_LIGHTING_WORKERS', default)))
         pending_cubes=[]
         try:
             dependencies={}

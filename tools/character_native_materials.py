@@ -50,8 +50,16 @@ def native_surface(source, template):
     return result
 
 
-def convert_character_materials(output, components, assets, namespace, sex):
-    """Convert only materials selected by this character; no global replacements."""
+def bake_float_dds(path, image, material, specular=None):
+    write_float_dds(path, bake_macro_diffuse(image, material, specular))
+
+
+def convert_character_materials(output, components, assets, namespace, sex, bake=bake_float_dds):
+    """Convert only materials selected by this character; no global replacements.
+
+    `bake(path, image, material, specular=None)` writes each float macro texture;
+    callers may defer it, since nothing here reads those files back.
+    """
     body_ref = reference(assets, f'objects/characters/humans/{sex}/body/' +
                          ('female_body_01.mtl' if sex == 'female' else 'male_body_mat.mtl'))
     head_doc = reference(assets, f'objects/characters/humans/{sex}/head/' +
@@ -93,7 +101,7 @@ def convert_character_materials(output, components, assets, namespace, sex):
                         mask.save(output / (prefix + '_bgs.dds'))
                     if shader == 'illum':
                         spec = pixels('Specular') if 'Specular' in textures else None
-                        write_float_dds(output / (prefix + '_diff.dds'), bake_macro_diffuse(pixels('Diffuse'), material, spec))
+                        bake(output / (prefix + '_diff.dds'), pixels('Diffuse'), material, spec)
                         new = native_clothing_material(material, prefix + '_diff.dds', prefix + '_bgs.dds', cloth_ref, 'GarmentBase')
                         # Use the shipped permutation exactly, including its
                         # serialized global mask; local .ext bits are not that mask.
@@ -109,7 +117,7 @@ def convert_character_materials(output, components, assets, namespace, sex):
                             spec = Image.new('RGBA', (4, 4), (255, 255, 255, 255))
                         if 'COLORIZING_WITH_MASK' in material.get('StringGenMask', ''):
                             r, _, _, a = spec.split(); spec = Image.merge('RGBA', (r, r, r, a))
-                        write_float_dds(output / (prefix + '_spec.dds'), bake_macro_diffuse(spec, ET.Element('Material', Diffuse=material.get('Specular', '1,1,1'))))
+                        bake(output / (prefix + '_spec.dds'), spec, ET.Element('Material', Diffuse=material.get('Specular', '1,1,1')))
                         spec_slot = new.find("Textures/Texture[@Map='Specular']")
                         if spec_slot is None:
                             spec_slot = ET.SubElement(new.find('Textures'), 'Texture', Map='Specular')

@@ -98,6 +98,12 @@ class StagedAssets(dict):
         path.write_bytes(payload)
         super().__setitem__(name, path)
 
+    def reserve(self, name):
+        """Register the staged path for a payload a background job writes later."""
+        path = self[name] if name in self else self.directory / str(len(self))
+        super().__setitem__(name, path)
+        return path
+
 
 def install_staged(emitted, root, namespace):
     """Place staged assets under their isolated namespace without writing each one twice.

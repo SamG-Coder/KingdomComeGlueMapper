@@ -1,9 +1,13 @@
 """Wearable source pickup components, with source meshes on the native rig."""
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor
+import copy
 import xml.etree.ElementTree as ET
 import zipfile
 import tempfile
 from pathlib import Path
 from audit_character_bodies import Assets
+from bounded_pool import worker_count
 from build_npc_probe import asset_path, bind_material
 from campaign_dependencies import ImportPlan
 from character_person import native_xml
@@ -14,7 +18,7 @@ from clothing_regions import assign_upper_garment_regions, split_skin_regions, r
 from garment_contracts import clothing_role, source_variant
 from character_source_clothing import female_role
 from upgrade_map import read, xml
-from character_native_materials import convert_character_materials
+from character_native_materials import bake_float_dds, convert_character_materials
 
 
 def material_inputs(emitted, files):
@@ -45,12 +49,41 @@ class ClothingAdapter:
     # semantic role, then inherit the native role's layer and archetype.
     ROLES = {'7': 'Cap', '11': 'HorseShoe'}
 
-    def __init__(self, tables, assets, target, stack):
+    def __init__(self, tables, assets, target, stack, defer_bakes=False):
         self.tables, self.assets = tables, assets
         self.native = Assets(target, stack)
         with zipfile.ZipFile(target/'Data/Tables.pak') as z:
             self.components = native_xml(read(z, 'Libs/Tables/Character/CharacterComponent.xml'))
         self.parents = {c:p for p in self.components.iter() for c in p}
+        self.stack, self.defer, self.pool, self.pending = stack, defer_bakes, None, deque()
+
+    def deferred_bake(self, folder, names):
+        """Float macro bakes dominate the loot import and are pure; with
+        defer_bakes, run them in worker processes while later items convert.
+        The caller must then call finish() before reading any payload."""
+        reserve = getattr(self.assets.emitted, 'reserve', None)
+        if not self.defer or reserve is None: return bake_float_dds
+        def bake(path, image, material, specular=None):
+            name = path.relative_to(folder).as_posix(); names.append(name)
+            if self.pool is None:
+                # A 2048px bake holds several float32 RGBA copies and its mips.
+                self.workers = worker_count(16, 768 * 1024**2, 'GLUEMAPPER_BAKE_WORKERS')
+                self.pool = self.stack.enter_context(ProcessPoolExecutor(max_workers=self.workers))
+            # Bound queued texture copies; arguments are pickled after submit().
+            while len(self.pending) >= 2*self.workers: self.wait(*self.pending.popleft())
+            args = (image.copy(), copy.deepcopy(material), None if specular is None else specular.copy())
+            self.pending.append((name, self.pool.submit(bake_float_dds, reserve(name), *args)))
+        return bake
+
+    @staticmethod
+    def wait(name, future):
+        # Not ValueError: the importer would charge it to the item converting now.
+        try: future.result()
+        except Exception as error: raise RuntimeError('Wearable texture bake '+name+': '+str(error)) from error
+
+    def finish(self):
+        """Wait until every deferred texture has been written to its staged path."""
+        while self.pending: self.wait(*self.pending.popleft())
 
     def plan(self, identity):
         armor = self.tables.row('item/armor', 'item_id', identity)
@@ -145,12 +178,16 @@ class ClothingAdapter:
                         dest = folder/path; dest.parent.mkdir(parents=True, exist_ok=True)
                         dest.write_bytes(payload.read_bytes() if isinstance(payload, Path) else payload)
                     (folder/'Libs/Tables/Character').mkdir(parents=True,exist_ok=True)
-                    material_report = convert_character_materials(folder, component, self.native, name, sex)
+                    baked = []
+                    material_report = convert_character_materials(folder, component, self.native, name, sex,
+                                                                  self.deferred_bake(folder, baked))
                     for path in folder.rglob('*'):
                         if path.is_file():
                             relative = path.relative_to(folder).as_posix()
                             if relative.startswith(prefix) or relative.startswith('Libs/Tables/Character/ClothingMaterial__'):
                                 files[relative] = retain_material_file(a,relative,path)
+                    for relative in baked:
+                        if relative.startswith(prefix): files[relative] = a.emitted[relative]
         elif role not in ('HorseShoe','Ring','Necklace','Spurs'): raise ValueError('Source wearable is missing a model')
         files['Libs/Tables/Character/CharacterComponent__'+name+'.xml'] = xml(root)
         return name, files, dict(role=role,source_clothing=part['clothing_id'],source_geometry_preserved=True,

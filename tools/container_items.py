@@ -37,16 +37,18 @@ def build(source, target, mod, output, identifiers, *, asset_namespace='containe
         cache = output/'asset-cache'; cache.mkdir(exist_ok=reuse_output)
         assets = StaticAssetAdapter(stack, source.parent, asset_namespace, cache)
         from campaign_item_types import native_tool_types
+        clothing = ClothingAdapter(tables, assets, target, stack, defer_bakes=True)
         importer = DependencyImporter({
             'items': WorldItemAdapter(tables, 'containeritems', native, weapons, components,
                                       native_tool_types=native_tool_types(target)),
-            'clothing': ClothingAdapter(tables, assets, target, stack),
+            'clothing': clothing,
             'document_images': DocumentImageAdapter(source, reader, 'containeritems'),
             'assets': assets, 'strings': ItemTextAdapter(source, 'containeritems', 'English')},
             registered={'items': native_item_registry(native)})
         for index, identifier in enumerate(sorted(set(identifiers))):
             importer.ensure('items', identifier, {'origin':origin})
             if index % 50 == 0: print('Container item dependencies', index, '/', len(identifiers), flush=True)
+        clothing.finish()
         report = importer.report()
         report['required_items'] = len(set(identifiers))
         report['unresolved_items'] = sorted(set(identifiers)-importer.registered['items'].keys())

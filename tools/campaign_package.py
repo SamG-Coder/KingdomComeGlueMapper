@@ -5,8 +5,10 @@ Legacy quest sources are isolated pending translation; they are not target quest
 """
 from collections import deque
 from bisect import bisect_left
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import hashlib
+import os
 from pathlib import Path
 import re
 import shutil
@@ -70,41 +72,72 @@ def references(payload):
     return {safe_name(m.decode('ascii')) for m in REFERENCE.findall(payload)}
 
 
+def io_workers():
+    return min(16, os.cpu_count() or 4)
+
+
+def prefetched(names, load, window=64):
+    """Yield (name, load(name)) in order while reading ahead concurrently.
+
+    Serial reads leave an NVMe drive at queue depth one; file and archive
+    reads release the GIL, so a bounded read-ahead keeps it busy.
+    """
+    with ThreadPoolExecutor(max_workers=io_workers()) as pool:
+        pending = deque()
+        for name in names:
+            pending.append((name, pool.submit(load, name)))
+            if len(pending) >= window:
+                name, future = pending.popleft()
+                yield name, future.result()
+        while pending:
+            name, future = pending.popleft()
+            yield name, future.result()
+
+
 def dependency_closure(seeds, index, load):
-    """Resolve imported paths transitively, including streamed texture/mesh parts."""
+    """Resolve imported paths transitively, including streamed texture/mesh parts.
+
+    Breadth-first in waves: each wave's files are read and scanned concurrently.
+    The closure is a set, so the selection does not depend on visiting order.
+    """
     queue, selected = deque(sorted(seeds)), set()
     names = sorted(index)
-    while queue:
-        requested = queue.popleft()
-        if requested in index:
-            name = requested
-        else:
-            candidates = [requested + ext for ext in ('.mtl', '.cgf') if requested + ext in index]
-            if len(candidates) != 1:
-                raise ValueError(f'Unresolved or ambiguous imported asset: {requested}')
-            name = candidates[0]
-        if name in selected:
-            continue
-        selected.add(name)
-        # External LODs are loaded by filename convention, not a literal path
-        # inside the base CGF. Keep their own materials and streamed parts too.
-        if name.endswith('.cgf') and not re.search(r'_lod\d+\.cgf$', name):
-            for lod in range(1, 7):
-                sibling = name[:-4] + f'_lod{lod}.cgf'
-                if sibling in index and sibling not in selected:
-                    queue.append(sibling)
-        if not re.search(r'\.dds(?:\.|$)', name):
-            queue.extend(sorted(references(load(name)) - selected))
-        # CryEngine streams texture mip slices and external geometry separately.
-        start = bisect_left(names, name + '.')
-        for offset in range(start, len(names)):
-            sibling = names[offset]
-            if not sibling.startswith(name + '.'):
-                break
-            if sibling not in selected:
-                queue.append(sibling)
-        if name + 'm' in index and name + 'm' not in selected:
-            queue.append(name + 'm')
+    with ThreadPoolExecutor(max_workers=io_workers()) as pool:
+        while queue:
+            wave = []
+            while queue:
+                requested = queue.popleft()
+                if requested in index:
+                    name = requested
+                else:
+                    candidates = [requested + ext for ext in ('.mtl', '.cgf') if requested + ext in index]
+                    if len(candidates) != 1:
+                        raise ValueError(f'Unresolved or ambiguous imported asset: {requested}')
+                    name = candidates[0]
+                if name in selected:
+                    continue
+                selected.add(name)
+                wave.append(name)
+                # External LODs are loaded by filename convention, not a literal path
+                # inside the base CGF. Keep their own materials and streamed parts too.
+                if name.endswith('.cgf') and not re.search(r'_lod\d+\.cgf$', name):
+                    for lod in range(1, 7):
+                        sibling = name[:-4] + f'_lod{lod}.cgf'
+                        if sibling in index and sibling not in selected:
+                            queue.append(sibling)
+                # CryEngine streams texture mip slices and external geometry separately.
+                start = bisect_left(names, name + '.')
+                for offset in range(start, len(names)):
+                    sibling = names[offset]
+                    if not sibling.startswith(name + '.'):
+                        break
+                    if sibling not in selected:
+                        queue.append(sibling)
+                if name + 'm' in index and name + 'm' not in selected:
+                    queue.append(name + 'm')
+            scanned = [n for n in wave if not re.search(r'\.dds(?:\.|$)', n)]
+            for found in pool.map(lambda n: references(load(n)), scanned):
+                queue.extend(sorted(found - selected))
     return sorted(selected)
 
 
@@ -154,17 +187,18 @@ def package_world(converted_data, source_level, destination):
                     raise ValueError(f'Conflicting generated archive asset: {key}')
                 index[key] = (z, name)
         # Development loose assets override earlier generated packages explicitly.
-        for prefix in PREFIXES:
-            for path in sorted((root / prefix).rglob('*')):
-                if path.is_file():
-                    if not path.resolve().is_relative_to(root):
-                        raise ValueError(f'Converted asset escapes build directory: {path}')
-                    index[safe_name(path.relative_to(root).as_posix())] = path
+        loose = [path for prefix in PREFIXES for path in sorted((root / prefix).rglob('*')) if path.is_file()]
+        with ThreadPoolExecutor(max_workers=io_workers()) as pool:
+            inside = list(pool.map(lambda p: p.resolve().is_relative_to(root), loose))
+        for path, ok in zip(loose, inside):
+            if not ok:
+                raise ValueError(f'Converted asset escapes build directory: {path}')
+            index[safe_name(path.relative_to(root).as_posix())] = path
         def load(name):
             entry = index[name]
             return entry.read_bytes() if isinstance(entry, Path) else read(*entry)
         selected = dependency_closure(seeds, index, load)
-        shards, assets = write_asset_shards(destination / 'Data', ((name, load(name)) for name in selected), total_entries=len(selected))
+        shards, assets = write_asset_shards(destination / 'Data', prefetched(selected, load), total_entries=len(selected))
     return {'level': LEVEL, 'path': 'Levels/' + LEVEL,
             'source_level': source_level, 'imported_assets': assets, 'asset_archives': shards,
             'native_dependencies_validated': False,

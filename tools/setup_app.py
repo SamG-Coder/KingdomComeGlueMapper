@@ -2,6 +2,7 @@
 import argparse
 import importlib
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import subprocess
@@ -65,10 +66,44 @@ def self_test(destination):
     stream.seek(0)
     if Image.open(stream).getpixel((0, 0)) != (255, 255, 255, 255):
         raise RuntimeError('Bundled image codec failed')
+    pools = pool_self_test()
     result = {'version': APP_VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
               'tk': tkinter.Tcl().eval('info patchlevel'), 'converter_modules': len(CONVERTERS),
-              'runtime_files': 3, 'web_ui': True, 'hybrid_bake': gpu_test, 'status': 'passed'}
+              'runtime_files': 3, 'web_ui': True, 'hybrid_bake': gpu_test, 'worker_pools': pools,
+              'status': 'passed'}
     Path(destination).write_text(json.dumps(result, indent=2), encoding='utf-8')
+
+
+# Module-level functions the setup worker runs in process pools.
+POOL_TARGETS = ('world_voxels:_tile', 'build_world_containers:_model_assets',
+                'character_native_materials:bake_float_dds')
+
+
+def pool_self_test(destination=None):
+    """Setup-worker paths that only fail when frozen: cache signature and pool children.
+
+    Pool children of a frozen build re-enter this executable; they are dispatched by
+    multiprocessing.freeze_support() before argument parsing.
+    """
+    import tempfile
+    import xml.etree.ElementTree as ET
+    from PIL import Image
+    from bounded_pool import importable, ordered_map, starcall
+    from character_native_materials import bake_float_dds
+    from desktop_setup import lighting_cache
+    with tempfile.TemporaryDirectory(prefix='gluemapper-pools-') as temporary:
+        cache = lighting_cache(Path(temporary) / 'job' / 'conversion')
+        if len(cache.name) != 16: raise RuntimeError('Lighting cache signature unavailable')
+        if not all(ordered_map(importable, POOL_TARGETS, workers=2)):
+            raise RuntimeError('Worker pool targets unavailable in child processes')
+        bake = Path(temporary) / 'bake.dds'
+        job = (bake_float_dds, (bake, Image.new('RGBA', (4, 4), (255, 128, 0, 255)), ET.Element('Material', Diffuse='1,1,1')))
+        list(ordered_map(starcall, [job], workers=2))
+        if bake.read_bytes()[:4] != b'DDS ': raise RuntimeError('Worker pool bake failed')
+    result = {'lighting_cache': True, 'targets': len(POOL_TARGETS), 'bake': True,
+              'frozen': bool(getattr(sys, 'frozen', False)), 'status': 'passed'}
+    if destination: Path(destination).write_text(json.dumps(result, indent=2), encoding='utf-8')
+    return result
 
 
 def launch_gui():
@@ -261,6 +296,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--worker', type=Path)
     parser.add_argument('--self-test', type=Path)
+    parser.add_argument('--pool-self-test', type=Path)
     parser.add_argument('--mods-worker',type=Path)
     parser.add_argument('--legacy-ui',action='store_true')
     args = parser.parse_args()
@@ -269,6 +305,7 @@ def main():
         from setup_mods import worker as mods_worker
         return mods_worker(args.mods_worker)
     if args.self_test: self_test(args.self_test); return 0
+    if args.pool_self_test: pool_self_test(args.pool_self_test); return 0
     if args.legacy_ui:launch_gui()
     else:
         from setup_web import launch
@@ -277,4 +314,7 @@ def main():
 
 
 if __name__ == '__main__':
+    # Frozen pool children start this executable with --multiprocessing-fork;
+    # dispatch them before argparse or the setup UI can see those arguments.
+    multiprocessing.freeze_support()
     raise SystemExit(main())

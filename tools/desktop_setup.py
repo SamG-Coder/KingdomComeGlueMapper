@@ -112,6 +112,16 @@ def travel_world(config):
     return Path(config['kcd2']).resolve() / 'Mods' / MOD_ID / 'Data/Levels/kcd1_rataje'
 
 
+def lighting_cache(build):
+    """Probe conversions shared by runs in one workspace, keyed by the converter's code.
+
+    Cubemaps entries are keyed by their input textures only, so the folder name
+    includes a hash of lighting_cubemaps.py: a changed converter starts afresh.
+    """
+    code = hashlib.sha256(Path(__file__).with_name('lighting_cubemaps.py').read_bytes()).hexdigest()[:16]
+    return Path(build).resolve().parents[1] / 'lighting-cache' / code
+
+
 def conversion_plan(library, build):
     data = Path(build) / 'Data'
     common = ['--library', str(library)]
@@ -324,6 +334,7 @@ def worker(config_path):
                 paths = job / 'game-paths.json'
                 paths.write_text(json.dumps(dict(schema=1, kcd1=config['kcd1'], kcd2=config['kcd2'], build=str(build))), encoding='utf-8')
                 plan = conversion_plan(paths, build)
+                os.environ['GLUEMAPPER_LIGHTING_CACHE'] = str(lighting_cache(build))
                 total = len(plan) + 3 + (config['action'] == 'build_install')
                 for index, (label, module, args) in enumerate(plan):
                     if cancel(): raise Cancelled('Cancelled after the previous conversion stage')
