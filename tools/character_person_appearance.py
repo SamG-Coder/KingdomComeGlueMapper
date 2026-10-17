@@ -262,9 +262,14 @@ def _build_appearance(source, target, person, namespace, output):
             'Libs/Tables/item/InventoryPreset__' + namespace + '_clothes.xml': xml(preset_root)}.items():
             dest = output / name; dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data.read_bytes() if isinstance(data, Path) else data)
+        # Same native clothing shader/vertex-feature upgrade as female garments:
+        # the fixed outfit otherwise keeps legacy Illum colourisation (issue #1).
+        material_report = convert_character_materials(output, document.find('CharacterComponents/Component'),
+                                                      native, namespace, sex)
+        (output / ('Libs/Tables/Character/CharacterComponent__' + namespace + '.xml')).write_bytes(xml(document))
     return dict(appearance=appearance, inventory=namespace + '_clothes', gender=sex,
                 archetype=native_soul_archetype(archetypes, sex.title()), parts=evidence, rig=rig,
-                nonvisual_equipment=accessories,
+                nonvisual_equipment=accessories, materials=material_report,
                 outfit_mode='Fixed source outfit, using the existing skin upgrader', runtime_verified=False)
 
 
