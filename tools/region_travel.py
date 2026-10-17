@@ -17,6 +17,8 @@ import zipfile
 
 from campaign_entity_links import native_guid, append_links
 from campaign_package import level_registration, level_table_shells
+from cooking_pots import rotate
+from entity_visuals import quaternion_product as qmul
 from upgrade_map import read, xml
 from region_travel_dialogue import patch as patch_driver_dialogue, merge_localization, HOST, DIALOGUE
 from region_travel_ground import Heightfield, wheel_bottom, fit_cart
@@ -113,15 +115,6 @@ def travel_graph(project, route):
     ET.SubElement(switch, 'Constant', Name='LevelSwitching', Value=MOD + '_' + route)
     ET.SubElement(switch, 'Edge', From='prepare_travel.OnExec', To='Exec')
     return xml(root)
-
-
-def qmul(a, b):
-    w,x,y,z=a;v,i,j,k=b
-    return (w*v-x*i-y*j-z*k,w*i+x*v+y*k-z*j,w*j-x*k+y*v+z*i,w*k+x*j-y*i+z*v)
-
-
-def rotate(q, v):
-    return qmul(qmul(q, (0,*v)), (q[0],-q[1],-q[2],-q[3]))[1:]
 
 
 def prefab_geometry(prefab):
