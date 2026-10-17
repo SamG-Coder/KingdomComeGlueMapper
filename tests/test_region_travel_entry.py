@@ -178,6 +178,25 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(trigger.find("Edge[@To='IsActive']").get('From'), 'destination.ready')
         self.assertEqual(report['ready_port_consumers'], 1)
 
+    def test_ready_gate_counts_a_wired_activation_edge_together_with_existing_consumers(self):
+        # The activation edge is wired independently of unrelated existing ready
+        # consumers, and the receipt counts the resulting edges. Regression for
+        # the wiring order bug: counting before rewiring reported one consumer
+        # when two existed, or zero when the trigger was the only consumer.
+        files, native, scripts = self.fixture()
+        graph = ET.fromstring(travel_graph('Travel', 'to_trosky'))
+        nodes = graph.find('Skald/Project/Nodes')
+        trigger = ET.SubElement(nodes, 'InteractionTriggerNode', Name='use_cart')
+        ET.SubElement(trigger, 'Edge', From='stale.native', To='IsActive')
+        existing = ET.SubElement(nodes, 'TriggerSequence')
+        ET.SubElement(existing, 'Edge', From='destination.ready', To='SetTrue')
+        _, graphs, report = register_entry(files, xml(graph), 'Quests/Travel.xml', native, scripts,
+                                           'destination', 42, guid, station_streaming=True)
+        project = ET.fromstring(graphs['Quests/Travel.xml'])
+        self.assertEqual(project.find(".//InteractionTriggerNode[@Name='use_cart']/Edge[@To='IsActive']").get('From'),
+                         'destination.ready')
+        self.assertEqual(report['ready_port_consumers'], 2)
+
     def test_stale_interaction_entity_is_left_resident(self):
         files, native, scripts = self.fixture()
         result, _, report = self.package(files, native, scripts)
