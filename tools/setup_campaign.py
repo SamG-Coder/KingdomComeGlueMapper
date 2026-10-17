@@ -5,7 +5,6 @@ stays disabled by default; --start-probe enables experimental native New Game.
 """
 import argparse
 from datetime import date
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +16,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from campaign_sources import audit_opening, opening_spawn
-from upgrade_map import read
+from upgrade_map import read, digest
 from retail_menu import menu_assets
 from setup_progress import progress
 from herb_pickup import build_registration
@@ -31,10 +30,6 @@ RECEIPT = 'gluemapper-install.json'
 def runtime_directory():
     return Path(sys._MEIPASS) / 'runtime' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1] / 'runtime'
 
-
-def digest(path):
-    with path.open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def hash_workers():

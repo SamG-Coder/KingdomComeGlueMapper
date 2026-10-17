@@ -21,6 +21,17 @@ def read(archive, name):
         return stream.read()
 
 
+def digest(path):
+    """Hex SHA-256 of a file, streamed like the receipt digests."""
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def digest_bytes(data):
+    """Hex SHA-256 of raw bytes."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def xml(element):
     return ET.tostring(element, encoding="utf-8", xml_declaration=True)
 

@@ -1,18 +1,15 @@
 """Stage/install/restore a bounded offline-GI test with content-addressed backups."""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
-from upgrade_map import read
+from upgrade_map import read, digest
 from voxel_lighting import validate_pair
 from world_voxels import configure_environment
 
-
-def digest(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
 
 def require_closed_game():

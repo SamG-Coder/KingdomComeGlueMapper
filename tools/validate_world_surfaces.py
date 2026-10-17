@@ -11,9 +11,7 @@ from pathlib import Path
 import shutil
 from voxel_lighting import validate_pair
 from world_surface_tiles import code_digest,gpu_configuration,tile_signature
-
-
-def digest(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+from upgrade_map import digest
 
 
 def stem(job):return '_'.join(f'{v:04d}' for v in [*(x+128 for x in job['origin']),256])

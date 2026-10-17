@@ -5,7 +5,6 @@ new quest skeleton. It keeps incomplete source work phases in the receipt and
 does not mark a bounded playtest as full campaign conversion.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -17,11 +16,8 @@ from build_person_schedule_test import build as jobs_build
 from build_profile_systems import build as systems_build
 from build_horse_trader_test import rewrite
 from character_person_activity import validate_scheduler_targets
-from upgrade_map import read
+from upgrade_map import read, digest
 
-
-def digest(path):
-    with Path(path).open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
 
 def verify_baseline(mod, baseline):

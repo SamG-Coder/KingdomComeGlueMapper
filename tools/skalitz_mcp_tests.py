@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from datetime import datetime, timezone
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -23,6 +22,8 @@ import threading
 import time
 from typing import Any
 import uuid
+
+from upgrade_map import digest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,10 +59,6 @@ GAMEPLAY_TOOLS = {"henry_task_start", "henry_task_cancel"}
 
 def utc() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def write_json(path: Path, value: Any) -> None:

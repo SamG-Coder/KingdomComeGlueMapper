@@ -8,7 +8,6 @@ may change. Installation rejects stale inputs and retains exact backups.
 import argparse
 import copy
 from contextlib import ExitStack
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -20,7 +19,7 @@ from character_skin_upgrade import upgrade_skin, canonicalize_skin_skeletons, Co
 from clothing_assembly import convert_fixed_outfit
 from clothing_regions import assign_body_regions, assign_upper_garment_regions, split_skin_regions
 from merge_population_package import signature
-from upgrade_map import xml
+from upgrade_map import xml, digest_bytes as digest
 
 
 TABLES=dict(components='Libs/Tables/Character/CharacterComponent.xml',
@@ -29,8 +28,6 @@ TABLES=dict(components='Libs/Tables/Character/CharacterComponent.xml',
             items='Libs/Tables/item/item__gluenpc.xml',
             appearance='Libs/Storm/appearance/gluemapper.xml')
 
-
-def digest(data):return hashlib.sha256(data).hexdigest()
 
 
 def safe_path(root, relative):

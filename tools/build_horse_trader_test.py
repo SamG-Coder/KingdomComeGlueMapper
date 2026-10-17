@@ -4,7 +4,6 @@ Writes a staging directory only. Installation is deliberately separate from
 conversion/validation and must happen while the game is closed.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -20,15 +19,12 @@ from horse_trader import roster, horse_resources
 from horse_trader_dialogue import attach, ROLE
 from horse_trader_world import register, STASH_PREFIX
 from merchant_stash import source_stash, stash_assets
-from upgrade_map import read, xml
+from upgrade_map import read, xml, digest
 
 ENTRY = 'Quests/GlueTravel/entry/kcd1_travel.xml'
 PROJECT = 'Quests/GlueTravel/GlueTravel_kcd1.xml'
 LEVEL_FILES = ('objects_mission0.xml', 'whdata_0', 'waitinglinks.xml', 'triggerareas.fubar', 'tables/ai/scheduler.xml')
 
-
-def digest(path):
-    with path.open('rb') as stream: return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def rewrite(source, target, replacements):

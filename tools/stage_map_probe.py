@@ -1,18 +1,14 @@
 """Stage an UNCONVERTED map copy for target-loader diagnostics, not gameplay."""
-import hashlib
 import json
 from pathlib import Path
 import shutil
+
+from upgrade_map import digest
 
 BASE = Path(r"D:\SteamLibrary\steamapps\common")
 SOURCE = BASE / "KingdomComeDeliverance/Data/Levels/rataje"
 DEST = BASE / "KCD2Mod/Data/Levels/rataje"
 REPORT = Path(__file__).resolve().parents[1] / "reports/staged-map-probe.json"
-
-
-def digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def main():

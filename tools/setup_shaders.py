@@ -17,7 +17,7 @@ import time
 import zipfile
 
 from fix_illum_shader import REPAIRS as ILLUM_REPAIRS
-from upgrade_map import read
+from upgrade_map import read, digest
 
 ARCHIVES = ('Shaders.pak', 'ShadersBin.pak', 'ShaderCache.pak', 'ShaderCacheStartup.pak')
 PREFIX = 'Shaders/HWScripts/CryFX/'
@@ -44,10 +44,6 @@ sys_intromoviesduringinit=0
 sys_PakPriority=0
 '''
 
-
-def digest(path):
-    with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def patched(name, blob):

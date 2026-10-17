@@ -6,17 +6,13 @@ only profile-qualified archive paths change. Runtime pathfinding still needs
 an in-game acceptance test. Group-combination profiles require their complete
 group conversion rather than a misleading stand-alone profile mesh.
 """
-import hashlib
 import struct
 
 from campaign_dependencies import ImportPlan
 from campaign_quest_graph import identifier
 from region_travel_navigation import validate_mesh
-from upgrade_map import read
+from upgrade_map import read, digest_bytes as digest
 
-
-def digest(data):
-    return hashlib.sha256(data).hexdigest()
 
 
 class NavigationSource:
