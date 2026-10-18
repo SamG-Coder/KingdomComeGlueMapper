@@ -114,7 +114,10 @@ def prepare(target, output):
     for path in (target/'Engine').glob('*.pak'):
         if path.name.lower().startswith(('shader',)): continue
         dest = engine/path.name
-        if not dest.exists(): os.link(path, dest)
+        if dest.exists(): continue
+        # Hard links cannot cross volumes (game on C:, build on D:).
+        try: os.link(path, dest)
+        except OSError: shutil.copy2(path, dest)
     seed = root/'USER_ShaderCacheGen'
     if not seed.exists(): shutil.copytree(sdk/'Tools/modding/USER_ShaderCacheGen', seed)
     (root/'system.cfg').write_text(CONFIG, encoding='utf-8')

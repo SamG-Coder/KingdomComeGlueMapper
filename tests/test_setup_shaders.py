@@ -87,6 +87,29 @@ class ShaderSetupTests(unittest.TestCase):
             self.assertFalse(report['isolated_mount_verified'])
             self.assertFalse(report['runtime_verified'])
 
+    def test_prepare_copies_engine_paks_when_hard_links_cross_volumes(self):
+        import zipfile
+        from setup_shaders import prepare, ILLUM_REPAIRS
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t); target = root/'game'; sdk = root/'KCD2Mod'
+            for name in ('Data/a.pak', 'Localization/b.pak', 'Engine/Engine.pak', 'Engine/ShadersBin.pak'):
+                (target/name).parent.mkdir(parents=True, exist_ok=True); (target/name).write_bytes(name.encode())
+            sources = {'Illum.cfx': b'\n'.join(pair[0] for pair in ILLUM_REPAIRS), **{n: p[0] for n, p in REPAIRS.items()}}
+            with zipfile.ZipFile(target/'Engine/Shaders.pak', 'w') as z:
+                for name, blob in sources.items(): z.writestr('Shaders/HWScripts/CryFX/'+name, blob)
+            for name in ('Bin/x.dll', 'Tools/ShaderCacheGen/ShaderCacheGen.exe', 'Tools/rc/rc.exe',
+                         'Tools/modding/USER_ShaderCacheGen/seed.txt'):
+                (sdk/name).parent.mkdir(parents=True, exist_ok=True); (sdk/name).write_bytes(b'tool')
+            # Game on C:, build on D: -> os.link raises ERROR_NOT_SAME_DEVICE.
+            with patch('setup_shaders.tool_root', return_value=sdk), \
+                 patch('setup_shaders.os.link', side_effect=OSError(18, 'cannot move to a different disk drive', None, 17)):
+                compiler, _ = prepare(target, root/'build')
+            engine = compiler/'Engine'
+            self.assertEqual((engine/'Engine.pak').read_bytes(), b'Engine/Engine.pak')
+            self.assertFalse((engine/'Shaders.pak').exists())  # rebuilt from extracted sources, never linked
+            self.assertEqual((target/'Engine/Engine.pak').read_bytes(), b'Engine/Engine.pak')
+            self.assertEqual((compiler/'Data/a.pak').read_bytes(), b'Data/a.pak')
+
     def test_tampered_package_does_not_change_game(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t); package=root/'package'; package.mkdir(); package_shaders(package)
