@@ -77,6 +77,17 @@ class ClothingRegionsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Overlapping'):
             read_chunks(corrupt)
 
+    def test_chunk_range_validation_is_independent_of_table_order(self):
+        chunks=[Chunk(0x100b,0x824,i,bytes([i])*8) for i in range(1,9)]
+        blob=bytearray(write_chunks(chunks,{}))
+        entries=[bytes(blob[16+i*16:32+i*16]) for i in range(8)]
+        blob[16:16+128]=b''.join(reversed(entries))
+        self.assertEqual(read_chunks(blob),list(reversed(chunks)))
+        # Two payloads overlap even though their table rows are far apart.
+        offset=struct.unpack_from('<I',blob,16+12)[0]
+        struct.pack_into('<I',blob,16+7*16+12,offset+1)
+        with self.assertRaisesRegex(ValueError,'Overlapping'):read_chunks(blob)
+
     def test_preview_classifier_uses_named_weights_and_explicit_height(self):
         blob, _ = sample_skin()
         chunks = read_chunks(blob)

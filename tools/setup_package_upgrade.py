@@ -242,6 +242,8 @@ def finalize(package, *, source=None, target=None, notify=lambda *a: None, cance
     mesh_files, mesh_report = upgrade_package(package)
     receipt['files'].update(mesh_files)
     receipt['mesh_lod_metadata'] = mesh_report
+    from setup_streaming import validate_mesh_package
+    receipt['build_recipe']['streaming_validation'].update(validate_mesh_package(package))
     from hlod_spatial_metadata import upgrade_package as upgrade_spatial_metadata
     spatial_files, spatial_report = upgrade_spatial_metadata(package)
     receipt['files'].update(spatial_files)

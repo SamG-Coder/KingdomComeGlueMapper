@@ -36,10 +36,15 @@ def read_chunks(blob):
     occupied = [(0, 16), (table, table + count * 16)]
     for i in range(count):
         kind, version, ident, size, offset = struct.unpack_from('<HHIII', blob, table + i * 16)
-        if offset + size > len(blob) or any(offset < end and offset + size > start for start, end in occupied):
+        if offset + size > len(blob):
             raise ValueError('Overlapping or truncated chunk')
         occupied.append((offset, offset + size))
         result.append(Chunk(kind, version, ident, bytes(blob[offset:offset + size])))
+    # Validate disjoint byte ranges once, rather than scanning all previous
+    # ranges for every chunk. Large HLOD compounds can contain 100,000 nodes.
+    occupied.sort()
+    if any(a[1] > b[0] and b[1] > a[0] for a,b in zip(occupied,occupied[1:])):
+        raise ValueError('Overlapping or truncated chunk')
     if len({c.id for c in result}) != count:
         raise ValueError('Duplicate chunk IDs')
     return result

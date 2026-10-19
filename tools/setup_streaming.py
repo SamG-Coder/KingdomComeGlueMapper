@@ -63,6 +63,45 @@ def texture_families(index):
     return checked
 
 
+def mesh_families(index):
+    """Validate the effective CGF/CGFM pair, including resident physics needs."""
+    from mesh_lod_metadata import PREFIXES as STATIC_PREFIXES
+    from native_mesh_streaming import validate_pair
+    from clothing_regions import read_chunks
+    checked = 0
+    for name in index:
+        if not name.startswith(STATIC_PREFIXES) or not name.endswith('.cgf'):
+            continue
+        archive, original = index[name][-1]
+        header = read(archive, original)
+        if not any(c.kind == 0x1000 and struct.unpack_from('<I', c.data)[0] & 9 == 9
+                   for c in read_chunks(header)):
+            continue
+        if name+'m' not in index:
+            raise ValueError('Missing geometry companion: '+name+'m')
+        archive, original = index[name+'m'][-1]
+        try:
+            validate_pair(header, read(archive, original))
+        except ValueError as error:
+            raise ValueError(name+': '+str(error)) from error
+        checked += 1
+    return checked
+
+
+def validate_mesh_package(package):
+    """Run the same geometry contract during an in-place recipe migration."""
+    with ExitStack() as stack:
+        index = {}
+        for path in sorted((Path(package)/'Data').glob('*.pak')):
+            archive = stack.enter_context(zipfile.ZipFile(path))
+            for name in archive.namelist():
+                key = name.replace('\\', '/').lower()
+                if key.endswith(('.cgf', '.cgfm')):
+                    index.setdefault(key, []).append((archive, name))
+        return dict(physics_dependency_validation=1, mesh_streaming_families=mesh_families(index),
+                    runtime_verified=False)
+
+
 def validate(package, level='kcd1_travel', converted_data=None):
     package = Path(package)
     from lod_ratio_metadata import upgrade_package as validate_lod_ratios
@@ -107,24 +146,12 @@ def validate(package, level='kcd1_travel', converted_data=None):
             gaps = family_gaps(index, generated_names(converted_data))
             if gaps: raise ValueError('Setup omitted generated LOD/mip siblings: '+', '.join(sorted(gaps)[:20]))
         families = texture_families(index)
-        from mesh_lod_metadata import PREFIXES as STATIC_PREFIXES
-        from mesh_streaming import validate_pair
-        from clothing_regions import read_chunks
-        mesh_families = 0
-        for name in index:
-            if not name.startswith(STATIC_PREFIXES) or not name.endswith('.cgf'):continue
-            archive, original = index[name][-1]
-            header = read(archive, original)
-            if not any(c.kind == 0x1000 and struct.unpack_from('<I',c.data)[0] & 9 == 9
-                       for c in read_chunks(header)):continue
-            if name+'m' not in index:raise ValueError('Missing geometry companion: '+name+'m')
-            archive, original = index[name+'m'][-1]
-            validate_pair(header, read(archive, original))
-            mesh_families += 1
+        meshes = mesh_families(index)
         return dict(level=level, groups=sum(1 for _ in tree.iter('HLod')), proxies=proxies,
             detail_records=len(near)-proxies, mesh_table=len(parsed.tables['meshes']['paths']),
             referenced_resources=len(required), missing_resources=0, texture_families=families,
-            mesh_streaming_families=mesh_families,
+            mesh_streaming_families=meshes,
+            physics_dependency_validation=1,
             vegetation_grid_version=spatial['version'],
             lod_ratio_version=ratio_report['version'],
             external_lods=sum(bool(re.search(r'_lod[1-6]\.cgf$', n)) for n in index),

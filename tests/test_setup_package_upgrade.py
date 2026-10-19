@@ -40,7 +40,7 @@ class UpgradeTests(unittest.TestCase):
         self.source_recipe = 31
         self.test_migrates_legacy_world_without_changing_shared_assets()
 
-    def test_recipe30_migrates_lod_metadata(self):
+    def test_recipe30_revalidates_mesh_physics_dependencies(self):
         self.source_recipe = 30
         self.test_migrates_legacy_world_without_changing_shared_assets()
 
@@ -166,6 +166,7 @@ class UpgradeTests(unittest.TestCase):
                 with zipfile.ZipFile(p/'Data/gluemappertravel.pak') as z:
                     self.assertIn(b'Marker=', z.read(QUEST_PATH))
             verify_package(p)
+            self.assertEqual(result['build_recipe']['streaming_validation']['physics_dependency_validation'], 1)
             self.assertEqual(result['build_recipe']['streaming_validation']['vegetation_grid_version'], 1)
             self.assertEqual(result['build_recipe']['streaming_validation']['lod_ratio_version'], 1)
             if getattr(self,'restore_split',False):

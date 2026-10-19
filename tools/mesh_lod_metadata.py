@@ -12,7 +12,7 @@ HAS_FACE_AREA = 8
 PREFIXES = ('gluebuild/', 'glueveg/', 'gluelandscape/', 'glueitems/', 'gluewater/')
 
 
-def face_area(mesh, chunks):
+def face_area(mesh, chunks, minimum_area=1e-5):
     if mesh.version != 0x801 or len(mesh.data) != 264:
         raise ValueError('Unsupported static mesh header')
     flags, _, vertices, indices, subsets, subset_id = struct.unpack_from('<6I', mesh.data)
@@ -58,7 +58,7 @@ def face_area(mesh, chunks):
         areas = np.sqrt(np.sum(cross * cross, axis=1)) * np.float32(0.5)
         if not np.isfinite(areas).all():
             raise ValueError('Non-finite triangle area')
-        logs.extend(np.log(areas[areas >= np.float32(1e-5)]))
+        logs.extend(np.log(areas[(areas > 0) & (areas >= np.float32(minimum_area))]))
     if not logs:
         return None  # Degenerate/tiny-only meshes have no engine area statistic.
     # Sequential float accumulation matches the engine-family implementation.
