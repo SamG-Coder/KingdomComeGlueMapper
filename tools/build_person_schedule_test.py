@@ -40,13 +40,15 @@ def build(a):
     else:
         files, report = bind_arrivals(files, schedules, a.target)
     if a.jobs:
+        from character_horse_handler_work import refresh_existing
+        files, stable_refreshes = refresh_existing(files, a.target)
         with zipfile.ZipFile(a.travel_pak) as pak:
             items=[read(pak,n) for n in pak.namelist() if n.lower().startswith('libs/tables/item/item__') and n.endswith('.xml')]
         registered=native_item_registry(native_items(a.target,items))
         with zipfile.ZipFile(a.source/'Data/Levels'/a.source_level/'level.pak') as archive:
             files,jobs=bind_jobs(files,schedules,archive,a.target,registered,getattr(a,'routes',False))
         resources.update(job_resources(a.source,a.target,files,schedules))
-        report=dict(arrivals=report,jobs=jobs)
+        report=dict(arrivals=report,jobs=jobs,stable_approach_refreshes=stable_refreshes)
         # Match setup's additive sleep policy after replacing an owned idle
         # routine. Otherwise a test package can reintroduce all-night work.
         from character_sleep_work import restrict_work_to_waking_hours

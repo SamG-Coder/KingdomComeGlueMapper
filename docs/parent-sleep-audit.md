@@ -1,5 +1,10 @@
 # Parent sleep audit — 22 October 2026
 
+The [23 October source investigation](parent-sleep-horse-hand-investigation.md)
+adds a reproducible ladder-reference audit and a separate correction for copied
+bed scheduler positions. The unresolved autonomous loft route remains distinct
+from those changes.
+
 ## Result and scope
 
 The installed loft has player-usable beds, but its NPC navigation is incomplete.

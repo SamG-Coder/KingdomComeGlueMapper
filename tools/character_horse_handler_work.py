@@ -2,11 +2,12 @@
 import copy
 import hashlib
 import math
+import re
 import uuid
 import xml.etree.ElementTree as E
 import zipfile
 from pathlib import Path
-from campaign_entity_links import guid_value, native_guid
+from campaign_entity_links import append_links, guid_value, native_guid
 from character_person import unique, resolve_link_targets, world_entity
 from character_station_work import unquote
 from character_job_items import register_item, bind_reservation
@@ -154,6 +155,139 @@ def resources():
     return {'Libs/Tables/ai/smartEntity/SmartEntity__gm_stable_hay.xml':xml(table),
             'Libs/Tables/ai/DecisionLabelDatabase__gm_stable_hay.xml':xml(labels),
             'AI/gluemapper/stable_hay.xml':xml(trees)}
+
+
+def refresh_existing(files, target):
+    """Migrate the owned pre-approach graph before publishing its new behavior.
+
+    Existing workers are deliberately excluded from the idle-to-work converter.
+    Their behavior is nevertheless refreshed on every population upgrade. Older
+    hay graphs therefore need the start point now required by that behavior.
+    Only the generated cart/hub identities and the known old origin placement
+    are accepted; unrelated resources and all activity clocks remain intact.
+    """
+    mission = E.fromstring(files['objects_mission0.xml'])
+    carts = [e for e in mission if e.find('Properties') is not None
+             and e.find('Properties').get('guidSmartObjectType') == TEMPLATE]
+    if not carts:
+        return dict(files), []
+    animation = native_fragments(target)[FRAGMENTS[0]]
+    scheduler = E.fromstring(files['tables/ai/scheduler.xml'])
+    rows = scheduler.find('Schedulers')
+    waiting = E.fromstring(files['waitinglinks.xml'])
+    edges, report = [], []
+    identity = lambda value: native_guid(int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little'))
+
+    def entity(guid):
+        if not isinstance(guid, str):
+            raise ValueError('Stable graph entity has no GUID')
+        return unique((e for e in mission if e.get('EntityGuid') == guid), 'stable graph entity: ' + guid)
+
+    def linked(owner, label):
+        link = unique((l for l in owner.findall('EntityLinks/Link') if l.get('Name') == label),
+                      'stable graph link: ' + label)
+        node = entity(link.get('TargetGuid'))
+        if node.get('EntityId') != link.get('TargetId'):
+            raise ValueError('Stable graph target ID disagrees with its GUID')
+        return node
+
+    for cart in carts:
+        guid = cart.get('EntityGuid')
+        match = re.fullmatch(r'gm_stable_hay_([0-9a-f]{1,16})', cart.get('Name', ''))
+        # Source uint64 text is retained in the hash but lowercased in the name.
+        source_ids = [] if match is None else [value for value in {match[1], match[1].upper()}
+                     if identity('stable-hay/' + value) == guid]
+        if (len(source_ids) != 1 or cart.get('EntityClass') != 'SmartObjectHolder'
+                or cart.find('Properties').attrib != dict(guidSmartObjectType=TEMPLATE, bSaved_by_game='0')):
+            raise ValueError('Cannot refresh foreign stable cart')
+        leaf = unique((r for r in rows if r.get('EntityGuid') == str(guid_value(guid))), 'stable cart scheduler')
+        if leaf.tag != 'C_SmartHub' or len(leaf):
+            raise ValueError('Cannot refresh changed stable cart scheduler')
+        labels = [l.get('Name') for l in cart.findall('EntityLinks/Link')]
+        reservation = "schedulerReservedItem['use','stable_pitchfork']"
+        if labels.count(reservation) != 1 or any(label not in (reservation, 'stableAnimationStart') for label in labels):
+            raise ValueError('Cannot refresh changed stable reservation graph')
+        point = linked(cart, reservation)
+        slot = linked(point, '')
+        expected_point = identity('job-reservation/' + guid + '/stable_pitchfork/' + slot.get('EntityGuid'))
+        if (point.get('EntityClass') != 'TagPoint' or point.get('EntityGuid') != expected_point
+                or len(point.findall('EntityLinks/Link')) != 1 or slot.get('EntityClass') != 'ItemSlot'
+                or slot.find('Properties') is None or not slot.find('Properties').get('guidItemClassId')):
+            raise ValueError('Cannot refresh changed stable tool reservation')
+
+        consumers = [(r, link) for r in rows for link in r.findall('Links/S_ActivityLink')
+                     if link.get('TargetGuid') == str(guid_value(guid))]
+        if not consumers:
+            raise ValueError('Stable cart has no owned schedule consumer')
+        hubs = []
+        for row, activity in consumers:
+            hub = entity(native_guid(int(row.get('EntityGuid'))))
+            actor = unique((e for e in mission if e.get('EntityClass') == 'NPC'
+                            and identity('schedule-arrival/' + e.get('EntityGuid', '') + '/' + source_ids[0])
+                            == hub.get('EntityGuid')), 'owned stable worker')
+            prefix = 'gm_schedule_' + actor.get('Name') + '_'
+            parameters = activity.find('Parameters')
+            if (hub.get('EntityClass') != 'SchedulerHub' or not hub.get('Name', '').startswith(prefix)
+                    or not hub.get('Name')[len(prefix):].isdigit()
+                    or hub.find('Properties') is None or hub.find('Properties').attrib != dict(bSaved_by_game='0')
+                    or row.tag != 'C_SmartHub' or len(row) != 1 or len(row.findall('Links/S_ActivityLink')) != 1
+                    or row.get('Position') != hub.get('Pos') or activity.get('PositioningDelegate') != '0'
+                    or parameters is None or any(parameters.get(k) != v for k, v in
+                       dict(BehaviorName='use', TimeOfDayStart='0', TimeOfDayEnd='1440').items())
+                    or len(hub.findall('EntityLinks/Link')) != 1 or linked(hub, '_,use') is not cart):
+                raise ValueError('Cannot refresh changed stable schedule hub')
+            incoming = [(r, link) for r in rows for link in r.findall('Links/S_ActivityLink')
+                        if link.get('TargetGuid') == row.get('EntityGuid')]
+            if not incoming or any(r.get('EntityGuid') != str(guid_value(actor.get('EntityGuid')))
+                    or link.find('Parameters') is None or link.find('Parameters').get('BehaviorName') is not None
+                    for r, link in incoming):
+                raise ValueError('Cannot refresh foreign stable schedule consumer')
+            hubs.append((hub, row, actor))
+
+        pose = work_contact(cart.attrib, animation)
+        start_guid = identity('stable-start/' + guid)
+        starts = [e for e in mission if e.get('EntityGuid') == start_guid]
+        if len(starts) > 1:
+            raise ValueError('Duplicate stable animation start')
+        start = starts[0] if starts else None
+        if start is not None and (start.get('EntityClass') != 'TagPoint'
+                or start.get('Name') != cart.get('Name') + '_start'
+                or start.get('Pos') != pose['Pos'] or start.get('Rotate', '1,0,0,0') != pose['Rotate']
+                or start.findall('EntityLinks/Link')):
+            raise ValueError('Conflicting stable animation start')
+        for hub, row, actor in hubs:
+            old_pose = (hub.get('Pos'), hub.get('Rotate', '1,0,0,0'))
+            expected = (pose['Pos'], pose['Rotate'])
+            if old_pose != expected and (start is not None or old_pose != (cart.get('Pos'), cart.get('Rotate', '1,0,0,0'))):
+                raise ValueError('Cannot refresh unknown stable approach placement')
+        authored = [l for l in cart.findall('EntityLinks/Link') if l.get('Name') == 'stableAnimationStart']
+        if authored and (len(authored) != 1 or start is None
+                or authored[0].get('TargetGuid') != start_guid or authored[0].get('TargetId') != start.get('EntityId')):
+            raise ValueError('Conflicting stable animation start link')
+        saved_edges = [r for r in waiting.findall('.//WaitingLink') if r.get('SourceId') == guid
+                       and any(d.text == 'stableAnimationStart' for d in r)]
+        if len(saved_edges) > 1 or any(r.get('TargetId') != start_guid for r in saved_edges):
+            raise ValueError('Conflicting stable animation start waiting link')
+        if start is None:
+            start = E.SubElement(mission, 'Entity', Name=cart.get('Name')+'_start', EntityGuid=start_guid,
+                EntityId=str(max(int(e.get('EntityId', '0')) for e in mission)+1), EntityClass='TagPoint',
+                Pos=pose['Pos'], Rotate=pose['Rotate'])
+            E.SubElement(start, 'Properties')
+        if not authored:
+            E.SubElement(cart.find('EntityLinks'), 'Link', Name='stableAnimationStart',
+                         TargetId=start.get('EntityId'), TargetGuid=start_guid)
+        edges.append((guid, start_guid, 'stableAnimationStart'))
+        for hub, row, actor in hubs:
+            changed = hub.get('Pos') != pose['Pos'] or hub.get('Rotate', '1,0,0,0') != pose['Rotate']
+            hub.set('Pos', pose['Pos']); hub.set('Rotate', pose['Rotate']); row.set('Position', pose['Pos'])
+            report.append(dict(person=actor.get('Name'), job='stable_hay_approach_refresh', extension_only=True,
+                cart=guid, approach=start_guid, migrated=not authored or not saved_edges or changed,
+                pending=list(PENDING), runtime_verified=False))
+    result = dict(files)
+    result['objects_mission0.xml'] = xml(mission)
+    result['tables/ai/scheduler.xml'] = xml(scheduler)
+    result['waitinglinks.xml'] = append_links(files['waitinglinks.xml'], edges)
+    return result, report
 
 
 def bind(mission,scheduler,person,entry,archive,target,registered):

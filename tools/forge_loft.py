@@ -44,6 +44,8 @@ def layout_hash():
 def repair_interactions(files, native):
     """Update authored furniture in place without duplicating beds or inventory."""
     root=E.fromstring(files['objects_mission0.xml'])
+    scheduler=E.fromstring(files['tables/ai/scheduler.xml'])
+    rows=scheduler.find('Schedulers')
     names={e.get('Name'):e for e in root}
     for p in placements():
         if p['kind']=='chest':
@@ -55,11 +57,17 @@ def repair_interactions(files, native):
         node.attrib.update(template.attrib)
         node.remove(node.find('Properties'));node.append(template.find('Properties'))
     for role in ('player','mother','father'):
+        bed=names[PREFIX+role+'_bed']
+        hub=one((r for r in rows if r.get('EntityGuid')==str(guid_value(bed.get('EntityGuid')))),
+                'assigned bed scheduler')
+        # A copied native hub position belongs to its original town. Let the
+        # placed bed supply its location, as the world/rental bed adapters do.
+        hub.attrib.pop('Position',None)
         trigger=names[PREFIX+role+'_trigger']
         click=trigger.find('Properties/Click')
         click.set('UseNotOwnerMessage','@ui_use_sit')
         click.set('esActionType','Stance');click.set('sAction','sitting')
-    updated=dict(files,**{'objects_mission0.xml':xml(root)})
+    updated=dict(files,**{'objects_mission0.xml':xml(root),'tables/ai/scheduler.xml':xml(scheduler)})
     updated,_=install(updated,native,prefixes=(PREFIX,))
     return updated
 
@@ -150,7 +158,8 @@ def convert(files,native):
         click=bt.find('Properties/Click')
         click.set('UseNotOwnerMessage','@ui_use_sit')
         click.set('esActionType','Stance');click.set('sAction','sitting')
-        bh=copy.deepcopy(hub);bh.set('EntityGuid',str(guid_value(bed.get('EntityGuid'))));rows.append(bh)
+        bh=copy.deepcopy(hub);bh.set('EntityGuid',str(guid_value(bed.get('EntityGuid'))))
+        bh.attrib.pop('Position',None);rows.append(bh)
         network.append((owners[role],bed.get('EntityGuid'),'owner'))
         link(names['Ska_SA_HomeForge'],bed,'bed')
         if role!='player':
@@ -196,6 +205,7 @@ def validate(files):
     for role in ('player','mother','father'):
         bed=one((e for e in root if e.get('Name')==PREFIX+role+'_bed'),'assigned bed')
         hub=one((r for r in rows if r.get('EntityGuid')==str(guid_value(bed.get('EntityGuid')))),'assigned bed scheduler')
+        if hub.get('Position') is not None:raise ValueError('Bed scheduler retains a copied position')
         if not hub.findall('.//EffectHeal'):raise ValueError('Bed healing contract missing')
         if bed.find('Properties').get('soclass_SmartObjectHelpers')!='Bed_1Place_High':
             raise ValueError('Bed animation family does not match furniture')

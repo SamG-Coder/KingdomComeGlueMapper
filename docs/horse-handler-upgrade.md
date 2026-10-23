@@ -62,3 +62,12 @@ one-shot/loop lifecycles. Missing or ambiguous data rejects conversion.
 The preceding installed candidate picked up its pitchfork and approached the
 cart, but the user confirmed that it stood still. The alignment/tag correction
 is installed and passes offline checks; it has not been verified in play. Do not mark this job runtime-verified on the strength of these checks.
+
+## Existing-package migration investigation
+
+The [23 October source investigation](parent-sleep-horse-hand-investigation.md)
+identifies an upgrade path that can publish the current hay behavior while
+retaining an older cart graph without its required animation-start link. The
+investigation branch adds an owned-job migration before resource publication.
+This is a package-consistency correction; the native animation and complete
+autonomous work cycle still require live acceptance.

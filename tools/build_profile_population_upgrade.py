@@ -80,6 +80,11 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
     missing=set(new_people)-set(merchants)-eligible
     if missing:
         raise ValueError('New population actors lack an owned idle schedule: '+', '.join(sorted(missing)))
+    # Refresh existing carts before adding workers who may share them. The
+    # latest behavior requires its start-point graph even for non-idle actors.
+    from character_horse_handler_work import refresh_existing as refresh_stable_jobs
+    files, stable_refreshes = refresh_stable_jobs(files, target)
+    converted.extend(stable_refreshes)
     with zipfile.ZipFile(source/'Data/Levels'/source_level/'level.pak') as archive:
         # Older packages incorrectly selected the female housework branch for
         # every actor. Repair only importer-owned route jobs, preserving the
