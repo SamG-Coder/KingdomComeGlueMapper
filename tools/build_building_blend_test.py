@@ -6,7 +6,6 @@ and source hashes only; installation must happen while the game is closed.
 import argparse
 from contextlib import ExitStack
 import copy
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -15,7 +14,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from build_horse_trader_test import digest
-from clothing_regions import read_chunks
+from clothing_regions import chunk_digest, read_chunks
 from compiled_terrain import parse
 from building_brushes import resource_table
 from static_assets import asset_pack, convert_blended_detail
@@ -36,8 +35,7 @@ def rewrite(source, destination, changes):
 
 
 def signature(blob):
-    return hashlib.sha256(b''.join(struct.pack('<HHI', c.kind,c.version,c.id)+c.data
-                                  for c in read_chunks(blob) if c.kind!=0x1014)).hexdigest()
+    return chunk_digest(blob).hexdigest()
 
 
 def roots(blob):

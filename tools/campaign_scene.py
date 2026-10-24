@@ -10,7 +10,7 @@ import re
 import xml.etree.ElementTree as ET
 
 from campaign_quest_graph import xml, edge, constant, identifier
-from campaign_entity_links import append_links, native_guid
+from campaign_entity_links import append_links, entity_link, native_guid
 
 
 STATS = dict(str='strength', agi='agility', vit='vitality', spc='speech')
@@ -62,21 +62,15 @@ def bind_scene_positions(project_blob, mission_blob, waiting_blob, dialogue_name
         next_id += 1
         return result
 
-    def link(a, b, label):
-        links = a.find('EntityLinks')
-        if links is None: links = ET.SubElement(a, 'EntityLinks')
-        ET.SubElement(links, 'Link', Name=label, TargetId=b.get('EntityId'), TargetGuid=b.get('EntityGuid'))
-        waiting.append((a.get('EntityGuid'), b.get('EntityGuid'), label))
-
     holder = entity(alias, 'DialogueHolder', next(iter(participants.values())))
     ET.SubElement(assets, 'DialogueHolderAsset', Name=alias)
     ET.SubElement(dialogs[0], 'Asset', Name='DialogueHolder', Alias=alias)
-    link(hosts[0], holder, "asset['" + alias + "']")
+    entity_link(hosts[0], holder, "asset['" + alias + "']", waiting)
     for soul, pose in participants.items():
         spot = entity(alias + '_' + soul, 'TagPoint', pose)
         ET.SubElement(spot, 'Properties', bSaved_by_game='0')
-        link(holder, spot, 'teleportBefore')
-        link(spot, spot, "useAsset['" + soul + "']")
+        entity_link(holder, spot, 'teleportBefore', waiting)
+        entity_link(spot, spot, "useAsset['" + soul + "']", waiting)
         report.append(dict(soul_asset=soul, source_name=pose.get('Name'),
                            position=pose['Pos'], rotation=pose.get('Rotate'), phase='teleportBefore'))
     return xml(root), xml(mission), append_links(waiting_blob, waiting), report

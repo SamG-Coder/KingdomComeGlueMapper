@@ -4,7 +4,7 @@ import unittest
 import xml.etree.ElementTree as E
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from campaign_entity_links import native_guid, guid_value, append_links
+from campaign_entity_links import native_guid, guid_value, append_links, entity_link
 from build_campaign_runtime_probe import add_concept_preprocess
 
 
@@ -26,6 +26,20 @@ class EntityLinksTests(unittest.TestCase):
         self.assertEqual([n.text for n in r.find('WaitingLinks')[0]], ['home', "asset['door']"])
         self.assertEqual(append_links(data, [(a, c, "asset['area']")]), data)
         with self.assertRaises(ValueError): append_links(b'<StaticLinksInfo version="2"/>', [])
+
+    def test_entity_link_writes_inline_link_and_records_waiting_tuple(self):
+        a = E.Element('Entity', EntityId='10', EntityGuid=native_guid(10))
+        b = E.Element('Entity', EntityId='20', EntityGuid=native_guid(20))
+        waiting = []
+        entity_link(a, b, 'teleportBefore', waiting)
+        self.assertEqual(waiting, [(native_guid(10), native_guid(20), 'teleportBefore')])
+        link = a.find('EntityLinks/Link')
+        self.assertEqual((link.get('Name'), link.get('TargetId'), link.get('TargetGuid')),
+                         ('teleportBefore', '20', native_guid(20)))
+        entity_link(a, b, "asset['x']", waiting)
+        self.assertEqual(len(a.findall('EntityLinks')), 1)
+        self.assertEqual(len(a.findall('EntityLinks/Link')), 2)
+        self.assertEqual(waiting[-1], (native_guid(10), native_guid(20), "asset['x']"))
 
     def test_concept_registration_preserves_people_and_binds_real_player(self):
         original = b'<Root version="1"><SoulList><Souls><Soul><Name>existing</Name><Guid>existing</Guid></Soul></Souls></SoulList></Root>'

@@ -177,12 +177,8 @@ def build(library, mod, output):
 def resolve_brushes(files, meshes, mod, source):
     """Find the three original equipment meshes regardless of build numbering."""
     from build_open_test_gates import source_geometry
-    import hashlib
-    from clothing_regions import read_chunks
+    from clothing_regions import chunk_digest
     from spatial_hlod import records
-    def signature(blob):
-        return hashlib.sha256(b''.join(struct.pack('<HHI',c.kind,c.version,c.id)+c.data
-            for c in read_chunks(blob) if c.kind!=0x1014)).digest()
     models=('objects/props/blacksmith_tools/anvil_01.cgf',
             'objects/props/blacksmith_tools/water_container.cgf',
             'objects/props/wooden_bins/barrels/barrel_02/barrel_02_metal_pieces.cgf')
@@ -200,14 +196,14 @@ def resolve_brushes(files, meshes, mod, source):
     expected=set()
     for name,blob in source_geometry(source,models).items():
         expected.add(name)
-        variants[signature(blob)]=name
-        variants[signature(normalize(blob))]=name
+        variants[chunk_digest(blob)]=name
+        variants[chunk_digest(normalize(blob))]=name
     found={};matched=set()
     for path in sorted((mod/'Data').glob('*.pak')):
         with zipfile.ZipFile(path) as archive:
             for name in archive.namelist():
                 if name.lower() not in nearby:continue
-                value=signature(read(archive,name))
+                value=chunk_digest(read(archive,name))
                 if value in variants:found[name.lower()]=value;matched.add(variants[value])
     if matched!=expected:raise ValueError('Missing original Rattay equipment geometry')
     return set(found)

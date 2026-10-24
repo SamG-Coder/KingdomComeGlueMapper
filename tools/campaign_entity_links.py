@@ -24,6 +24,20 @@ def guid_value(value):
     return result
 
 
+def entity_link(a, b, label, waiting):
+    """Append an EntityLinks/Link from a to b and record it for the link network.
+
+    Creates the EntityLinks container on the source entity when absent, writes a
+    single Link with the target's EntityId and EntityGuid, and appends the
+    (source guid, target guid, label) record so the caller can export it to the
+    native AI link network afterwards.
+    """
+    links = a.find('EntityLinks')
+    if links is None: links = ET.SubElement(a, 'EntityLinks')
+    ET.SubElement(links, 'Link', Name=label, TargetId=b.get('EntityId'), TargetGuid=b.get('EntityGuid'))
+    waiting.append((a.get('EntityGuid'), b.get('EntityGuid'), label))
+
+
 def append_links(data, links, *, allow_untagged=False):
     """Merge explicit (source GUID, target GUID, definition) links, deduplicated.
 

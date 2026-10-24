@@ -1,3 +1,4 @@
+import hashlib
 import struct
 import sys
 from pathlib import Path
@@ -5,7 +6,7 @@ import unittest
 from collections import Counter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from clothing_regions import (Chunk, Skin, read_chunks, split_skin_regions,
+from clothing_regions import (Chunk, Skin, chunk_digest, read_chunks, split_skin_regions,
                               write_chunks, assign_upper_garment_regions)
 
 
@@ -57,6 +58,16 @@ class ClothingRegionsTests(unittest.TestCase):
         for labels in [['arms'], ['arms', '', 'torso', 'waist']]:
             with self.assertRaises(ValueError):
                 split_skin_regions(blob, labels)
+
+    def test_chunk_digest_matches_packed_chunks_and_ignores_material_names(self):
+        blob, _ = sample_skin()
+        self.assertEqual(chunk_digest(blob),
+                         hashlib.sha256(b''.join(struct.pack('<HHI', c.kind, c.version, c.id) + c.data
+                                                for c in read_chunks(blob) if c.kind != 0x1014)).digest())
+        base = chunk_digest(blob)
+        for name in (b'objects/x.cgf', b'objects/y.cgf'):
+            renamed = read_chunks(blob) + [Chunk(0x1014, 0x800, 99, name)]
+            self.assertEqual(chunk_digest(write_chunks(renamed, {})), base)
 
     def test_rejects_corrupt_internal_face_mapping(self):
         blob, _ = sample_skin()

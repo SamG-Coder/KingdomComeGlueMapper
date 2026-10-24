@@ -1,6 +1,5 @@
 """Opt-in testing override for the reviewed Talburg and Skalitz gate pieces."""
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -72,11 +71,8 @@ def open_gates(files, meshes, grate_mesh='gluebuild/setup_buildings/mesh1197.cgf
 
 def resolve_models(files, meshes, asset, original):
     """Generated mesh numbers vary; require the original geometry at each site."""
-    from clothing_regions import read_chunks
+    from clothing_regions import chunk_digest
     from spatial_hlod import records
-    def signature(blob):
-        return hashlib.sha256(b''.join(struct.pack('<HHI',c.kind,c.version,c.id)+c.data
-            for c in read_chunks(blob) if c.kind!=0x1014)).digest()
     candidates=set()
     data=files['terrain/hlods.dat']
     for group in ET.fromstring(files['terrain/hlods.xml']).iter('HLod'):
@@ -93,15 +89,15 @@ def resolve_models(files, meshes, asset, original):
     palisade=gate.get('Geometry')
     for target,source in ((grate,'objects/buildings/castles/castle_talmberk/castle_talmberk_grate.cgf'),
                           (palisade,'objects/buildings/wall_wooden/talmberk_palisade_gate.cga')):
-        actual=signature(asset(target))
+        actual=chunk_digest(asset(target))
         reviewed=original(source)
-        matches=actual==signature(reviewed)
+        matches=actual==chunk_digest(reviewed)
         if not matches and source.endswith('.cgf'):
             # Packaging calculates missing face-area metadata. Compare against
             # that exact source conversion, never mask arbitrary header changes.
             from mesh_lod_metadata import normalize
             try:
-                matches=actual==signature(normalize(reviewed))
+                matches=actual==chunk_digest(normalize(reviewed))
             except (ValueError, KeyError, struct.error):
                 matches=False
         if not matches:

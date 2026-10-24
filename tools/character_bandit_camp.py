@@ -8,7 +8,7 @@ import uuid
 import zipfile
 import xml.etree.ElementTree as ET
 
-from campaign_entity_links import append_links, guid_value, native_guid
+from campaign_entity_links import append_links, entity_link, guid_value, native_guid
 from campaign_trigger_areas import TriggerArea, read_areas, write_areas
 from character_native_clone import identity
 from character_person import native_xml, unique
@@ -95,12 +95,6 @@ def register(files, resources, target, namespace, camp, level_id, template):
         return ET.SubElement(mission, 'Entity', Name=name, EntityClass=cls,
             EntityId=str(max(int(e.get('EntityId', '0')) for e in mission)+1), EntityGuid=guid, Pos=pos)
 
-    def link(a, b, label):
-        links = a.find('EntityLinks')
-        if links is None: links = ET.SubElement(a, 'EntityLinks')
-        ET.SubElement(links, 'Link', Name=label, TargetId=b.get('EntityId'), TargetGuid=b.get('EntityGuid'))
-        waiting.append((a.get('EntityGuid'), b.get('EntityGuid'), label))
-
     area = entity('_camp_area', 'SmartAreaShape', camp['area'].get('Pos'))
     for key in ('Rotate', 'Scale'):
         if camp['area'].get(key): area.set(key, camp['area'].get(key))
@@ -118,7 +112,7 @@ def register(files, resources, target, namespace, camp, level_id, template):
     home = entity('_camp_home', 'SchedulerHub', npc.get('Pos'))
     # Match the successful generated control: home is a static ownership link,
     # while the actor retains its independent interruptible schedulerWait job.
-    link(npc, home, 'home'); link(home, area, 'home_area')
+    entity_link(npc, home, 'home', waiting); entity_link(home, area, 'home_area', waiting)
     from character_person_activity import validate_scheduler_targets
     validate_scheduler_targets(scheduler)
     files.update({'objects_mission0.xml': xml(mission), 'whdata_0': xml(wh),

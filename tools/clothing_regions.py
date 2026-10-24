@@ -45,6 +45,18 @@ def read_chunks(blob):
     return result
 
 
+def chunk_digest(blob):
+    """SHA-256 over packed chunk headers and payloads, skipping material-name chunks.
+
+    Compiled-skin identity does not include the 0x1014 material-name records,
+    whose text can be normalized independently of the geometry. Several build
+    tools compared this digest locally; it lives beside read_chunks so every
+    caller shares one definition.
+    """
+    return hashlib.sha256(b''.join(struct.pack('<HHI', c.kind, c.version, c.id) + c.data
+                           for c in read_chunks(blob) if c.kind != 0x1014)).digest()
+
+
 def write_chunks(chunks, replacements):
     output = bytearray(b'CrCh' + struct.pack('<III', 0x746, len(chunks), 16))
     output.extend(bytes(16 * len(chunks)))
