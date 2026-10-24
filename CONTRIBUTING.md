@@ -85,6 +85,14 @@ game-dependent checks explicitly skippable. Use temporary directories instead of
 `outputs/` or `research/`. Follow the existing style: one `unittest` module per
 converter, imports taken from `tools/`.
 
+### Runtime MCP acceptance (optional)
+
+The runtime evidence runner `tools/skalitz_mcp_tests.py` needs the games and a
+locally built KCD2Mcp client. See the
+[runtime MCP acceptance setup](docs/runtime-mcp-setup.md) guide. Runtime checks
+are optional for pull requests; state plainly what you could not verify without
+the games.
+
 ## Reporting an issue
 
 Include, as far as you can:
