@@ -77,6 +77,8 @@ def finalize(package, *, source=None, target=None, repair_roots=(), notify=lambd
     from setup_gameplay import PROJECT, OPENING, validate
     from build_recipe import VERSION
     package = Path(package).resolve()
+    # Saved jobs pass the game folders from job.json as strings.
+    source, target = (None if p is None else Path(p) for p in (source, target))
     receipt = verify_package(package)
     eligible(receipt)
     if receipt.get('travel_bridge', {}).get('destination') != 'kcd1_travel':

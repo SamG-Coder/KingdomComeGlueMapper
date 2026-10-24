@@ -37,6 +37,12 @@ class UpgradeTests(unittest.TestCase):
         self.repeat_resume = True
         self.test_migrates_legacy_world_without_changing_shared_assets()
 
+    def test_saved_job_string_game_paths_reach_upgraders_as_paths(self):
+        # setup_mods passes the job.json game folders to finalize as strings.
+        self.string_paths = True
+        self.retail_initializers = True
+        self.test_migrates_legacy_world_without_changing_shared_assets()
+
     def test_rewrite_preserves_terrain_above_zip_directory_limit(self):
         from setup_package_upgrade import rewrite
         with tempfile.TemporaryDirectory() as directory:
@@ -243,7 +249,8 @@ class UpgradeTests(unittest.TestCase):
                 with patch('setup_quest_introductions.upgrade', return_value=({}, {'runtime_verified': False})) as intro_upgrade, patch('campaign_menu_stage.add_to_package'), patch(
                         'setup_quest_starts.SELECTIONS', (('different_quest','teacher','intro'),)):
                     progress=[]  # the setup passes EventLog.progress(label, current, total, detail='')
-                    result=finalize(p, source=p, target=p/'native' if getattr(self, 'retail_initializers', False) else None,
+                    as_job = str if getattr(self, 'string_paths', False) else (lambda path: path)
+                    result=finalize(p, source=as_job(p), target=as_job(p/'native') if getattr(self, 'retail_initializers', False) else None,
                                     notify=lambda *args: progress.append(args))
                     self.assertTrue(progress and all(3 <= len(args) <= 4 for args in progress), progress)
                     intro_upgrade.assert_called_once_with(p, p, p/'native' if getattr(self, 'retail_initializers', False) else None)
