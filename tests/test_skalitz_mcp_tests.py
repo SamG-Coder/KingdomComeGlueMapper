@@ -3,11 +3,13 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 SPEC = importlib.util.spec_from_file_location("skalitz_mcp_tests", Path(__file__).resolve().parents[1] / "tools/skalitz_mcp_tests.py")
 m = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m)
@@ -140,6 +142,19 @@ class RuntimeContractTests(unittest.TestCase):
         self.assert_no_mutation(client)
         self.assertFalse(any(name == "inspect_npc" for name, _ in client.calls))
         self.assertTrue(any(c["status"] == "blocked" for c in report["checks"]))
+
+    def test_public_client_missing_inspection_tools_reports_blocked(self):
+        client = FakeMcp()
+        client.tools = {"launch_game", "attach_plugin", "load_trosky", "runtime_status",
+                        "inspect_world", "create_demo", "inspect_entity", "test_mechanics",
+                        "remove_demo", "read_logs", "execute_lua"}
+        report = self.run_case(client)
+        self.assertEqual(client.calls, [])
+        boundary = next(c for c in report["checks"] if c["id"] == "run_boundary")
+        self.assertEqual(boundary["status"], "blocked")
+        for name in ("player_state", "inspect_npc", "list_entities"):
+            self.assertIn(name, boundary["detail"])
+        self.assertFalse(report["fully_verified"])
 
     def test_no_session_refuses_gameplay(self):
         client = FakeMcp()

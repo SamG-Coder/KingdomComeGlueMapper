@@ -20,6 +20,17 @@ and library locations; substitute your own. This page records the setup, not
 in-game results: where a check has not been run, or a tool is not public, it
 says so.
 
+**Public-client compatibility, checked 26 October 2026:** the published
+[client at `50b2712`](https://github.com/SamG-Coder/KCD2Mcp/blob/50b2712eae95683068ee3ad99b91b300f335eb2c/src/Client/Program.cs)
+has 11 tools. It supports its own lifecycle test and direct inspection, but
+lacks `player_state`, `inspect_npc` and `list_entities`, so it cannot run
+GlueMapper's `observe` mode. It also lacks the `native_menu_*` and
+`henry_task_*` tools required for `exercise`. Building that public revision
+does not add those capabilities. Use `plan` offline, or use a separately
+provided compatible client whose `tools/list` includes every required tool.
+The maintainer's local checkout may contain unpublished extensions; it is not
+the public release contract.
+
 ## Build the client
 
 Clone [SamG-Coder/KCD2Mcp](https://github.com/SamG-Coder/KCD2Mcp) (MIT)
@@ -93,7 +104,9 @@ client:
   state at startup.
 - The bridge permits only the audited retail `WHGame.dll` it was built against
   and requires unique native function signatures. Other game builds are
-  refused, so a game update needs a rebuilt client and plugin. Restart the game
+  refused, so a game update needs a compatibility audit and matching client and
+  plugin changes; rebuilding the same sources alone does not add support.
+  Restart the game
   to load an updated plugin; live unload is not implemented.
 - **Back up `Saved Games/kingdomcome2/saves` before any test session.** The
   plugin never modifies saves automatically, and the KCD2Mcp lifecycle test
@@ -112,7 +125,8 @@ transport uses a game log line and large results can be truncated.
 
 [tools/skalitz_mcp_tests.py](../tools/skalitz_mcp_tests.py) is the
 source-driven Skalitz evidence runner. It starts the client as a subprocess and
-speaks real MCP JSON-RPC over stdio to it, with deadlines and captured stderr:
+speaks real MCP JSON-RPC over stdio to it, with deadlines and captured stderr.
+With a compatible client and the converted destination already loaded:
 
 ```powershell
 .venv/Scripts/python.exe tools/skalitz_mcp_tests.py --mcp C:\KCD2Mcp\out\client\KCDTestMap.Client.exe --mode observe
@@ -127,25 +141,28 @@ Defaults and overrides:
   and the spec to [docs/kcd1-campaign-start-spec.md](kcd1-campaign-start-spec.md).
   Override with `--manifest`, `--quest-ir` and `--spec`; `--game-log` selects
   the game log to capture.
-- `--mode plan` builds the test plan without contacting the game.
+- `--mode plan` builds the test plan without contacting the game. It still
+  requires a generated acceptance manifest; the default paths are build
+  outputs, not files included in a fresh checkout.
 
 Modes:
 
-- `--mode observe` needs no prepared session and only reads the active world.
+- `--mode observe` needs no ephemeral session and only reads the active world.
   It requires the read tools `runtime_status`, `player_state`, `inspect_npc`
   and `list_entities`, checks that the active world matches the manifest's
   destination level, inspects a bounded set of nearby source entities, and runs
   a read-only quest probe through `execute_lua` when that tool is available.
   `execute_lua`, `inspect_entity` and `inspect_world` work against any loaded
   world; the full observe run is bound to the Skalitz destination level from
-  the manifest.
+  the manifest. With the published 11-tool client, the report instead records
+  `run_boundary: blocked` and lists the missing inspection tools.
 - `--mode exercise` adds one bounded movement test
   (`henry_task_start`/`henry_task_status`) and requires a prepared ephemeral
   native-menu session passed with `--session` (32 hex digits). It verifies that
   session with `native_menu_*` tools such as `native_menu_status` and
-  `native_menu_verify_saves`. Those tools were not in the public KCD2Mcp tree
-  as of its last push (2026-10-10), so preparing the ephemeral session still
-  needs the maintainer.
+  `native_menu_verify_saves`. These tools, and the Henry movement tools, are
+  absent from the public revision checked above. A compatible extended client
+  and prepared session are required.
 
 Each run writes `plan.json`, `report.json`, per-call JSON under `evidence/`,
 the MCP stderr and the game-log interval to the output directory (default
@@ -157,7 +174,8 @@ entire gameplay acceptance family.
 
 ## Verify it works
 
-Two bounded checks before trusting anything downstream:
+The checks below cover different capabilities; passing the public client's
+lifecycle test does not establish compatibility with GlueMapper's runner:
 
 1. **KCD2Mcp's own lifecycle test.** With a test Trosky world loaded, run
    `python test_mcp.py` in the KCD2Mcp checkout
@@ -167,8 +185,9 @@ Two bounded checks before trusting anything downstream:
    absence and recreates them. Evidence is written under
    `runtime/mcp-lifecycle-test.json`. The test does not load or overwrite
    saves.
-2. **A short observe run from this repository** while the game is running with
-   a world loaded:
+2. **A short observe run from this repository**, only with a compatible client,
+   a generated acceptance manifest, and the manifest's converted destination
+   loaded. The native Trosky world from the first check is a different world:
 
    ```powershell
    .venv/Scripts/python.exe tools/skalitz_mcp_tests.py --mcp C:\KCD2Mcp\out\client\KCDTestMap.Client.exe --mode observe --output outputs\CurrentBuild\mcp-tests\observe-smoke
