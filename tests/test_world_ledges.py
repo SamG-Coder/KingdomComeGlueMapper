@@ -6,7 +6,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from world_ledges import convert, read_ledges, rewrite_level
+from world_ledges import (LAYER, _layer_xml, _leveldata_xml, _reserved_xml, convert,
+                          next_entity_id, plan, read_ledges, rewrite_level)
 
 
 def marker(x, end):
@@ -38,29 +39,31 @@ def fixture():
 
 
 class WorldLedgesTests(unittest.TestCase):
-    def test_conversion_zeroes_entity_links_and_preserves_markers(self):
+    def test_plan_remaps_linked_ledges_and_synthesizes_entities(self):
         blob = fixture()
-        before = read_ledges(blob)
-        before_markers = [ET.tostring(m) for m in before.find('Markers')]
-        converted, report = convert(blob)
+        before_markers = [ET.tostring(m) for m in read_ledges(blob).find('Markers')]
+        converted, entities, id_map, report = plan(blob, 500)
         root = ET.fromstring(converted)
-        manager = root.find('LedgeManager')
-        ledges = list(manager.find('Ledges'))
-        self.assertEqual(len(ledges), 2)
-        self.assertEqual([int(l.findtext('entityId')) for l in ledges], [0, 0])
-        self.assertEqual([int(l.findtext('Flags0')) for l in ledges], [559, 551])
+        ledges = list(root.find('LedgeManager/Ledges'))
+        self.assertEqual([int(l.findtext('entityId')) for l in ledges], [500, 0])
+        self.assertEqual([int(l.findtext('Flags0')) for l in ledges], [558, 551])
         self.assertEqual([int(l.findtext('Flags1')) for l in ledges], [558, 551])
-        self.assertEqual([ET.tostring(m) for m in manager.find('Markers')], before_markers)
+        self.assertEqual([ET.tostring(m) for m in root.find('LedgeManager/Markers')], before_markers)
         self.assertIsNone(root.find('WeatherProfileManager'))
-        profiles = root.find('GameProfileManager')
-        self.assertEqual(len(list(profiles.find('GameProfiles'))), 0)
-        self.assertEqual(len(list(profiles.find('GameProfileGroups/Groups'))), 0)
-        self.assertEqual(report['ledges'], 2)
-        self.assertEqual(report['markers'], 5)
-        self.assertEqual(report['entity_linked_zeroed'], [5])
-        self.assertEqual(report['flags_world_bit_set'], 1)
-        self.assertTrue(report['weather_profile_manager_dropped'])
+        self.assertEqual(len(list(root.find('GameProfileManager/GameProfiles'))), 0)
         self.assertEqual(root.get('version'), '1')
+        self.assertEqual(id_map, {5: 500})
+        self.assertEqual(len(entities), 1)
+        entity = entities[0]
+        self.assertEqual(entity.get('Name'), 'gm_ledge_5')
+        self.assertEqual(entity.get('EntityClass'), 'LedgeObject')
+        self.assertEqual(entity.get('EntityId'), '500')
+        self.assertEqual(entity.get('Pos'), '0,1,2')  # first marker of the linked ledge
+        self.assertEqual(entity.get('Layer'), LAYER)
+        self.assertEqual(entity.find('Properties').get('bSaved_by_game'), '0')
+        self.assertEqual(report['world_ledges'], 1)
+        self.assertEqual(report['entity_linked'], 1)
+        self.assertTrue(report['weather_profile_manager_dropped'])
 
     def test_read_ledges_rejects_gaps_and_missing_end_markers(self):
         def gap_fixture():
@@ -91,12 +94,40 @@ class WorldLedgesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'version 1'):
             read_ledges(b'<Root version="2"><LedgeManager/></Root>')
         # KCD1 writes no version attribute; the converter accepts it and emits "1".
-        converted, _ = convert(fixture().replace(b' version="1"', b'', 1))
+        converted, report = convert(fixture().replace(b' version="1"', b'', 1), 500)
         self.assertEqual(ET.fromstring(converted).get('version'), '1')
+
+    def test_layer_and_reserved_writers(self):
+        _, entities, _, _ = plan(fixture(), 500)
+        layer = ET.fromstring(_layer_xml(entities))
+        self.assertEqual(layer.tag, 'Objects')
+        self.assertEqual([e.get('EntityId') for e in layer], ['500'])
+        reserved = ET.fromstring(_reserved_xml(entities))
+        self.assertEqual(reserved.tag, 'ReservedEntityIDsFromLayers')
+        self.assertEqual([e.get('ID') for e in reserved], ['500'])
+        leveldata = b'<LevelData><Layers><Layer Name="a" Id="3" Specs="-1"/></Layers></LevelData>'
+        updated = ET.fromstring(_leveldata_xml(leveldata))
+        self.assertEqual([(e.get('Name'), e.get('Id')) for e in updated.find('Layers')],
+                         [('a', '3'), (LAYER, '4')])
+        with self.assertRaisesRegex(ValueError, 'already registered'):
+            _leveldata_xml(_leveldata_xml(leveldata))
+        with self.assertRaisesRegex(ValueError, 'Layers container'):
+            _leveldata_xml(b'<LevelData/>')
+
+    def test_next_entity_id_considers_mission_and_reserved_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pak = Path(directory) / 'level.pak'
+            mission = b'<Mission><Entity Name="a" EntityId="7"/><Entity Name="b" EntityId="42"/></Mission>'
+            reserved = b'<ReservedEntityIDsFromLayers><ReservedEntityID ID="100"/></ReservedEntityIDsFromLayers>'
+            with zipfile.ZipFile(pak, 'x', zipfile.ZIP_STORED) as output:
+                output.writestr('objects_mission0.xml', mission)
+                output.writestr('extractedlayerentityids.xml', reserved)
+            self.assertEqual(next_entity_id(pak), 101)
 
     def test_rewrite_level_preserves_other_members_and_is_replaceable(self):
         blob = fixture()
-        converted, _ = convert(blob)
+        converted, entities, _, _ = plan(blob, 500)
+        members = {'whdata_1': converted, 'layers/' + LAYER + '.xml': _layer_xml(entities)}
         with tempfile.TemporaryDirectory() as directory:
             level = Path(directory) / 'setup_world'
             level.mkdir()
@@ -104,12 +135,13 @@ class WorldLedgesTests(unittest.TestCase):
             with zipfile.ZipFile(level / 'level.pak', 'x', zipfile.ZIP_STORED) as output:
                 output.writestr('terrain/hlods.dat', original)
                 output.writestr('levelinfo.xml', b'<LevelInfo Name="setup_world"/>')
-            rewrite_level(level, converted)
+            rewrite_level(level, members)
             with zipfile.ZipFile(level / 'level.pak') as result:
                 self.assertEqual(result.read('terrain/hlods.dat'), original)
                 self.assertEqual(result.read('levelinfo.xml'), b'<LevelInfo Name="setup_world"/>')
                 self.assertEqual(result.read('whdata_1'), converted)
-            rewrite_level(level, converted)  # replace path
+                self.assertEqual(result.read('layers/' + LAYER + '.xml'), members['layers/' + LAYER + '.xml'])
+            rewrite_level(level, members)  # replace path
             with zipfile.ZipFile(level / 'level.pak') as result:
                 self.assertEqual(result.read('whdata_1'), converted)
 
