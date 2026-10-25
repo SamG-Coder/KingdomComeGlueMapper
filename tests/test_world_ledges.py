@@ -4,10 +4,25 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from world_ledges import (LAYER, _layer_xml, _leveldata_xml, _reserved_xml, convert,
-                          next_entity_id, plan, read_ledges, rewrite_level)
+                          next_entity_id, plan, prepare_level, read_ledges, rewrite_level)
+
+
+def level_fixture(folder, *, metadata=False):
+    pak = Path(folder) / 'level.pak'
+    with zipfile.ZipFile(pak, 'w') as output:
+        output.comment = b'keep archive metadata'
+        output.writestr('objects_mission0.xml', b'<Mission><Entity EntityId="42"/></Mission>')
+        output.writestr('layers/existing.xml', b'<Objects><Entity EntityId="500"/></Objects>')
+        output.writestr('leveldata.xml', b'<LevelData><Layers><Layer Name="existing" Id="7" Specs="-1"/></Layers></LevelData>')
+        output.writestr('extractedlayerentityids.xml', b'<ReservedEntityIDsFromLayers><ReservedEntityID ID="100"/></ReservedEntityIDsFromLayers>')
+        output.writestr('terrain/unchanged.bin', b'unchanged terrain payload', compress_type=zipfile.ZIP_DEFLATED)
+        if metadata:
+            output.writestr('whdata_1', b'<Root version="1"><GameProfileManager><GameProfiles><GameProfile><Name>arrival</Name><Id>5</Id></GameProfile></GameProfiles><GameProfileGroups><Groups><Group>keep</Group></Groups></GameProfileGroups></GameProfileManager><OtherManager value="keep"/></Root>')
+    return pak
 
 
 def marker(x, end):
@@ -39,6 +54,94 @@ def fixture():
 
 
 class WorldLedgesTests(unittest.TestCase):
+    def test_prepare_preserves_existing_profiles_reservations_and_layer_ids(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pak = level_fixture(folder, metadata=True)
+            with zipfile.ZipFile(pak) as source:
+                before = ET.fromstring(source.read('whdata_1'))
+            members, report = prepare_level(fixture(), pak, replace=True)
+            after = ET.fromstring(members['whdata_1'])
+            for manager in ('GameProfileManager', 'OtherManager'):
+                self.assertEqual(ET.tostring(before.find(manager)), ET.tostring(after.find(manager)))
+            self.assertEqual(report['entity_ids'], {'5': 501})
+            self.assertFalse(report['runtime_verified'])
+            reserved = ET.fromstring(members['extractedlayerentityids.xml'])
+            self.assertEqual([row.get('ID') for row in reserved], ['100', '501'])
+            layers = ET.fromstring(members['leveldata.xml']).find('Layers')
+            self.assertEqual([(row.get('Name'), row.get('Id')) for row in layers], [('existing', '7'), (LAYER, '8')])
+
+    def test_replace_is_repeatable_and_keeps_ledge_ids(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pak = level_fixture(folder)
+            first, first_report = prepare_level(fixture(), pak)
+            rewrite_level(Path(folder), first)
+            with self.assertRaisesRegex(ValueError, 'already has whdata_1'):
+                prepare_level(fixture(), pak)
+            second, second_report = prepare_level(fixture(), pak, replace=True)
+            self.assertEqual(second, first)
+            self.assertEqual(second_report['entity_ids'], first_report['entity_ids'])
+
+    def test_replace_rejects_colliding_or_unowned_layer_entities(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pak = level_fixture(folder)
+            members, _ = prepare_level(fixture(), pak)
+            rewrite_level(Path(folder), members)
+            with zipfile.ZipFile(pak) as source:
+                layer = ET.fromstring(source.read('layers/' + LAYER + '.xml'))
+            ident = layer[0].get('EntityId')
+            rewrite_level(Path(folder), {'objects_mission0.xml': ('<Mission><Entity EntityId="' + ident + '"/></Mission>').encode()})
+            with self.assertRaisesRegex(ValueError, 'collides'):
+                prepare_level(fixture(), pak, replace=True)
+            layer[0].set('EntityClass', 'NPC')
+            rewrite_level(Path(folder), {'layers/' + LAYER + '.xml': ET.tostring(layer)})
+            with self.assertRaisesRegex(ValueError, 'unowned'):
+                prepare_level(fixture(), pak, replace=True)
+
+    def test_reserved_writer_rejects_id_collision(self):
+        _, entities, _, _ = plan(fixture(), 500)
+        with self.assertRaisesRegex(ValueError, 'already reserved'):
+            _reserved_xml(entities, b'<ReservedEntityIDsFromLayers><ReservedEntityID ID="500"/></ReservedEntityIDsFromLayers>')
+
+    def test_rewrite_streams_unchanged_members_and_preserves_metadata(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pak = level_fixture(folder)
+            with zipfile.ZipFile(pak) as source:
+                before = source.getinfo('terrain/unchanged.bin')
+            with patch.object(zipfile.ZipFile, 'read', side_effect=AssertionError('Unchanged members must stream')):
+                rewrite_level(Path(folder), {'new.xml': b'<New/>'})
+            with zipfile.ZipFile(pak) as source:
+                self.assertEqual(source.comment, b'keep archive metadata')
+                self.assertEqual(source.read('terrain/unchanged.bin'), b'unchanged terrain payload')
+                after = source.getinfo('terrain/unchanged.bin')
+                self.assertEqual((after.compress_type, after.date_time, after.external_attr),
+                                 (before.compress_type, before.date_time, before.external_attr))
+                self.assertIsNone(source.testzip())
+
+    def test_failed_rewrite_preserves_original_and_cleans_only_its_temp(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pak = level_fixture(folder)
+            original = pak.read_bytes()
+            unrelated = Path(folder) / 'level.pak.new'
+            unrelated.write_bytes(b'unrelated pending work')
+            with patch('world_ledges.shutil.copyfileobj', side_effect=OSError('write failed')):
+                with self.assertRaisesRegex(OSError, 'write failed'):
+                    rewrite_level(Path(folder), {})
+            self.assertEqual(pak.read_bytes(), original)
+            self.assertEqual(unrelated.read_bytes(), b'unrelated pending work')
+            self.assertEqual(list(Path(folder).glob('ledges-*.pak')), [])
+
+    def test_duplicate_archive_members_are_rejected_before_replacement(self):
+        with tempfile.TemporaryDirectory() as folder:
+            pak = level_fixture(folder)
+            with zipfile.ZipFile(pak, 'a') as archive:
+                archive.writestr('LEVELDATA.XML', b'<Other/>')
+            original = pak.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'Duplicate'):
+                prepare_level(fixture(), pak)
+            with self.assertRaisesRegex(ValueError, 'Duplicate'):
+                rewrite_level(Path(folder), {})
+            self.assertEqual(pak.read_bytes(), original)
+
     def test_plan_remaps_linked_ledges_and_synthesizes_entities(self):
         blob = fixture()
         before_markers = [ET.tostring(m) for m in read_ledges(blob).find('Markers')]

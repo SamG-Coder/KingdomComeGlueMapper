@@ -1,10 +1,11 @@
 """Convert KCD1 authored vault and climb points into the KCD2 level format.
 
-KCD2 enables fence and wall vaulting through two coupled pieces: the
+KCD2 stores authored fence and wall vaulting data in two coupled pieces: the
 `whdata_1` archive member (a `<Root version="1">` carrying a `LedgeManager`
 plus a `GameProfileManager`) and the `LedgeObject` layer entities whose
 `EntityId` the nonzero `Ledge.entityId` records reference. The converted
-level shipped neither, so vaulting was absent map-wide (issue #5).
+level shipped neither. These records alone have not enabled runtime vaulting
+in the reported tests (issue #5).
 
 KCD1's `rataje/level.pak` stores the same `LedgeManager` schema (3,589
 ledges, 30,140 markers, world-space coordinates the converter keeps 1:1).
@@ -28,9 +29,12 @@ still requires an in-game check; this converter establishes the structural
 conversion only.
 """
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
+import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -71,6 +75,8 @@ def read_ledges(blob):
         raise ValueError("LedgeManager must carry ledges and at least two markers")
     used = 0
     for record in records:
+        if int(_child_text(record, "entityId").text) < 0:
+            raise ValueError('Ledge entity ID must not be negative')
         start = int(_child_text(record, "markersStartIdx").text)
         count = int(_child_text(record, "markersCount").text)
         if count < 2 or start < 0 or start != used or start + count > len(points):
@@ -85,7 +91,7 @@ def read_ledges(blob):
     return manager
 
 
-def plan(blob, next_id, layer=LAYER):
+def plan(blob, next_id, layer=LAYER, *, existing_ids=None):
     """Return (whdata_1 bytes, entities, id_map, report) for a KCD1 whdata_1.
 
     Every record and marker is preserved verbatim except the entityId of the
@@ -93,7 +99,9 @@ def plan(blob, next_id, layer=LAYER):
     synthesized LedgeObject entities use. The world bucket (entityId 0) and
     all flag values are copied unchanged.
     """
-    import copy
+    if not isinstance(next_id, int) or isinstance(next_id, bool) or next_id < 1:
+        raise ValueError('Expected a positive next entity ID')
+    existing_ids = existing_ids or {}
     source = _parse_whdata(blob)
     manager = read_ledges(blob)
     ledges, markers = manager.find("Ledges"), manager.find("Markers")
@@ -111,14 +119,16 @@ def plan(blob, next_id, layer=LAYER):
                 raise ValueError("Linked ledge marker has no world position")
             guid = native_guid(int.from_bytes(hashlib.sha256(
                 ('ledge-import/' + str(old)).encode()).digest()[:8], 'little'))
+            ident = existing_ids.get(old, next_id)
+            if old not in existing_ids:
+                next_id += 1
             entity = ET.Element('Entity', Name='gm_ledge_' + str(old),
-                                EntityClass='LedgeObject', EntityId=str(next_id),
+                                EntityClass='LedgeObject', EntityId=str(ident),
                                 EntityGuid=guid, Pos=position.text,
                                 CastShadowMinSpec='1', Layer=layer)
             ET.SubElement(entity, 'Properties', bSaved_by_game='0')
             entities.append(entity)
-            id_map[old] = next_id
-            next_id += 1
+            id_map[old] = ident
         record.find("entityId").text = str(id_map[old])
     root = ET.Element("Root", version="1")
     converted = ET.SubElement(root, "LedgeManager")
@@ -133,6 +143,7 @@ def plan(blob, next_id, layer=LAYER):
         entity_linked=len(entities), entity_ids={str(old): new for old, new in id_map.items()},
         weather_profile_manager_dropped=source.find("WeatherProfileManager") is not None,
         game_profiles_emitted=0,
+        runtime_verified=False,
         status="Structural conversion verified; vaulting behavior must be checked in game",
         limitations=[
             "Linked ledges reference synthesized LedgeObject entities; authored layer names are not imported",
@@ -156,27 +167,40 @@ def _layer_xml(entities, layer=LAYER):
     return xml(root)
 
 
-def _reserved_xml(entities):
-    root = ET.Element('ReservedEntityIDsFromLayers')
+def _reserved_xml(entities, blob=None, *, replaced_ids=()):
+    root = ET.fromstring(blob) if blob is not None else ET.Element('ReservedEntityIDsFromLayers')
+    if root.tag != 'ReservedEntityIDsFromLayers':
+        raise ValueError('Invalid reserved layer entity IDs root')
+    for row in list(root):
+        if row.get('ID') in replaced_ids:
+            root.remove(row)
+    ids = {row.get('ID') for row in root}
     for entity in entities:
-        ET.SubElement(root, 'ReservedEntityID', ID=entity.get('EntityId'))
+        ident = entity.get('EntityId')
+        if ident in ids:
+            raise ValueError('Ledge entity ID is already reserved')
+        ET.SubElement(root, 'ReservedEntityID', ID=ident)
+        ids.add(ident)
     return xml(root)
 
 
-def _leveldata_xml(blob, layer=LAYER):
+def _leveldata_xml(blob, layer=LAYER, *, replace=False):
     data = ET.fromstring(blob)
     layers = data.find('Layers')
     if layers is None:
         raise ValueError('leveldata.xml has no Layers container')
-    if any(e.get('Name') == layer for e in layers):
-        raise ValueError('Ledge layer already registered')
+    existing = [e for e in layers if e.get('Name') == layer]
+    if existing:
+        if not replace or len(existing) != 1:
+            raise ValueError('Ledge layer already registered')
+        return blob
     layer_id = max((int(e.get('Id')) for e in layers), default=0) + 1
     ET.SubElement(layers, 'Layer', Name=layer, Id=str(layer_id), Specs='-1')
     return xml(data)
 
 
 def next_entity_id(pak):
-    """Lowest unused EntityId across the mission and reserved layer ids."""
+    """ID above every mission, layer and reserved entity ID."""
     with zipfile.ZipFile(pak) as archive:
         names = set(archive.namelist())
         mission = ET.fromstring(archive.read('objects_mission0.xml'))
@@ -184,20 +208,99 @@ def next_entity_id(pak):
         if 'extractedlayerentityids.xml' in names:
             reserved = ET.fromstring(archive.read('extractedlayerentityids.xml'))
             ids |= {int(e.get('ID')) for e in reserved if e.get('ID')}
+        for name in names:
+            if name.lower().startswith('layers/') and name.lower().endswith('.xml'):
+                ids |= {int(e.get('EntityId')) for e in ET.fromstring(archive.read(name)).iter('Entity')
+                        if e.get('EntityId')}
     return max(ids, default=0) + 1
 
 
-def rewrite_level(level_dir, members):
-    """Add or replace archive members of level_dir/level.pak in place."""
-    pak = level_dir / "level.pak"
+def prepare_level(blob, pak, *, replace=False):
+    """Prepare only owned ledge data, retaining other profile/layer metadata."""
+    layer_path = 'layers/' + LAYER + '.xml'
+    existing_ids, replaced_ids = {}, set()
     with zipfile.ZipFile(pak) as archive:
-        existing = {info.filename: archive.read(info.filename) for info in archive.infolist()}
-    existing.update(members)
-    replacement = pak.with_name("level.pak.new")
-    with zipfile.ZipFile(replacement, "x", zipfile.ZIP_STORED) as output:
-        for name, payload in existing.items():
-            output.writestr(name, payload)
-    replacement.replace(pak)
+        names = archive.namelist()
+        if len({n.lower() for n in names}) != len(names):
+            raise ValueError('Duplicate level package members')
+        if 'whdata_1' in names and not replace:
+            raise ValueError('Destination already has whdata_1; pass --replace to retain its other managers')
+        if layer_path in names:
+            if not replace:
+                raise ValueError('Ledge layer already exists; pass --replace')
+            previous = ET.fromstring(archive.read(layer_path))
+            if previous.tag != 'Objects':
+                raise ValueError('Invalid existing ledge layer root')
+            for entity in previous:
+                name = entity.get('Name', '')
+                if (entity.tag != 'Entity' or entity.get('EntityClass') != 'LedgeObject' or entity.get('Layer') != LAYER
+                        or not name.startswith('gm_ledge_') or not name[9:].isdigit()):
+                    raise ValueError('Existing ledge layer contains an unowned entity')
+                old, ident = int(name[9:]), int(entity.get('EntityId'))
+                expected = native_guid(int.from_bytes(hashlib.sha256(
+                    ('ledge-import/' + str(old)).encode()).digest()[:8], 'little'))
+                if (old <= 0 or ident <= 0 or old in existing_ids or str(ident) in replaced_ids
+                        or entity.get('EntityGuid') != expected):
+                    raise ValueError('Existing ledge layer has invalid ownership or IDs')
+                existing_ids[old] = ident
+                replaced_ids.add(str(ident))
+            for name in names:
+                if name == 'objects_mission0.xml' or (name.lower().startswith('layers/') and name.lower().endswith('.xml') and name != layer_path):
+                    for entity in ET.fromstring(archive.read(name)).iter('Entity'):
+                        if entity.get('EntityId') in replaced_ids:
+                            raise ValueError('Existing ledge entity ID collides with another layer or mission')
+        converted, entities, id_map, report = plan(blob, next_entity_id(pak), existing_ids=existing_ids)
+        if 'whdata_1' in names:
+            # Replace the ledge manager only. Existing travel/quest profiles and
+            # any other target-native managers belong to their own converters.
+            root = _parse_whdata(archive.read('whdata_1'))
+            managers = root.findall('LedgeManager')
+            if len(managers) > 1:
+                raise ValueError('Duplicate destination LedgeManager')
+            index = list(root).index(managers[0]) if managers else 0
+            for manager in managers:
+                root.remove(manager)
+            root.insert(index, ET.fromstring(converted).find('LedgeManager'))
+            if root.find('GameProfileManager') is None:
+                root.append(ET.fromstring(converted).find('GameProfileManager'))
+            converted = xml(root)
+        members = {
+            'whdata_1': converted,
+            layer_path: _layer_xml(entities),
+            'extractedlayerentityids.xml': _reserved_xml(
+                entities, archive.read('extractedlayerentityids.xml') if 'extractedlayerentityids.xml' in names else None,
+                replaced_ids=replaced_ids),
+            'leveldata.xml': _leveldata_xml(archive.read('leveldata.xml'), replace=layer_path in names),
+        }
+        report['existing_game_profiles_preserved'] = 'whdata_1' in names
+        if 'whdata_1' in names:
+            report['limitations'] = [note for note in report['limitations'] if not note.startswith('GameProfileManager is emitted empty')]
+    report['entity_ids'] = {str(old): new for old, new in id_map.items()}
+    return members, report
+
+
+def rewrite_level(level_dir, members):
+    """Stream an atomic archive replacement; preserve unmodified members."""
+    pak = level_dir / "level.pak"
+    with tempfile.NamedTemporaryFile(dir=level_dir, prefix='ledges-', suffix='.pak', delete=False) as handle:
+        replacement = Path(handle.name)
+    try:
+        with zipfile.ZipFile(pak) as archive, zipfile.ZipFile(replacement, 'w', zipfile.ZIP_STORED, allowZip64=True) as output:
+            names = archive.namelist()
+            if len({n.lower() for n in names}) != len(names):
+                raise ValueError('Duplicate level package members')
+            output.comment = archive.comment
+            for info in archive.infolist():
+                if info.filename in members:
+                    output.writestr(copy.copy(info), members[info.filename])
+                else:
+                    with archive.open(info) as source, output.open(copy.copy(info), 'w', force_zip64=info.file_size >= zipfile.ZIP64_LIMIT) as target:
+                        shutil.copyfileobj(source, target, length=1024*1024)
+            for name in sorted(set(members) - set(names)):
+                output.writestr(name, members[name])
+        replacement.replace(pak)
+    finally:
+        replacement.unlink(missing_ok=True)
 
 
 def main():
@@ -216,30 +319,15 @@ def main():
         parser.error("Level package not found: " + str(pak))
     with zipfile.ZipFile(args.library / SOURCE) as source:
         blob = source.read("whdata_1")
-    start = next_entity_id(pak)
-    converted, entities, id_map, report = plan(blob, start)
+    members, report = prepare_level(blob, pak, replace=args.replace)
     report["level"] = args.level
     report["source"] = SOURCE
-    report["reserved_ids_start"] = start
-    members = {
-        "whdata_1": converted,
-        "layers/" + LAYER + ".xml": _layer_xml(entities),
-        "extractedlayerentityids.xml": _reserved_xml(entities),
-    }
-    with zipfile.ZipFile(pak) as archive:
-        if 'leveldata.xml' in archive.namelist():
-            members['leveldata.xml'] = _leveldata_xml(archive.read('leveldata.xml'))
-        else:
-            raise ValueError('leveldata.xml missing from the level package')
     report_path = level_dir / "ledge-conversion-report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2), flush=True)
     if not args.apply:
         print("Dry run: pass --apply to patch " + str(pak), flush=True)
         return
-    with zipfile.ZipFile(pak) as archive:
-        if "whdata_1" in archive.namelist() and not args.replace:
-            raise ValueError("Destination already has whdata_1; rebuild the level, restore the previous package, or pass --replace")
     rewrite_level(level_dir, members)
     print("Patched " + str(pak), flush=True)
 
