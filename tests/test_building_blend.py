@@ -1,4 +1,5 @@
 """Synthetic source/target blend equivalence and binary preservation checks."""
+import hashlib
 import importlib.util
 import io
 from pathlib import Path
@@ -16,7 +17,7 @@ from building_blend_mesh import reatlas, render_material_ids
 from building_materials import blend_inputs, convert
 from clothing_regions import Chunk, read_chunks, write_chunks
 from static_assets import convert_material_features
-from build_building_blend_test import merge_baked_material
+from build_building_blend_test import merge_baked_material, signature
 
 
 def triangle_mesh():
@@ -41,6 +42,18 @@ def triangle_mesh():
 
 
 class BuildingBlendTests(unittest.TestCase):
+    def test_geometry_lookup_signature_keeps_legacy_hex_contract(self):
+        blob = triangle_mesh()
+        chunks = read_chunks(blob)
+        expected = hashlib.sha256(b''.join(
+            struct.pack('<HHI', c.kind, c.version, c.id) + c.data
+            for c in chunks if c.kind != 0x1014)).hexdigest()
+        self.assertEqual(signature(blob), expected)
+        renamed = chunks + [Chunk(0x1014, 0x800, 99, b'converted/material')]
+        self.assertEqual(signature(write_chunks(renamed, {})), expected)
+        changed = write_chunks(chunks, {42: b'different physics geometry'})
+        self.assertNotEqual(signature(changed), expected)
+
     def test_legacy_uncompressed_default_texture(self):
         stream = io.BytesIO()
         Image.new('RGB', (4, 4), (128, 128, 128)).save(stream, format='DDS')

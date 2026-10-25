@@ -35,7 +35,7 @@ def rewrite(source, destination, changes):
 
 
 def signature(blob):
-    return chunk_digest(blob).hexdigest()
+    return chunk_digest(blob).hex()
 
 
 def roots(blob):
