@@ -59,7 +59,9 @@ The previous assumption that authored `LedgeObject` entities were available
 only in the editor export was incorrect. The installed retail level contains
 all 228 linked objects: 204 in `objects_mission0.xml` and 24 across state layers.
 All 228 linked records have a first marker different from their authored entity
-origin. Using that marker as `Pos` discards the original transform.
+origin; 128 differ by more than 1 mm and the largest difference is 9.06 metres.
+Some of the remaining differences are rounding scale. Using the first marker
+as `Pos` discards the original transform.
 
 The converter now resolves the linked entities from retail mission/layer XML
 and preserves `Pos`, `Rotate`, `Scale`, `CastShadowMinSpec` and the complete
@@ -70,10 +72,12 @@ The conversion report retains the source member for each linked object.
 
 The updated synthetic tests exercise mission and state-layer discovery,
 transform/property preservation, mutation isolation, missing/duplicate records,
-and invalid/parented transforms. All 35 focused ledge/setup tests pass.
+and invalid/parented transforms. All 35 focused ledge/setup tests pass on Python
+3.11 and 3.14; the full branch suite passes 2,338 tests with 17 skips on 3.14.
 Read-only validation against installed retail assets verifies all 228 transforms
 and property trees, 3,589 ledges and 30,140 markers. Repeated preparation yields
-identical members; unrelated destination members remain unchanged. Evidence is
+identical members; unrelated destination members remain unchanged. The CLI also
+successfully applied real-source data to a disposable synthetic level. Evidence is
 in the ignored `outputs/pr-review-20261029/pr56-authored-data.json`.
 
 This correction does **not** resolve layer activation. The PR's latest runtime
