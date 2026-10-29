@@ -9,29 +9,29 @@ in the reported tests (issue #5).
 
 KCD1's `rataje/level.pak` stores the same `LedgeManager` schema (3,589
 ledges, 30,140 markers, world-space coordinates the converter keeps 1:1).
-KCD1's 228 authored `LedgeObject` entities exist only in the Modding Tools
-export, which is not required for the conversion: every linked record
-already carries its first marker as the native entity position, and the
-authored bIsThin/window/flip semantics are folded into Flags0/Flags1.
+KCD1's authored `LedgeObject` entities are present in the retail mission
+and layer XML. Their transforms and Properties must be retained: a linked
+record's first marker is not a replacement for its entity origin.
 
 The converter therefore:
 - copies the whole LedgeManager verbatim, re-numbering the 228 linked
   records to fresh ids reserved against the converted level's own entities;
-- synthesizes one minimal LedgeObject entity per link (Name, Pos = first
-  marker, reserved EntityId/EntityGuid) in `layers/ledges_import.xml`,
+- copies each linked object's authored transform and Properties, with
+  reserved EntityId/EntityGuid, into `layers/ledges_import.xml`,
   registered in leveldata.xml and extractedlayerentityids.xml, matching
   the native layer pattern used by region_travel_entry;
 - drops the KCD1-only WeatherProfileManager and emits the minimal empty
   GameProfileManager in the native child order.
 
-The entityId=0 world-ledge bucket is preserved unchanged. Runtime vaulting
-still requires an in-game check; this converter establishes the structural
-conversion only.
+The entityId=0 world-ledge bucket is preserved unchanged. Source layer
+activation has not been converted. Registering this output layer does not
+load it in game; state-aware activation and runtime vaulting remain pending.
 """
 import argparse
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import tempfile
@@ -40,7 +40,7 @@ import zipfile
 
 from campaign_entity_links import native_guid
 from game_paths import GameLibrary
-from upgrade_map import xml
+from upgrade_map import read, xml
 
 
 SOURCE = "KingdomComeDeliverance/Data/Levels/rataje/level.pak"
@@ -91,21 +91,76 @@ def read_ledges(blob):
     return manager
 
 
-def plan(blob, next_id, layer=LAYER, *, existing_ids=None):
+def read_source_entities(archive, blob):
+    """Resolve linked objects from retail XML, retaining their source ownership."""
+    required = {int(record.findtext('entityId'))
+                for record in read_ledges(blob).find('Ledges')}
+    required.discard(0)
+    names = {}
+    for name in archive.namelist():
+        normalized = name.replace('\\', '/').lower()
+        if normalized in names:
+            raise ValueError('Duplicate source level package member: ' + name)
+        names[normalized] = name
+    entities, origins = {}, {}
+    for normalized, name in sorted(names.items()):
+        if not (normalized == 'objects_mission0.xml'
+                or normalized.startswith('layers/') and normalized.endswith('.xml')):
+            continue
+        for entity in ET.fromstring(read(archive, name)).iter('Entity'):
+            if entity.get('EntityClass') != 'LedgeObject':
+                continue
+            ident = int(entity.get('EntityId', '0'))
+            if ident not in required:
+                continue
+            if ident in entities:
+                raise ValueError('Duplicate authored LedgeObject ID: ' + str(ident))
+            entities[ident] = entity
+            origins[ident] = normalized
+    missing = sorted(required - entities.keys())
+    if missing:
+        raise ValueError('Missing authored LedgeObject IDs: ' + ', '.join(map(str, missing)))
+    return entities, origins
+
+
+def _authored_object(entity, ident):
+    if (entity is None or entity.tag != 'Entity'
+            or entity.get('EntityClass') != 'LedgeObject'
+            or entity.get('EntityId') != str(ident)):
+        raise ValueError('Missing or mismatched authored LedgeObject: ' + str(ident))
+    if entity.get('ParentId', '0') not in ('', '0'):
+        raise ValueError('Parented LedgeObject needs a resolved world transform: ' + str(ident))
+    for field, count in (('Pos', 3), ('Rotate', 4), ('Scale', 3)):
+        value = entity.get(field)
+        if value is None and field != 'Pos':
+            continue
+        try:
+            values = [float(n) for n in (value or '').split(',')]
+        except ValueError:
+            values = []
+        if len(values) != count or not all(math.isfinite(n) for n in values):
+            raise ValueError('Invalid authored LedgeObject ' + field + ': ' + str(ident))
+    if entity.find('Properties') is None:
+        raise ValueError('Authored LedgeObject has no Properties: ' + str(ident))
+    return entity
+
+
+def plan(blob, next_id, layer=LAYER, *, existing_ids=None, source_entities=None):
     """Return (whdata_1 bytes, entities, id_map, report) for a KCD1 whdata_1.
 
     Every record and marker is preserved verbatim except the entityId of the
     linked ledges, which is re-numbered to fresh ids (next_id upward) that the
-    synthesized LedgeObject entities use. The world bucket (entityId 0) and
-    all flag values are copied unchanged.
+    converted LedgeObject entities use. Their authored transforms and
+    Properties are required; missing metadata is never replaced with guesses.
+    The world bucket (entityId 0) and all flag values are copied unchanged.
     """
     if not isinstance(next_id, int) or isinstance(next_id, bool) or next_id < 1:
         raise ValueError('Expected a positive next entity ID')
     existing_ids = existing_ids or {}
+    source_entities = source_entities or {}
     source = _parse_whdata(blob)
     manager = read_ledges(blob)
     ledges, markers = manager.find("Ledges"), manager.find("Markers")
-    points = list(markers)
     id_map = {}
     entities = []
     for record in ledges:
@@ -113,10 +168,7 @@ def plan(blob, next_id, layer=LAYER, *, existing_ids=None):
         if not old:
             continue
         if old not in id_map:
-            first = points[int(_child_text(record, "markersStartIdx").text)]
-            position = first.find("worldPosition")
-            if position is None or position.text is None:
-                raise ValueError("Linked ledge marker has no world position")
+            authored = _authored_object(source_entities.get(old), old)
             guid = native_guid(int.from_bytes(hashlib.sha256(
                 ('ledge-import/' + str(old)).encode()).digest()[:8], 'little'))
             ident = existing_ids.get(old, next_id)
@@ -124,9 +176,12 @@ def plan(blob, next_id, layer=LAYER, *, existing_ids=None):
                 next_id += 1
             entity = ET.Element('Entity', Name='gm_ledge_' + str(old),
                                 EntityClass='LedgeObject', EntityId=str(ident),
-                                EntityGuid=guid, Pos=position.text,
+                                EntityGuid=guid,
                                 CastShadowMinSpec='1', Layer=layer)
-            ET.SubElement(entity, 'Properties', bSaved_by_game='0')
+            for field in ('Pos', 'Rotate', 'Scale', 'CastShadowMinSpec'):
+                if field in authored.attrib:
+                    entity.set(field, authored.get(field))
+            entity.append(copy.deepcopy(authored.find('Properties')))
             entities.append(entity)
             id_map[old] = ident
         record.find("entityId").text = str(id_map[old])
@@ -141,12 +196,13 @@ def plan(blob, next_id, layer=LAYER, *, existing_ids=None):
         ledges=len(ledges), markers=len(markers),
         world_ledges=sum(1 for r in ledges if int(r.findtext("entityId")) == 0),
         entity_linked=len(entities), entity_ids={str(old): new for old, new in id_map.items()},
+        authored_entities_preserved=len(entities),
         weather_profile_manager_dropped=source.find("WeatherProfileManager") is not None,
         game_profiles_emitted=0,
         runtime_verified=False,
         status="Structural conversion verified; vaulting behavior must be checked in game",
         limitations=[
-            "Linked ledges reference synthesized LedgeObject entities; authored layer names are not imported",
+            "Authored source layer activation is not converted; output-layer registration alone does not load its entities",
             "KCD1 WeatherProfileManager is not converted",
             "GameProfileManager is emitted empty; region arrival profiles are added later",
             "Runtime vault, window and flip behavior requires an in-game check",
@@ -154,9 +210,9 @@ def plan(blob, next_id, layer=LAYER, *, existing_ids=None):
     return xml(root), entities, id_map, report
 
 
-def convert(blob, next_id):
-    """Backwards-compatible wrapper; returns (whdata_1 bytes, report) only."""
-    result, _, _, report = plan(blob, next_id)
+def convert(blob, next_id, *, source_entities=None):
+    """Return only (whdata_1 bytes, report); linked ledges need authored objects."""
+    result, _, _, report = plan(blob, next_id, source_entities=source_entities)
     return result, report
 
 
@@ -215,7 +271,7 @@ def next_entity_id(pak):
     return max(ids, default=0) + 1
 
 
-def prepare_level(blob, pak, *, replace=False):
+def prepare_level(blob, pak, *, replace=False, source_entities=None):
     """Prepare only owned ledge data, retaining other profile/layer metadata."""
     layer_path = 'layers/' + LAYER + '.xml'
     existing_ids, replaced_ids = {}, set()
@@ -249,7 +305,8 @@ def prepare_level(blob, pak, *, replace=False):
                     for entity in ET.fromstring(archive.read(name)).iter('Entity'):
                         if entity.get('EntityId') in replaced_ids:
                             raise ValueError('Existing ledge entity ID collides with another layer or mission')
-        converted, entities, id_map, report = plan(blob, next_entity_id(pak), existing_ids=existing_ids)
+        converted, entities, id_map, report = plan(
+            blob, next_entity_id(pak), existing_ids=existing_ids, source_entities=source_entities)
         if 'whdata_1' in names:
             # Replace the ledge manager only. Existing travel/quest profiles and
             # any other target-native managers belong to their own converters.
@@ -318,8 +375,10 @@ def main():
     if not pak.is_file():
         parser.error("Level package not found: " + str(pak))
     with zipfile.ZipFile(args.library / SOURCE) as source:
-        blob = source.read("whdata_1")
-    members, report = prepare_level(blob, pak, replace=args.replace)
+        blob = read(source, "whdata_1")
+        source_entities, origins = read_source_entities(source, blob)
+    members, report = prepare_level(blob, pak, replace=args.replace, source_entities=source_entities)
+    report['source_entity_members'] = {str(ident): name for ident, name in origins.items()}
     report["level"] = args.level
     report["source"] = SOURCE
     report_path = level_dir / "ledge-conversion-report.json"

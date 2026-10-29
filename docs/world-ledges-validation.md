@@ -52,3 +52,33 @@ The PR currently adds a fresh-conversion stage only. Listing a layer in
 `leveldata.xml` and reserving its IDs does not establish that a game profile
 loads it. No runtime success, complete issue resolution or saved-build migration
 is claimed by this review.
+
+## Retail authored-object correction, 29 October 2026
+
+The previous assumption that authored `LedgeObject` entities were available
+only in the editor export was incorrect. The installed retail level contains
+all 228 linked objects: 204 in `objects_mission0.xml` and 24 across state layers.
+All 228 linked records have a first marker different from their authored entity
+origin. Using that marker as `Pos` discards the original transform.
+
+The converter now resolves the linked entities from retail mission/layer XML
+and preserves `Pos`, `Rotate`, `Scale`, `CastShadowMinSpec` and the complete
+nested `Properties` tree. Only generated identity and destination-layer
+ownership change. Missing or duplicate source objects, invalid transforms and
+unresolved parent transforms fail explicitly instead of generating substitutes.
+The conversion report retains the source member for each linked object.
+
+The updated synthetic tests exercise mission and state-layer discovery,
+transform/property preservation, mutation isolation, missing/duplicate records,
+and invalid/parented transforms. All 35 focused ledge/setup tests pass.
+Read-only validation against installed retail assets verifies all 228 transforms
+and property trees, 3,589 ledges and 30,140 markers. Repeated preparation yields
+identical members; unrelated destination members remain unchanged. Evidence is
+in the ignored `outputs/pr-review-20261029/pr56-authored-data.json`.
+
+This correction does **not** resolve layer activation. The PR's latest runtime
+review reported zero loaded `LedgeObject` entities despite 228 declared objects.
+The output layer is absent from active profile `GameLayers`. Loading every
+source-state object indiscriminately would also enable ledges belonging to
+inactive quest states. Activation must preserve source-state ownership before
+the remaining in-game and saved-build acceptance checks can be completed.
