@@ -200,6 +200,12 @@ class RecipeTests(unittest.TestCase):
             build_recipe=dict(version=VERSION, status='complete',
                 content_validation={'start_policy':POLICY}, streaming_validation={'ok':True},
                 shader_validation={'installation':'mod_private_root'}, steps=[{'id':s} for s in STAGE_IDS]))
+        with self.assertRaisesRegex(ValueError,'source clothing conversion'): require_current(receipt)
+        eligible(receipt)
+        self.assertNotIn('source_appearance_upgrade',receipt)
+        from character_person_appearance import APPEARANCE_POLICY_VERSION
+        receipt['source_appearance_upgrade'] = dict(version=APPEARANCE_POLICY_VERSION,
+            mode='source_converter',equipment_validation=True)
         with self.assertRaisesRegex(ValueError, 'navigation conversion'): require_current(receipt)
         eligible(receipt)  # recoverable by resume, but it must run the adapter
         self.assertNotIn('static_navigation_profiles', receipt)
@@ -235,6 +241,11 @@ class RecipeTests(unittest.TestCase):
         self.assertNotIn('surface_placement', receipt)
         from terrain_object_tree import VERSION as PLACEMENT_VERSION
         receipt['surface_placement'] = dict(version=PLACEMENT_VERSION)
+        with self.assertRaisesRegex(ValueError,'crime and punishment'):require_current(receipt)
+        eligible(receipt)
+        self.assertNotIn('crime_services',receipt)
+        from setup_crime_services import VERSION as CRIME_VERSION
+        receipt['crime_services']=dict(version=CRIME_VERSION,status='bound_native_services')
         require_current(receipt)
         receipt['static_navigation_profiles']['profiles'] = []
         with self.assertRaisesRegex(ValueError, 'navigation conversion'): require_current(receipt)

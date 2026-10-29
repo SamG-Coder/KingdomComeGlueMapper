@@ -49,6 +49,7 @@ def self_test(destination):
     from world_surface_tiles import code_digest
     if len(code_digest())!=64:raise RuntimeError('Bake source signatures unavailable')
     import setup_resume
+    import setup_resume_space
     import setup_launch
     from setup_multiplayer import settings
     from kcdmp_map_project.kcdmp_bridge.builder import evidence, PROJECT_ROOT

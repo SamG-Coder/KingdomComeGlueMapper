@@ -26,17 +26,18 @@ def upgrade(package, source, target, profiles, notify=lambda *a: None, cancelled
     # path. Use extended paths for the whole stage, including temp cleanup,
     # rather than depending on a machine-wide Windows registry setting.
     package = filesystem_path(package)
-    notify('Import source-profile people and shops', 0, 1, ', '.join(profiles))
+    notify('Import source-profile people and shops', 0, 0, 'Discovering selected profiles: ' + ', '.join(profiles))
     with tempfile.TemporaryDirectory(prefix='profile-population-', dir=package.parent) as temporary:
         work = Path(temporary)
         report = build(source, target, package, work/'build', list(profiles),
-            level=LEVEL, entry=ENTRY, update_receipt=False, cancelled=cancelled,
-            notify=lambda message: notify('Import source-profile people and shops', 0, 1, message))
+            level=LEVEL, entry=ENTRY, update_receipt=False, cancelled=cancelled, progress=notify,
+            notify=lambda message: notify('Import source-profile people and shops', 0, 0, message))
         if (report.get('version') != VERSION or report.get('profiles') != list(profiles)
                 or report.get('level') != LEVEL or report.get('people', 0) <= 0
                 or not isinstance(report.get('service_validation'), list)):
             raise ValueError('Population builder did not validate the selected profile')
         if cancelled(): raise InterruptedError('Cancelled before publishing profile population')
+        notify('Publish source-profile people and shops', 0, 0, 'Publishing validated population and shop bindings')
         staged = work/'build/package'
         overlay = work/'overlay'
         # The builder clones the full baseline through hardlinks. Publish only

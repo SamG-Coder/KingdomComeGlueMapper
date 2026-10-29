@@ -17,14 +17,25 @@ from world_item_documents import DocumentImageAdapter
 from upgrade_map import read
 
 
+_PAK_ITEM_PATCHES = {}
+
+
 def item_patches(mod):
-    """Read effective item extensions already staged in a package."""
+    """Read effective item extensions already staged in a package.
+
+    Each pak's tables are cached by path, size and mtime: Setup calls this for
+    every container/inventory build, and most paks are unchanged in between.
+    """
     patches = []
     for path in sorted((Path(mod)/'Data').glob('*.pak')):
-        with zipfile.ZipFile(path) as archive:
-            for name in archive.namelist():
-                if re.fullmatch(r'libs/tables/item/item(?:__[^/]+)?\.xml', name, re.I):
-                    patches.append(read(archive, name))
+        stat = path.stat()
+        signature = (path.resolve(), stat.st_size, stat.st_mtime_ns)
+        if signature not in _PAK_ITEM_PATCHES:
+            with zipfile.ZipFile(path) as archive:
+                _PAK_ITEM_PATCHES[signature] = [
+                    read(archive, name) for name in archive.namelist()
+                    if re.fullmatch(r'libs/tables/item/item(?:__[^/]+)?\.xml', name, re.I)]
+        patches.extend(_PAK_ITEM_PATCHES[signature])
     return patches
 
 
@@ -81,7 +92,10 @@ def build(source, target, mod, output, identifiers, *, asset_namespace='containe
                     pass
             destination.write_bytes(payload.read_bytes() if isinstance(payload, Path) else payload)
         if report['unresolved_items']:
-            raise ValueError(str(len(report['unresolved_items']))+' loot item dependencies need conversion; see report.json')
+            failures = [f"{j['group']}:{j['identity']}: {j['error']}" for j in report['jobs']
+                        if j.get('error') and j['group'] != 'items']
+            raise ValueError(str(len(report['unresolved_items']))+' loot item dependencies need conversion; '
+                             + '; '.join(failures[:4]) + '; report: ' + str(output/'report.json'))
         return report
 
 

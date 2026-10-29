@@ -3,8 +3,10 @@
 Quest and shop adapters select a person; this helper does not select a quest,
 merchant, gender, body or coordinates on their behalf.
 """
+from collections import Counter
 import copy
 import hashlib
+import json
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -29,26 +31,54 @@ def unique(values, label):
     return values[0]
 
 
+_LAYER_INDEX = {}
+
+
+def layer_entity_index(archive):
+    """EntityId -> layer entries holding it, built once per unchanged source level archive.
+
+    Person resolvers call resolve_link_targets a few hundred times per build on
+    the same level; without this each call reads every layer file again.
+    """
+    def build():
+        index = {}
+        for entry in archive.namelist():
+            normalized = entry.replace('\\', '/').lower()
+            if not normalized.startswith('layers/') or not normalized.endswith('.xml'):
+                continue
+            for entity in ET.fromstring(read(archive, entry)).iter('Entity'):
+                index.setdefault(entity.get('EntityId'), set()).add(entry)
+        return index
+    if not isinstance(archive.filename, str):
+        return build()
+    path = Path(archive.filename).resolve()
+    stat = path.stat()
+    signature = (path, stat.st_size, stat.st_mtime_ns)
+    if signature not in _LAYER_INDEX:
+        _LAYER_INDEX[signature] = build()
+    return _LAYER_INDEX[signature]
+
+
 def resolve_link_targets(archive, actor, entities, provenance):
     """Resolve direct authored NPC links even when targets live in other layers."""
     required = {link.get('TargetId') for link in actor.findall('EntityLinks/Link')}
     if any(not identity for identity in required):
         raise ValueError('Source person link has no target identity')
+    counts = Counter(e.get('EntityId') for e in entities)
     for identity in required:
-        if sum(e.get('EntityId') == identity for e in entities) > 1:
+        if counts[identity] > 1:
             raise ValueError('Ambiguous source person link target: ' + identity)
     known = {e.get('EntityId') for e in entities}
     missing = required - known
     if not missing:
         return entities
     found = {}
+    holders = layer_entity_index(archive)
+    entries = set().union(*(holders.get(identity, ()) for identity in missing))
     for entry in archive.namelist():
-        normalized = entry.replace('\\', '/').lower()
-        if not normalized.startswith('layers/') or not normalized.endswith('.xml'):
+        if entry not in entries:
             continue
         blob = read(archive, entry)
-        if not any(identity.encode() in blob for identity in missing):
-            continue
         for entity in ET.fromstring(blob).iter('Entity'):
             identity = entity.get('EntityId')
             if identity not in missing:
@@ -216,6 +246,9 @@ def actor_resources(target, person, character, namespace, *, role_name, native_s
         for name, attributes in steps: ET.SubElement(ops, name, attributes)
         files['Libs/Storm/' + filename] = xml(rules)
     files['Libs/Storm/storm.xml'] = xml(storm)
-    files['Libs/GlueMapper/PersonImport/' + namespace + '.json'] = receipt(person, soul, namespace)
+    provenance = json.loads(receipt(person, soul, namespace))
+    if character.get('appearance_policy') is not None:
+        provenance['appearance_policy'] = character['appearance_policy']
+    files['Libs/GlueMapper/PersonImport/' + namespace + '.json'] = json.dumps(provenance, indent=2).encode('utf-8')
     return files
 

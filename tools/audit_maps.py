@@ -26,15 +26,25 @@ def texture_families(names):
 
 
 def open_entry(archive, entry):
-    """Accept CryEngine's slash-only local/central ZIP name discrepancy."""
-    with open(archive.filename, "rb") as source:
-        source.seek(entry.header_offset)
-        header = source.read(30)
-        if len(header) != 30 or header[:4] != b"PK\x03\x04":
-            raise ValueError("Invalid local ZIP header")
-        name_length = struct.unpack_from("<H", header, 26)[0]
-        flags = struct.unpack_from("<H", header, 6)[0]
-        local_name = source.read(name_length).decode("utf-8" if flags & 0x800 else "cp437")
+    """Accept CryEngine's slash-only local/central ZIP name discrepancy.
+
+    The local header is read through the archive's own handle: reopening the
+    file for every entry cost about 1 ms per read once Combine reads entries by
+    the hundred thousand. The position is restored for archives open to append.
+    """
+    with archive._lock:
+        source = archive.fp
+        position = source.tell()
+        try:
+            source.seek(entry.header_offset)
+            header = source.read(30)
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                raise ValueError("Invalid local ZIP header")
+            name_length = struct.unpack_from("<H", header, 26)[0]
+            flags = struct.unpack_from("<H", header, 6)[0]
+            local_name = source.read(name_length).decode("utf-8" if flags & 0x800 else "cp437")
+        finally:
+            source.seek(position)
     if local_name.replace("\\", "/") != entry.orig_filename.replace("\\", "/"):
         raise ValueError("Local and central ZIP names disagree beyond separators")
     adjusted = copy.copy(entry)

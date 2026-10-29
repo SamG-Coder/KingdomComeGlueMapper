@@ -16,6 +16,24 @@ from campaign_entity_links import guid_value, native_guid
 
 
 class PersonImportTests(unittest.TestCase):
+    def test_legacy_attachment_header_keeps_geometry_and_rejects_unknown_extension(self):
+        source = sample_skin()
+        chunks = read_chunks(source)
+        mesh = next(c for c in chunks if c.kind == 0x1000)
+        from dataclasses import replace
+        chunks = [replace(c, version=0x801) if c.id == mesh.id else c for c in chunks]
+        legacy = write_chunks(chunks, {mesh.id: mesh.data[:260]})
+        result, _ = align_internal_translation(legacy)
+        before, after = CompiledSkin(source), CompiledSkin(result)
+        self.assertEqual(len(after.mesh.data), 264)
+        for stream in (0, 1, 2, 5, 6, 9):
+            self.assertEqual(before.streams[stream].data, after.streams[stream].data)
+        unknown = bytearray(mesh.data[:260]); unknown[-1] = 1
+        with self.assertRaisesRegex(ValueError, 'legacy mesh reserved'):
+            align_internal_translation(write_chunks(chunks, {mesh.id: bytes(unknown)}))
+        with self.assertRaisesRegex(ValueError, 'standard mesh'):
+            align_internal_translation(write_chunks(chunks, {mesh.id: mesh.data[:256]}))
+
     def test_uniform_internal_offset_keeps_render_geometry_and_rejects_deformation(self):
         source = sample_skin()
         chunks = read_chunks(source)

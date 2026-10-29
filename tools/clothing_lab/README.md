@@ -37,7 +37,7 @@ Run every converted outfit through the structural and geometry checks:
   --mode presets --geometry --reports reports/clothing-lab
 ```
 
-Enumerate **every KCD1 soul record**, resolve body/head/hair/beard references and both `clothing_id` and `clothing2_id` attachments, then validate converted outfits where present:
+Enumerate **every KCD1 soul record**, resolve body/head/hair/beard references, both `clothing_id` and `clothing2_id` garment slots, and `armor2clothing_attachment` details, then validate converted outfits where present:
 
 ```powershell
 .venv/Scripts/python.exe tools/clothing_lab_test.py `
@@ -101,8 +101,11 @@ The matrix computes **exact symbolic counts** over full layer selections using
 unary registration checks, declared part/layer occupancy, repeated archetypes,
 and exclusive native body-subpart/layer reservations. Different archetypes can
 reserve the same native inventory slot even when their mesh regions differ.
-Validation contract version 4 includes these reservations and native draw-region
-selection. Lower-layer meshes discarded by the native attachment manager need
+Validation contract version 5 includes these reservations, native draw-region
+selection, culled garment coverage and hair/headwear intersection diagnostics.
+The new geometry checks flag review candidates in the bind pose; they do not
+certify animation or every pixel of an alpha-cut surface.
+Lower-layer meshes discarded by the native attachment manager need
 review; they cannot be counted as confirmed coverage. Old resume/checklist
 evidence is rejected and must be rerun.
 These counts are not rendered tests. Other engine equipment exclusions,
@@ -163,6 +166,57 @@ changed files, and leaves `runtime_verified` false until a separate native test.
 Use a fresh new game to exercise initial outfit selection. Keep native screenshots
 and engine observations separate from WebGL captures and symbolic counts. A
 four-person playtest does not certify every source soul or arbitrary combination.
+
+For a whole-cast developer audit, use `--all-imported --overlay-only` instead of
+`--person`. This resolves every existing `PersonImport` receipt, including the
+older named namespaces, and rebuilds one person at a time. It records source
+code hashes and the base-package signature, writes changed runtime assets only,
+and discards temporary conversion intermediates after each successful person.
+It retains a progress report and completed files if a later conversion fails.
+A failed batch is explicitly incomplete; it is not a successful audit.
+
+The overlay includes a single migration of shared appearance tables, removing
+only exact definitions replaced by generated canonical tables. A shared name
+prefix does not grant ownership of gameplay inventories: equipped wrappers,
+carried items and shop stock remain intact. New per-person definitions retain
+their original identities. Both rebuild modes validate the NPC equipment chain
+before declaring their output complete.
+This prevents legacy shared tables from selecting stale clothing or registering
+conflicting hiding groups. Open the result through `--overlay` in the workbench
+or audit CLI. It is **not an installable package** and must not be copied into
+the game as a standalone mod.
+
+Source armour-linked straps, belts, collars, sleeves and apron knots are joined
+to their owning garment before native region composition. The importer uses
+the source relationship tables, gender and tint; it preserves source triangles,
+materials and LODs. Exact duplicate material slots are coalesced to avoid
+repeated texture loads. Garment hiding must be safe for every triangle touching
+a masked vertex. Head, hair and beard also receive conditional coverage from
+opaque headwear. These rules apply to source types, without named-NPC exceptions.
+
+Validation contract 6 follows each imported person's named Storm equipment rule
+through nested `InventoryPresetRef`, `ClothingPresetRef`, item GUIDs and clothing
+components. Missing or conflicting definitions, cycles and empty outfits are
+errors even when the mesh family exists. Checked actor presets use the reachable
+clothing components. These checks do not emulate Storm precedence, later quest
+inventory changes or rendered animation.
+
+Persistent body geometry keeps its source shape. Fixed-outfit fitting may shrink
+inner garments, but must not bake an outfit-dependent shrink/chest morph into
+skin that remains after unequipping the outfit. Conditional equipment masks
+control covered skin instead.
+
+To repair bodies in an existing developer package without rebaking textures:
+
+```powershell
+.venv/Scripts/python.exe tools/upgrade_source_bodies.py --source <KCD1> --target <KCD2> --installed <mod> --output <new-overlay>
+```
+
+This standalone developer tool supports `--person <source-name>` or all imported
+people by default. It verifies unchanged topology, UVs and skinning identities,
+keeps installed material bindings and recomputes body coverage. Its overlay is
+for inspection and must be promoted to a verified full package before install.
+It is not part of consumer Setup.
 
 ## Regression tests
 

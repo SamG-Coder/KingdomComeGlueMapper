@@ -77,13 +77,42 @@ def convert_character_materials(output, components, assets, namespace, sex, bake
         ScratchSaturation='1', ScratchBrightness='1.25', GrimeDiffuse='#493528',
         GrimeSpecular='#161616', GrimeGloss='0.04')
     folder = 'objects/characters/' + components.get('FilePath')
-    converted = {}; meshes = set(); report = []
+    materials = {e.get('Material'): ET.parse(output / folder / e.get('Material')).getroot()
+                 for e in components.findall('DerivedComponents/*/Elements/SkinElement')}
+    if hasattr(bake, 'plan'):
+        bake.plan(sum(2 for root in materials.values()
+                      for material in (list(root.find('SubMaterials')) if root.find('SubMaterials') is not None else [root])
+                      if material.get('Shader','').lower() == 'illum'))
+    converted = {}; meshes = set(); report = []; effect_masks = {}
+    # Region assembly can bind the same source surface in many slots. Decode
+    # each source family once here; the files stay immutable during conversion.
+    from collections import OrderedDict
+    decoded, decoded_size = OrderedDict(), 0
+    def pixels(path):
+        nonlocal decoded_size
+        if path in decoded:
+            decoded.move_to_end(path)
+            return decoded[path]
+        image = read_dds_family(output / path)
+        size = image.width * image.height * 4
+        while decoded and decoded_size + size > 128 * 1024**2:
+            _, previous = decoded.popitem(last=False)
+            decoded_size -= previous.width * previous.height * 4
+        if size <= 128 * 1024**2:
+            decoded[path] = image; decoded_size += size
+        return image
+    def texture(path, image, material, specular=None):
+        destination = output / path
+        if hasattr(bake, 'reference'):
+            return bake.reference(destination, image, material, specular).relative_to(output).as_posix()
+        bake(destination, image, material, specular)
+        return path
     for component in components.findall('DerivedComponents/*'):
         for element in component.findall('Elements/SkinElement'):
             filename = element.get('Material')
             source_path = output / folder / filename
             if filename not in converted:
-                root = ET.parse(source_path).getroot()
+                root = materials[filename]
                 slots = root.find('SubMaterials')
                 originals = list(slots) if slots is not None else [root]
                 results = []; has_cloth = False
@@ -92,17 +121,26 @@ def convert_character_materials(output, components, assets, namespace, sex, bake
                     stem = PurePosixPath(filename).stem + '_' + str(i)
                     prefix = folder + 'native_' + stem
                     textures = {t.get('Map'): t for t in material.findall('Textures/Texture')}
-                    def pixels(slot):
-                        return read_dds_family(output / textures[slot].get('File'))
+                    def source_pixels(slot):
+                        return pixels(textures[slot].get('File'))
                     if shader in ('humanskin', 'illum'):
-                        mask = legacy_bg_mask(pixels('Decal')) if 'Decal' in textures else Image.new('RGBA', (4, 4), (0, 0, 0, 255))
-                        if shader == 'illum':
-                            r, g, _, a = mask.split(); mask = Image.merge('RGBA', (r, g, Image.new('L', mask.size, 192), a))
-                        mask.save(output / (prefix + '_bgs.dds'))
+                        # Region partitions and material aliases share these
+                        # immutable inputs. Tint does not affect effect masks;
+                        # write/filter/pack their identical pixels only once.
+                        # Cloth and skin keep distinct blue-channel semantics.
+                        mask_key = (textures['Decal'].get('File') if 'Decal' in textures else None,
+                                    shader == 'illum')
+                        if mask_key not in effect_masks:
+                            mask = legacy_bg_mask(source_pixels('Decal')) if 'Decal' in textures else Image.new('RGBA', (4, 4), (0, 0, 0, 255))
+                            if shader == 'illum':
+                                r, g, _, a = mask.split(); mask = Image.merge('RGBA', (r, g, Image.new('L', mask.size, 192), a))
+                            effect_masks[mask_key] = prefix + '_bgs.dds'
+                            mask.save(output / effect_masks[mask_key])
+                        mask_path = effect_masks[mask_key]
                     if shader == 'illum':
-                        spec = pixels('Specular') if 'Specular' in textures else None
-                        bake(output / (prefix + '_diff.dds'), pixels('Diffuse'), material, spec)
-                        new = native_clothing_material(material, prefix + '_diff.dds', prefix + '_bgs.dds', cloth_ref, 'GarmentBase')
+                        spec = source_pixels('Specular') if 'Specular' in textures else None
+                        diffuse_path = texture(prefix + '_diff.dds', source_pixels('Diffuse'), material, spec)
+                        new = native_clothing_material(material, diffuse_path, mask_path, cloth_ref, 'GarmentBase')
                         # Use the shipped permutation exactly, including its
                         # serialized global mask; local .ext bits are not that mask.
                         for key in ('Shader', 'GenMask', 'StringGenMask', 'MtlFlags', 'Opacity', 'vertModifType'):
@@ -117,17 +155,17 @@ def convert_character_materials(output, components, assets, namespace, sex, bake
                             spec = Image.new('RGBA', (4, 4), (255, 255, 255, 255))
                         if 'COLORIZING_WITH_MASK' in material.get('StringGenMask', ''):
                             r, _, _, a = spec.split(); spec = Image.merge('RGBA', (r, r, r, a))
-                        bake(output / (prefix + '_spec.dds'), spec, ET.Element('Material', Diffuse=material.get('Specular', '1,1,1')))
+                        specular_path = texture(prefix + '_spec.dds', spec, ET.Element('Material', Diffuse=material.get('Specular', '1,1,1')))
                         spec_slot = new.find("Textures/Texture[@Map='Specular']")
                         if spec_slot is None:
                             spec_slot = ET.SubElement(new.find('Textures'), 'Texture', Map='Specular')
-                        spec_slot.set('File', prefix + '_spec.dds')
+                        spec_slot.set('File', specular_path)
                         if has_cloth:
                             new.remove(new.find('FeatureSlots'))
                         has_cloth = True
                     elif shader == 'humanskin' and material.get('Name', '').lower() != 'mouth':
                         ref = head_ref if '%WRINKLE_BLENDING' in material.get('StringGenMask', '') else body_ref
-                        new = native_skin_material(native_surface(material, ref), prefix + '_bgs.dds', ref)
+                        new = native_skin_material(native_surface(material, ref), mask_path, ref)
                         # The native detail slot uses a new pore map. Disable its
                         # strength unless the source also authored that feature.
                         if '%DETAIL_MAPPING' not in material.get('StringGenMask', ''):

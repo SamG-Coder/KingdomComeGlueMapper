@@ -97,6 +97,7 @@ def assemble_region_skins(blobs, material_bases, material_name):
                     or bones.data[offset+312:offset+584] != candidate_bones.data[offset+312:offset+584]):
                 raise ValueError('Skeleton names, hierarchy or controller IDs differ')
         weights = skin.streams[9]
+        checked_joints = set()
         for offset in range(24, len(weights.data), 12):
             joints = struct.unpack_from('<4H', weights.data, offset)
             for joint, weight in zip(joints, weights.data[offset+8:offset+12]):
@@ -104,6 +105,9 @@ def assemble_region_skins(blobs, material_bases, material_name):
                     continue
                 if joint >= bone_count:
                     raise ValueError('Invalid weighted joint')
+                if joint in checked_joints:
+                    continue
+                checked_joints.add(joint)
                 address = 32+joint*584+216
                 a = struct.unpack_from('<24f', bones.data, address)
                 b = struct.unpack_from('<24f', candidate_bones.data, address)

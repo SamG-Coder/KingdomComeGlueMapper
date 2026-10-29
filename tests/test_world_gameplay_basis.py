@@ -119,6 +119,41 @@ class WorldGameplayBasisTests(unittest.TestCase):
         self.write_scripts()
         with self.assertRaisesRegex(ValueError, 'trosky_story'): self.run_apply()
 
+    def test_nested_libraries_keep_parent_helpers_and_relative_namespaces(self):
+        key = 'quests/final/barbora/open_world/combat.xml'
+        self.native_files[key] = self.native_files[key].replace(
+            b'<Nodes>', b'<Nodes><arrest Name="arrest" Namespace="utils.law.resolution"/>')
+        base = 'quests/final/barbora/utils/'
+        self.native_files[base+'law.xml'] = b'<Database><Skald><Library Name="law"><Definitions><Definition File="law/resolution.xml"/><Definition File="law/feedback.xml"/><Definition File="law/unrelated.xml"/></Definitions><Nodes><resolution Name="resolution"/><feedback Name="feedback" InstanceType="Static"/><unrelated Name="unrelated"/></Nodes></Library></Skald></Database>'
+        self.native_files[base+'law/resolution.xml'] = b'<Database><Skald><Library Name="resolution" VoiceNamespace="true"><Definitions><Definition File="resolution/arrest.xml"/></Definitions><Nodes><arrest Name="arrest" InstanceType="Static"/></Nodes></Library></Skald></Database>'
+        self.native_files[base+'law/resolution/arrest.xml'] = b'<Database><Skald><Module Name="arrest"><Nodes><feedback Name="f" Namespace=""/><feedback Name="relative" Namespace="law"/></Nodes></Module></Skald></Database>'
+        self.native_files[base+'law/feedback.xml'] = b'<Database><Skald><Module Name="feedback"><Nodes/></Module></Skald></Database>'
+        self.native_files[base+'law/unrelated.xml'] = b'<Database><Skald><Module Name="unrelated"><Nodes/></Module></Skald></Database>'
+        self.write_scripts()
+        _, graphs, _ = self.run_apply()
+        from world_gameplay_basis import package_dependencies, validate_dependency_scopes
+        wrapper = 'Quests/GlueTravel/entry/world/open_world.xml'
+        parent = ET.fromstring(graphs['Quests/GlueTravel/entry/world/native/utils_law.xml'])
+        self.assertEqual({n.tag for n in parent.findall('.//Nodes/*')}, {'resolution','feedback'})
+        nested = ET.fromstring(graphs['Quests/GlueTravel/entry/world/native/utils_law.resolution.xml'])
+        self.assertEqual(nested.find('Skald')[0].get('VoiceNamespace'), 'true')
+        self.assertEqual(nested.find('.//Nodes/arrest').get('InstanceType'), 'Static')
+        definitions = b'<Definitions><Nodes><Definition TypeName="LinkEffect"/></Nodes></Definitions>'
+        validate_dependency_scopes(graphs, wrapper, definitions)
+        with zipfile.ZipFile(self.script_path) as scripts:
+            self.assertEqual(graphs, package_dependencies(graphs, 'Quests/GlueTravel/entry/test_level.xml', wrapper, scripts))
+
+    def test_qualified_library_is_not_hidden_by_partial_local_namespace(self):
+        from world_gameplay_basis import validate_dependency_scopes
+        root='Quests/world/'
+        graphs={root+'root.xml':b'<Database><Skald><Module Name="root"><Definitions><Definition File="global.xml"/><Definition File="child.xml"/></Definitions></Module></Skald></Database>',
+                root+'global.xml':b'<Database><Skald><Library Name="utils"><Definitions><Definition File="law.xml"/></Definitions></Library></Skald></Database>',
+                root+'law.xml':b'<Database><Skald><Library Name="law"><Definitions><Definition File="helper.xml"/></Definitions></Library></Skald></Database>',
+                root+'helper.xml':b'<Database><Skald><Module Name="helper"/></Skald></Database>',
+                root+'local.xml':b'<Database><Skald><Library Name="utils"/></Skald></Database>',
+                root+'child.xml':b'<Database><Skald><Module Name="child"><Definitions><Definition File="local.xml"/></Definitions><Nodes><helper Name="helper" Namespace="utils.law"/></Nodes></Module></Skald></Database>'}
+        self.assertEqual(validate_dependency_scopes(graphs,root+'root.xml',b'<Definitions><Nodes/></Definitions>'),6)
+
     def test_empty_namespace_inherits_library_and_collects_sibling_chain(self):
         key = 'quests/final/barbora/open_world/combat.xml'
         self.native_files[key] = self.native_files[key].replace(b'<Nodes>', b'<Nodes><getmoney Name="money" Namespace="utils.money"/>')

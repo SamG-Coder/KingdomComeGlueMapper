@@ -55,6 +55,89 @@ class FakeCatalog:
 
 
 class ClothingLabTests(unittest.TestCase):
+    def test_head_mask_audit_catches_inner_collar_and_respects_opaque_outer_cover(self):
+        c = FakeCatalog()
+        c.parts['body']['kind'] = 'Head'
+        c.meshes['dress.skin'] = mesh(-.02)
+        c.meshes['dress.skin'].vertices[:,:2] *= 2
+        code = 'hidden_head_without_exterior_cover'
+        findings = validate(c, ['body','dress'], geometry=True)['findings']
+        self.assertEqual(next(f for f in findings if f['code']==code)['vertices'], 3)
+        c.meshes['dress.skin'].vertices[:,2] = .02
+        self.assertNotIn(code, {f['code'] for f in validate(c,['body','dress'],geometry=True)['findings']})
+        c.assets.pixels = lambda _: (np.zeros((4,4,4)), False)
+        self.assertIn(code, {f['code'] for f in validate(c,['body','dress'],geometry=True)['findings']})
+        self.assertNotIn(code, {f['code'] for f in validate(c,['body'],geometry=True)['findings']})
+
+    def test_equipped_nonvisual_accessory_is_valid_without_a_mesh(self):
+        from test_clothing_inventory import fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'Data').mkdir()
+            resources=fixture()
+            resources['Libs/Tables/Character/CharacterComponent__person.xml']=(
+                '<database><CharacterComponents><Component Name="person_root" FilePath="test"><DerivedComponents>'
+                '<Body Name="body"><Elements><SkinElement EquipmentPart="torso" Model="body.skin"/></Elements></Body>'
+                '<Clothing Name="garment"/>'
+                '</DerivedComponents></Component></CharacterComponents></database>')
+            with zipfile.ZipFile(root/'Data/test.pak','w') as z:
+                for name,blob in resources.items(): z.writestr(name,blob)
+                z.writestr('Libs/GlueMapper/PersonImport/person.json',json.dumps(dict(namespace='person',person='actor')))
+            c=Catalog(root)
+            self.assertEqual(c.errors,[])
+            self.assertEqual(c.presets['person_root']['parts'],['body'])
+            self.assertEqual(c.presets['person_root']['equipment_status'],'checked')
+
+    def test_outfit_validation_fails_when_meshes_exist_but_gameplay_cannot_equip_them(self):
+        c=FakeCatalog()
+        c.presets['person_root']=c.presets.pop('person')
+        c.inventory_checks=[dict(namespace='person',person='actor',status='error',
+            issues=[dict(code='equipment_reference_missing',message='Missing carried inventory')])]
+        result=validate(c,['body','dress'],inspect_assets=False)
+        self.assertEqual(result['status'],'error')
+        self.assertIn('equipped_outfit_unreachable',{f['code'] for f in result['findings']})
+
+    def test_source_import_receipt_labels_named_legacy_presets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'Data').mkdir()
+            component=b'<database><CharacterComponents><Component Name="original_alias_root" FilePath="test"><DerivedComponents><Body Name="body"><Elements><SkinElement EquipmentPart="torso" Model="body.skin"/></Elements></Body></DerivedComponents></Component></CharacterComponents></database>'
+            with zipfile.ZipFile(root/'Data/test.pak','w') as z:
+                z.writestr('Libs/Tables/Character/CharacterComponent__alias.xml',component)
+                z.writestr('Libs/GlueMapper/PersonImport/original_alias.json',json.dumps(dict(namespace='original_alias',person='source_person')))
+            c=Catalog(root)
+            self.assertEqual(c.presets['original_alias_root']['label'],'source_person')
+            self.assertEqual({e['code'] for e in c.errors},
+                {'equipment_storm_binding_missing', 'equipment_outfit_unreachable'})
+            self.assertEqual(c.inventory_checks[0]['status'], 'error')
+
+    def test_hidden_garment_without_cover_is_not_reported_as_clean(self):
+        c = FakeCatalog(); c.meshes['dress.skin'] = mesh(.04, hidden=True)
+        result = validate(c, ['body','dress'], geometry=True)
+        issue = next(f for f in result['findings'] if f['code']=='hidden_cloth_without_cover')
+        self.assertEqual(issue['triangles'], 1)
+        self.assertEqual(issue['sample_triangles'], [0])
+        # A surviving surface in another region of a composed outfit covers it.
+        c.parts['dress']['elements'].append(dict(c.parts['dress']['elements'][0], EquipmentPart='arms', ModelResolved='sleeve.skin'))
+        c.meshes['sleeve.skin'] = mesh(.06)
+        self.assertNotIn('hidden_cloth_without_cover', {f['code'] for f in validate(c,['body','dress'],geometry=True)['findings']})
+
+    def test_hidden_transparent_or_nodraw_cloth_is_not_a_missing_surface(self):
+        c = FakeCatalog(); c.meshes['dress.skin'] = mesh(.04, hidden=True)
+        c.assets.pixels = lambda _: (np.zeros((4,4,4)), False)
+        self.assertNotIn('hidden_cloth_without_cover', {f['code'] for f in validate(c,['body','dress'],geometry=True)['findings']})
+        c.materials = lambda _: [dict(shader='Nodraw')]
+        self.assertNotIn('hidden_cloth_without_cover', {f['code'] for f in validate(c,['body','dress'],geometry=True)['findings']})
+
+    def test_unmasked_hair_under_headwear_is_a_review_candidate(self):
+        c = FakeCatalog(); c.parts['hair'] = part('hair', 'Hair', '0')
+        c.parts['hair']['elements'][0]['EquipmentPart'] = 'head'
+        c.parts['dress']['elements'][0]['EquipmentPart'] = 'head'
+        c.groups['cover']['region'] = 'head'
+        c.meshes['hair.skin'] = mesh(.02)
+        selected = ['hair','dress']
+        self.assertIn('unmasked_hair_under_headwear', {f['code'] for f in validate(c,selected,geometry=True)['findings']})
+        c.meshes['hair.skin'] = mesh(.02, hidden=True)
+        self.assertNotIn('unmasked_hair_under_headwear', {f['code'] for f in validate(c,selected,geometry=True)['findings']})
+
     def test_duplicate_native_material_feature_declarations_fail_validation(self):
         c=object.__new__(Catalog)
         c.assets=SimpleNamespace(read=lambda _:b'<Material><SubMaterials><Material><FeatureSlots Slot00="Fabric"/></Material><Material><FeatureSlots Slot00="Fabric"/></Material></SubMaterials></Material>')
@@ -222,7 +305,9 @@ class ClothingLabTests(unittest.TestCase):
             'item/armor':[dict(item_id='a',clothing_id='c1',clothing2_id='c2')],
             'item/clothing':[dict(clothing_id='c1',model='dress.skin'),dict(clothing_id='c2',model='sleeve.skin')],
             'item/armor2clothing_preset':[dict(clothing_preset_id='p',armor_id='a')],
-            'item/clothing_preset':[dict(clothing_preset_id='p')],'item/attachment2clothing_preset':[]}
+            'item/clothing_preset':[dict(clothing_preset_id='p')],'item/attachment2clothing_preset':[],
+            'item/clothing_attachment':[dict(clothing_attachment_id='detail',model='strap.skin',gender_id='1')],
+            'item/armor2clothing_attachment':[dict(item_id='a',clothing_attachment_id='detail')]}
         fake=SimpleNamespace(get=lambda name:dict(rows=rows[name]))
         rows.update({'character_'+kind:[] for kind in ('body','head','hair','beard')})
         with patch('clothing_lab.source.RetailSourceReader'),patch('clothing_lab.source.SourceTables',return_value=fake):
@@ -230,6 +315,11 @@ class ClothingLabTests(unittest.TestCase):
         self.assertEqual(len(records),3)
         self.assertEqual([r['status'] for r in records],['ready','not_converted','source_error'])
         self.assertEqual([r['slot'] for r in records[0]['source_clothing']],['clothing_id','clothing2_id'])
+        self.assertEqual([r['model'] for r in records[0]['source_clothing_attachments']],['strap.skin'])
+        rows['item/clothing_attachment'] = []
+        with patch('clothing_lab.source.RetailSourceReader'),patch('clothing_lab.source.SourceTables',return_value=fake):
+            records=soul_records(Path('.'),FakeCatalog())
+        self.assertIn('Missing clothing attachment record: detail',records[0]['source_issues'])
 
     def test_cancelled_batch_saves_partial_report_without_marking_complete(self):
         with tempfile.TemporaryDirectory() as tmp:

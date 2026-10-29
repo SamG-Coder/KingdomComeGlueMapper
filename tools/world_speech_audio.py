@@ -17,7 +17,7 @@ from dialogue_dubbing import DEPOT
 from upgrade_map import read
 
 
-def relocation(graphs, wrapper):
+def relocation(graphs, wrapper, *, stop_at=()):
     """Derive the added scope; follow literal packaged dependencies for text IDs."""
     host = ET.fromstring(graphs[wrapper]).find('Skald')[0]
     if host.get('VoiceNamespace') != 'true':
@@ -34,9 +34,66 @@ def relocation(graphs, wrapper):
         for definition in root.findall('.//Definitions/Definition'):
             child = posixpath.normpath(posixpath.join(posixpath.dirname(path), definition.get('File')))
             if child not in graphs: raise ValueError('Missing speech dependency: ' + child)
+            if child in stop_at: continue
             walk(child)
     walk(wrapper)
     return native, destination, responses
+
+
+def native_voice_roots(scripts):
+    """Read independent audio roots from the native project's instances.
+
+    Shared libraries are project siblings of open_world in retail, even when
+    dependency packaging places them inside the imported world. Their source
+    recordings must not be looked up underneath the world audio directory.
+    """
+    from world_gameplay_basis import NativeGraphs, NATIVE
+    native = NativeGraphs(scripts)
+    project_path = posixpath.dirname(NATIVE) + '.xml'
+    project = native.get(project_path)
+    graphs = {project_path: read(scripts, native.names[project_path])}
+    candidates = {}
+    for declaration in project.findall('Definitions/Definition'):
+        path = posixpath.normpath(posixpath.join(posixpath.dirname(project_path), declaration.get('File'))).lower()
+        host = native.get(path)
+        name = host.get('Name')
+        enabled = host.get('VoiceNamespace', 'true' if host.tag in ('Level', 'Quest') else 'false')
+        if enabled != 'true' or not project.findall('Nodes/' + name): continue
+        if name in candidates: raise ValueError('Ambiguous native speech root: ' + name)
+        candidates[name] = path
+        graphs[path] = read(scripts, native.names[path])
+    # Retail includes mix path casing; archive lookup is case insensitive.
+    # Normalize the private lookup graph, never the native scripts themselves.
+    for path, blob in list(graphs.items()):
+        root = ET.fromstring(blob)
+        for declaration in root.findall('.//Definitions/Definition'):
+            declaration.set('File', declaration.get('File').lower())
+        graphs[path] = ET.tostring(root)
+    return {name: ('dialog/' + '/'.join(voice_namespace(graphs, path)) + '/').lower()
+            for name, path in candidates.items()}
+
+
+def relocations(graphs, wrapper, native_roots):
+    """Partition the dependency closure at each relocated native audio root.
+
+    Source roots come from native project declarations, destinations from the
+    imported instance hierarchy. No response, actor or settlement is special.
+    """
+    visited, roots = set(), {}
+    def walk(path):
+        if path in visited: return
+        visited.add(path)
+        if path not in graphs: raise ValueError('Missing speech dependency: ' + path)
+        host = ET.fromstring(graphs[path]).find('Skald')[0]
+        name = host.get('Name')
+        if name in native_roots and host.get('VoiceNamespace') == 'true':
+            roots[path] = native_roots[name]
+        for definition in host.findall('Definitions/Definition'):
+            walk(posixpath.normpath(posixpath.join(posixpath.dirname(path), definition.get('File'))))
+    walk(wrapper)
+    if wrapper not in roots: raise ValueError('Native world audio root is not registered')
+    return [(source, *relocation(graphs, path, stop_at=set(roots)-{path})[1:])
+            for path, source in sorted(roots.items())]
 
 
 def select(entries, native, destination, responses):
@@ -62,14 +119,24 @@ def upgrade(package, target, notify=lambda *a: None):
     if not wrappers: return {}, dict(recordings=0, reason='no relocated native world')
     if len(wrappers) != 1: raise ValueError('Ambiguous native world wrapper')
     target = Path(target)
-    native, destination, responses = relocation(graphs, wrappers[0])
-    if native == destination: return {}, dict(recordings=0, reason='native audio scope retained')
+    with zipfile.ZipFile(target/'Data/Scripts.pak') as scripts:
+        scopes = relocations(graphs, wrappers[0], native_voice_roots(scripts))
+    scopes = [scope for scope in scopes if scope[0] != scope[1]]
+    if not scopes: return {}, dict(recordings=0, reason='native audio scopes retained')
     relative = 'Localization/English.pak'
     path = package/relative
     pending = path.with_suffix('.speech-pending')
     with EnglishRecordings(target) as recordings, ExitStack() as stack:
-        selected = select(recordings.members, native, destination, responses)
-        if responses and not selected: raise ValueError('No native speech recordings resolved')
+        selected, scope_reports = {}, []
+        for native, destination, responses in scopes:
+            choices = select(recordings.members, native, destination, responses)
+            if responses and not choices: raise ValueError('No native speech recordings resolved: ' + native)
+            for dest, source in choices.items():
+                if dest in selected and selected[dest] != source:
+                    raise ValueError('Conflicting relocated speech destination: ' + dest)
+                selected[dest] = source
+            scope_reports.append(dict(source_scope=native, destination_scope=destination,
+                                      responses=len(responses), recordings=len(choices)))
         current = stack.enter_context(zipfile.ZipFile(path))
         existing = {i.filename.lower(): i for i in current.infolist()}
         depot = ET.fromstring(read(current, DEPOT))
@@ -87,7 +154,7 @@ def upgrade(package, target, notify=lambda *a: None):
             total += info.file_size
             old = existing.get(dest)
             if old is None or (old.CRC,old.file_size) != (info.CRC,info.file_size): changed[dest] = source
-        report = dict(source_scope=native, destination_scope=destination, responses=len(responses),
+        report = dict(version=2, scopes=scope_reports, responses=len(set().union(*(s[2] for s in scopes))),
                       recordings=len(selected), bytes=total, changed=len(changed), runtime_verified=False)
         if not changed: return {}, report
         notify('Relocating native nearby speech recordings', 0, len(changed), '')

@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from clothing_coverage import triangle_mask, source_opacity, covered_points, apply_membership, unculled_garment_visibility, opaque_native_surface, alpha_intersections, native_alpha_surfaces, triangle_safe_membership, register_coverage
+from clothing_coverage import triangle_mask, source_opacity, covered_points, apply_membership, apply_fitted_membership, unculled_garment_visibility, opaque_native_surface, alpha_intersections, native_alpha_surfaces, triangle_safe_membership, register_coverage, register_fixed_body_coverage
 from clothing_regions import split_skin_regions
 from npc_effects import write_float_dds
 from character_skin_upgrade import CompiledSkin, upgrade_skin
@@ -159,6 +159,45 @@ class ClothingCoverageTests(unittest.TestCase):
         self.assertFalse(safe[0]);self.assertFalse(safe[3])
         self.assertFalse(safe.any())
 
+    def test_fitted_outfit_preserves_exposed_faces_and_both_native_buffers(self):
+        blob, _ = upgrade_skin(sample_skin(), sample_skin(), clear_hiding=True)
+        original = CompiledSkin(blob)
+        covered = np.ones(original.n, bool)
+        covered[original.faces[0, 0]] = False
+        result = CompiledSkin(apply_fitted_membership(blob, {'outer': covered}))
+        alpha = np.frombuffer(result.streams[3].data[24:], np.uint8).reshape(-1, 4)[:, 3]
+        culled = (((255 ^ alpha) & 16) != 0)[result.faces].any(axis=1)
+        self.assertFalse(culled[0])
+        self.assertTrue(covered[result.faces[culled]].all())
+        for i, remap in enumerate(result.remap):
+            self.assertEqual(result.internal.data[32+int(remap)*64+63], alpha[i])
+        np.testing.assert_array_equal(result.vertices, original.vertices)
+        np.testing.assert_array_equal(result.faces, original.faces)
+
+    def test_fixed_outfit_masks_hair_head_and_beard_conditionally(self):
+        blob, _ = upgrade_skin(sample_skin(), sample_skin(), clear_hiding=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp); folder = output/'objects/characters/example'; folder.mkdir(parents=True)
+            tables = output/'Libs/Tables/Character'; tables.mkdir(parents=True)
+            (tables/'ClothingHidingGroup__test.xml').write_text('<database><ClothingHidingGroups/></database>')
+            component = ET.Element('Component', FilePath='example'); derived = ET.SubElement(component, 'DerivedComponents')
+            for kind, region in [('Body','torso'), ('Head','face'), ('Hair','head'), ('Beard','beard'), ('Clothing','head')]:
+                (folder/(kind+'.skin')).write_bytes(blob)
+                node = ET.SubElement(derived, kind)
+                ET.SubElement(ET.SubElement(node,'Elements'),'SkinElement', EquipmentPart=region, Model=kind+'.skin', Material='hood.mtl')
+            with patch('clothing_coverage.native_alpha_surfaces', return_value=([(0,[np.ones((1,1))])]*10, [])), \
+                 patch('clothing_coverage.normals', side_effect=lambda skin: np.tile([0,0,1], (skin.n,1))), \
+                 patch('clothing_coverage.covered_points', side_effect=lambda points,*args,**kwargs: np.ones(len(points),bool)):
+                result = register_fixed_body_coverage(output, component, 'test')
+            self.assertEqual({row['target'] for row in result['layers']}, {'Body.skin','Head.skin','Hair.skin','Beard.skin'})
+            for name in ('Body','Head','Hair','Beard'):
+                skin = CompiledSkin((folder/(name+'.skin')).read_bytes())
+                alpha = np.frombuffer(skin.streams[3].data[24:], np.uint8).reshape(-1,4)[:,3]
+                self.assertTrue(((255 ^ alpha) & 16).all())
+                self.assertFalse(((255 ^ alpha) & 0).any())  # Removing the outfit restores these surfaces.
+                for i, remap in enumerate(skin.remap):
+                    self.assertEqual(skin.internal.data[32+int(remap)*64+63], alpha[i])
+
     def test_physical_cut_does_not_disappear_when_distant_mip_averages_below_threshold(self):
         from clothing_coverage import physical_alpha_intersections
         uv = np.array([[.2,.2],[.3,.2],[.2,.3],[.7,.7],[.8,.7],[.7,.8]], '<f4')
@@ -176,11 +215,13 @@ class ClothingCoverageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output=Path(tmp);folder=output/'objects/characters/example';folder.mkdir(parents=True)
             (output/'Libs/Tables/Character').mkdir(parents=True)
-            for stem in ('body','dress'):
+            for stem in ('body','hair','head','dress'):
                 (folder/(stem+'.skin')).write_bytes(blob)
                 (folder/(stem+'_lod1.skin')).write_bytes(lower)
             component=ET.fromstring('<Component FilePath="example"><DerivedComponents>'
                 '<Body><Elements><SkinElement EquipmentPart="torso" Model="body.skin"/></Elements></Body>'
+                '<Hair><Elements><SkinElement EquipmentPart="head" Model="hair.skin"/></Elements></Hair>'
+                '<Head><Elements><SkinElement EquipmentPart="face" Model="head.skin"/></Elements></Head>'
                 '<Clothing Name="test_dress"><Elements><SkinElement EquipmentPart="torso" Model="dress.skin"/></Elements></Clothing>'
                 '</DerivedComponents></Component>')
             tables={'item/body_layer':[dict(body_layer_id='1',layer_order='1')],
@@ -189,10 +230,12 @@ class ClothingCoverageTests(unittest.TestCase):
             garment=dict(part=dict(kind='cloth',gender_id='2',armor_archetype_id='a'),stem='dress',
                          source_model='source.skin',source_material='source.mtl')
             with patch('clothing_coverage.native_alpha_surfaces',return_value=([(0,[np.ones((1,1))])]*10,[])), \
+                 patch('clothing_coverage.normals',side_effect=lambda skin: np.tile([0,0,1],(skin.n,1))), \
                  patch('clothing_coverage.covered_points',side_effect=lambda points,*args,**kwargs: np.ones(len(points),bool)):
                 result=register_coverage(output,component,[garment],SimpleNamespace(get=lambda key:dict(rows=tables[key])),'test')
-            self.assertEqual([(r['lod'],r['candidate_triangles']) for r in result['layers']],[(0,4),(1,1)])
-            for name in ('body.skin','body_lod1.skin'):
+            self.assertEqual([(r['lod'],r['candidate_triangles']) for r in result['layers']],[(0,4),(1,1)]*3)
+            self.assertEqual([r['lod'] for r in result['layers'] if r['coverage_test']=='outward_head_cone'],[0,1])
+            for name in ('body.skin','body_lod1.skin','hair.skin','hair_lod1.skin','head.skin','head_lod1.skin'):
                 skin=CompiledSkin((folder/name).read_bytes())
                 alpha=np.frombuffer(skin.streams[3].data[24:],np.uint8).reshape(-1,4)[:,3]
                 self.assertTrue(((255^alpha)&16).all())

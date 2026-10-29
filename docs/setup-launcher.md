@@ -1,7 +1,7 @@
 # Setup launcher
 
 Start with the [Windows installation guide](windows-setup.md) and the
-[0.3.16 prerelease](https://github.com/SamG-Coder/KingdomComeGlueMapper/releases/tag/v0.3.16).
+[0.3.28 prerelease](https://github.com/SamG-Coder/KingdomComeGlueMapper/releases/tag/v0.3.28).
 This page explains the launcher workflow and current source behavior; see
 [release, source and runtime status](status.md) for the difference between the
 download and later local builds.
@@ -43,7 +43,7 @@ complete the KCD1 campaign. Coach travel remains available for existing saves.
 | Buildings | Include structures, static props, ground and roads. Explicitly exclude forest instances from this surface pass. | 30 GiB |
 | All (Forest) | Buildings coverage plus eligible trees and foliage with their original transforms. | 60 GiB |
 
-Every choice installs visible buildings and vegetation. Optional surface baking prepares opacity, surface colour and normals for indirect illumination. A separate mandatory map-build stage compiles the mod shader archives with the installed Modding Tools, including when No Baking is selected. Lighting remains dynamic. The surface bake uses automatic CPU/OptiX selection: two compiled CPU workers for smaller tiles, persistent OptiX for dense tiles, 64-brick batches and overlapping CPU preparation/encoding. GPU errors are logged and fall back to CPU. All tiles are validated before packaging. The current bundled GPU binary targets sm_120; other hardware uses CPU when unsupported. These are experimental presets: terrain blends and foliage translucency do not have proven native parity. Post-release source has [bounded contributor bake/build benchmarks](status.md#performance-evidence); these are not a duration guarantee for the published installer or every bake mode. The allowances are planning thresholds, not measured final package sizes.
+Every choice installs visible buildings and vegetation. Optional surface baking prepares opacity, surface colour and normals for indirect illumination. A separate mandatory map-build stage compiles the mod shader archives with the installed Modding Tools, including when No Baking is selected. Lighting remains dynamic. The surface bake uses automatic CPU/OptiX selection: two compiled CPU workers for smaller tiles, persistent OptiX for dense tiles, 64-brick batches and overlapping CPU preparation/encoding. GPU errors are logged and fall back to CPU. All tiles are validated before packaging. The current bundled GPU binary targets sm_120; other hardware uses CPU when unsupported. These are experimental presets: terrain blends and foliage translucency do not have proven native parity. Setup v0.3.28 includes parallel tile baking; the [bounded contributor bake/build benchmarks](status.md#performance-evidence) are not a duration guarantee for this installer or every bake mode. The allowances are planning thresholds, not measured final package sizes.
 
 Existing unrecognized/modified installations are refused. Fishing is not installed alongside the old embedded fishing experiment in a map package; migrate to a clean map package first. Each mod has a separate verified installation transaction. Map rollback data is temporary and removed on success; Fishing retains its backup. If the second mod fails, the first successful installation remains.
 

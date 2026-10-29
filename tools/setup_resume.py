@@ -112,20 +112,37 @@ def preflight(config):
     if legacy.validate_games(Path(config['kcd1']),target)!='1.5.6':raise ValueError('KCD2 1.5.6 is required.')
     from setup_shaders import tool_root
     tool_root(target,config.get('mod_tools'))
-    extra=1
+    from setup_resume_space import lighting, installation
+    import setup_progress
+    lighting_plan=lighting(config,receipt,notify=lambda message:
+        setup_progress.progress('Check resume lighting cache',0,0,message))
+    messages=['Verified completed KCD1 Map. Continuing the same job; completed map conversion is retained.',
+              *lighting_plan['messages']]
+    extra=legacy.GIB+lighting_plan['bytes']
+    unfinished=lighting_plan['pending']
     if config['baking']!='none' and receipt.get('baking',{}).get('preset')!=config['baking']:
         import numba
-        extra+=30 if config['baking']=='buildings' else 60
     if config['cutscenes']=='opening' and not receipt.get('opening_movie'):
         from setup_cutscenes import check_tools
-        check_tools(config['converter']);extra+=10
+        check_tools(config['converter']);extra+=10*legacy.GIB;unfinished=True
     stage=0
     if config['action']!='build_only':
         if legacy.game_running():raise ValueError('Close Kingdom Come before installing.')
-        stage=sum(p.stat().st_size for p in (root/'package/map').rglob('*') if p.is_file())+legacy.GIB
-        if legacy.free_space(target)<stage:raise ValueError('Not enough free space to stage the saved package for installation.')
-    required=extra*legacy.GIB+(stage if workspace.anchor.lower()==target.anchor.lower() else 0)
-    if legacy.free_space(workspace)<required:raise ValueError(f'Resuming needs {required/legacy.GIB:.1f} GiB free for remaining work and staging.')
+        stage=installation(root/'package/map',target,receipt,lighting_plan)
+        # An install-space shortage must not prevent finishing retained build
+        # work. The installer checks actual output bytes again before staging.
+        required=stage+(extra if workspace.anchor.lower()==target.anchor.lower() else 0)
+        available=legacy.free_space(target)
+        if available<required:
+            detail=(f'Installation estimate: {required/legacy.GIB:.1f} GiB additional space '
+                    f'including remaining work on that drive; {available/legacy.GIB:.1f} GiB free. '
+                    'Existing build files are retained. Space is checked again before installation.')
+            if not unfinished:raise ValueError(detail)
+            messages.append('Build work can resume. '+detail)
+    if legacy.free_space(workspace)<extra:
+        raise ValueError(f'Resuming this job needs {extra/legacy.GIB:.1f} GiB additional build space; '
+                         f'{legacy.free_space(workspace)/legacy.GIB:.1f} GiB free. Completed work is retained.')
+    messages.append(f'Remaining build space allowance: {extra/legacy.GIB:.1f} GiB; completed files are already on disk.')
     if 'fishing' in config['mods']:
         fish=dict(config,mods=['fishing']);fresh_preflight(fish)
     if 'mp' in config['mods']:
@@ -135,4 +152,4 @@ def preflight(config):
             mp.update(action='install',package=str(root/'package'))
         elif not mp.get('mp_source'):mp['mp_source']=str(root/'package/map')
         mp_preflight(mp)
-    return dict(ok=True,config=config,messages=['Verified completed KCD1 Map. Resume will reuse it and retry unfinished optional stages.'])
+    return dict(ok=True,config=config,messages=messages)

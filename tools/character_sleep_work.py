@@ -209,16 +209,19 @@ def clock_signature(element):
     return signature(normalized)
 
 
-def upgrade(files, people, archive, target, tables, reader, source):
+def upgrade(files, people, archive, target, tables, reader, source, *, notify=lambda message: None):
     source_contract(E.fromstring(reader(source, {'home': ('Scripts.pak', 'Libs/AI/final/sa_home.xml')})['home']['data']))
     brains = {r['brain_id'] for r in tables.get('ai/brain')['rows'] if r['brain_name'] == 'npc_daycycle'}
     groups = statistics(tables.get('rpg/soul')['rows'], brains)
     clocks = plan_clocks(people, groups)
-    records = catalog(archive, tables)
+    notify('Scanning source beds and home boundaries')
+    records = catalog(archive, tables, notify=notify)
+    notify('Loading native sleeping activities')
     template, activity = contract(target)
     mission = E.fromstring(files['objects_mission0.xml']); scheduler = E.fromstring(files['tables/ai/scheduler.xml'])
     graph = []; reports = []; changed = False
     for name, clock in sorted(clocks.items()):
+        notify('Binding sleeping schedule: ' + name)
         actor = next((e for e in mission if e.get('Name') == name), None)
         if actor is None:
             continue

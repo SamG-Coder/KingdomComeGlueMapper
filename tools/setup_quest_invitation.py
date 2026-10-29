@@ -238,7 +238,9 @@ def repair_journal(package, source, *, model=None):
     if source is None: raise ValueError('KCD1 is required to restore invitation journal text')
     if model is None:
         from quest_import import import_quest
-        model, _ = import_quest(Path(source), SELECTION[0])
+        from campaign_sources import RetailSourceReader
+        with RetailSourceReader(source) as reader:
+            model, _ = import_quest(Path(source), SELECTION[0], source_reader=reader)
     localized, evidence = load_text(source,[model])
     journal = bool(model['tables']['quest2skald_subchapter']['rows'])
     if evidence['missing'] or journal and not localized[model['quest']].get('name'):

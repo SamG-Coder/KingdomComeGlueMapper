@@ -68,7 +68,9 @@ def upgrade(package, source, target):
         if report['pending']:
             raise ValueError('Guard actor dependencies incomplete')
         changes.update(apply_overlay(package,out/'package',consume=True))
-    model,_=import_quest(Path(source),QUEST)
+    from campaign_sources import RetailSourceReader
+    with RetailSourceReader(source) as reader:
+        model,_=import_quest(Path(source),QUEST,source_reader=reader)
     path=work/'quest-ir.json'
     path.write_text(json.dumps(model),encoding='utf-8')
     out=work/'dialogues'

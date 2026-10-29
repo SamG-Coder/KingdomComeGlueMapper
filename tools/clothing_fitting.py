@@ -122,6 +122,7 @@ class OutfitFitting:
 
     def evidence(self):
         return dict(policy='Authored fitting beneath opaque higher layers from source body-subpart contracts',
+            body_policy='Preserve source body shape; equipment controls skin visibility without permanent outfit-dependent fitting',
             source_tables={name: self.tables.get(name)['provenance'] for name in
                            ('item/body_layer', 'item/armor_archetype2body_subpart')},
             relationships=[dict(inner=self.parts[i]['clothing_id'], outer=self.parts[j]['clothing_id'])
@@ -171,18 +172,19 @@ class OutfitFitting:
 
     def weights(self, number, blob, variant, lod=0):
         part = self.parts[number]
-        if part['kind'] not in ('body', 'cloth'):
+        # A body outlives its equipment. Baking an outfit-dependent shrink into
+        # it leaves thin limbs and a neck seam when the outfit is unequipped or
+        # unavailable. Conditional hiding handles skin beneath clothes; only
+        # the clothing itself may retain fixed-outfit fitting deltas.
+        if part['kind'] != 'cloth':
             return {}, {}
-        higher = (higher_layers(number, self.parts, self.contracts) if part['kind'] == 'cloth' else
-                  [i for i in self.contracts if self.parts[i]['gender_id'] == part['gender_id']])
+        higher = higher_layers(number, self.parts, self.contracts)
         if not higher:
             return {}, {}
         shapes = [m['name'] for c in read_chunks(blob) if c.kind == 0x2002 for m in read_morphs(c)]
         shrink = [n for n in shapes if n.split(':')[-1].lstrip('#').casefold() == 'a_shrink']
         if len(shrink) > 1:
             raise ValueError('Ambiguous authored garment fitting shape')
-        if part['kind'] == 'body' and not shrink:
-            return {}, {}
         baked, _ = upgrade_skin(blob, blob, variant=variant, discard_unused_variants=True, bone_mapping={})
         skin = CompiledSkin(baked)
         by_cover = {i: fit_mask(skin, [self.cover(i, lod)]) for i in higher}

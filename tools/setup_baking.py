@@ -57,6 +57,19 @@ def bake_package(package,game,workspace,preset,progress,cancelled):
         return _bake_package(package,game,workspace,preset,progress,cancelled,cache)
 
 
+def checkpoint_workspace(game,workspace,preset,receipt):
+    """Use the same input signature for both resume planning and the baker."""
+    from world_surface_tiles import code_digest
+    policy=[preset,receipt['files'],code_digest()]
+    for name in ('world_surface_scene.py','world_surface_landscape.py','stage_world_surfaces.py'):
+        policy.append(hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest())
+    policy.append([(str(p),p.stat().st_size,p.stat().st_mtime_ns) for p in sorted(Path(game).glob('Data/**/*.pak'))])
+    engine=Path(game)/'Engine/Engine.pak'
+    if engine.exists():policy.append((str(engine),engine.stat().st_size,engine.stat().st_mtime_ns))
+    signature=hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest()
+    return Path(workspace).resolve()/signature
+
+
 def _bake_package(package,game,workspace,preset,progress,cancelled,cache=None):
     if preset not in PRESETS:raise ValueError('Unknown baking preset')
     if preset=='none':return
@@ -70,16 +83,8 @@ def _bake_package(package,game,workspace,preset,progress,cancelled,cache=None):
     restore_swap(package)
     receipt=verify_package(package)
     if receipt.get('baking',{}).get('preset')==preset:return
-    from world_surface_tiles import code_digest
     # Separate incompatible plans, while retaining interrupted work for inspection.
-    policy=[preset,receipt['files'],code_digest()]
-    for name in ('world_surface_scene.py','world_surface_landscape.py','stage_world_surfaces.py'):
-        policy.append(hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest())
-    policy.append([(str(p),p.stat().st_size,p.stat().st_mtime_ns) for p in sorted(Path(game).glob('Data/**/*.pak'))])
-    engine=Path(game)/'Engine/Engine.pak'
-    if engine.exists():policy.append((str(engine),engine.stat().st_size,engine.stat().st_mtime_ns))
-    signature=hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest()
-    workspace=workspace/signature
+    workspace=checkpoint_workspace(game,workspace,preset,receipt)
     workspace.mkdir(parents=True,exist_ok=True)
     overrides=[str(p.resolve()) for p in sorted((package/'Data').glob('*.pak'))]
     reports=[];staged=[]
@@ -114,7 +119,8 @@ def _bake_package(package,game,workspace,preset,progress,cancelled,cache=None):
                                     imported_from=report.get('imported_from'),
                                     vegetation_gi_upgrade=report.get('vegetation_gi_upgrade')))
                 continue
-            print('Building lighting: '+('regeneration requested' if forced() else 'no matching verified cache'),flush=True)
+            print('Lighting cache: '+('regeneration requested' if forced() else
+                  'exact input key not found; checking existing workspace caches against the static scene'),flush=True)
         levelwork=workspace/level.name;levelwork.mkdir(exist_ok=True)
         if cache is not None and forced():
             levelwork=levelwork/('rebuild-'+uuid.uuid4().hex[:12]);levelwork.mkdir()
@@ -135,6 +141,27 @@ def _bake_package(package,game,workspace,preset,progress,cancelled,cache=None):
                 pending=ready.with_suffix('.tmp');pending.write_text(json.dumps(dict(attempt=root.name)))
                 pending.replace(ready)
         from setup_gpu import hybrid_environment
+        scene_key = None
+        if cache is not None:
+            from setup_bake_cache import scene_identity, matching_workspace_cache
+            progress('Check existing workspace lighting',0,0,'Matching static geometry and materials; no previous job required')
+            with hybrid_environment():
+                hit = None if forced() else matching_workspace_cache(cache,root/'scene',preset,
+                    notify=lambda message: progress('Check existing workspace lighting',0,0,message))
+            if hit:
+                output = workspace/('cached-'+uuid.uuid4().hex[:12])
+                progress('Reuse cached lighting',0,0,f'{hit[1]["tiles"]} tiles from {cache.folder}')
+                report = restore(hit,level,output)
+                print(f'Reusing {report["tiles"]} lighting tiles from {cache.folder}; validation: {report["cache_validation"]}',flush=True)
+                if report['input_compatibility']=='not_recorded':
+                    print('Existing lighting output hashes and tile layout checked. The older cache did not record scene inputs.',flush=True)
+                staged.append((level.name,output/'packages'))
+                reports.append(dict(level=level.name,tiles=report['tiles'],limitations=report['limitations'],
+                    vegetation_gi_upgrade=report.get('vegetation_gi_upgrade'),cache_key=report['cache_key'],
+                    cache_validation=report['cache_validation'],input_compatibility=report['input_compatibility']))
+                continue
+            print('Building lighting: '+('regeneration requested' if forced() else
+                  'no complete matching workspace cache; details are recorded in events.jsonl'),flush=True)
         print('Hybrid bake: compiled CPU below 1,000,000 triangles (2 workers); '
               'OptiX for dense tiles, 64-brick batches with CPU overlap. '
               'GPU failures are logged and fall back to CPU.',flush=True)
@@ -148,7 +175,11 @@ def _bake_package(package,game,workspace,preset,progress,cancelled,cache=None):
         if cancelled():raise InterruptedError('Cancelled before staging bake')
         output=root/('staged-'+uuid.uuid4().hex[:12])
         report=stage(root/'scene',output)
-        if cache is not None: publish(cache,cache_key,output,report,cancelled)
+        if cache is not None:
+            progress('Record shared lighting cache',0,0,'Recording static scene inputs for future jobs')
+            with hybrid_environment(): scene_key = scene_identity(root/'scene',preset)
+            publish(cache,cache_key,output,report,cancelled,
+                scene_identity=scene_key,preset=preset,level=level.name)
         staged.append((level.name,output/'packages'))
         reports.append(dict(level=level.name,tiles=report['tiles'],limitations=report['limitations'],
                             vegetation_gi_upgrade=report.get('vegetation_gi_upgrade')))

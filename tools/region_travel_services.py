@@ -60,11 +60,19 @@ def resolve_merchant(source, name, source_level='rataje'):
         work = unique((l for l in actor.findall('EntityLinks/Link') if l.get('Name', '').startswith('Work[')), 'source merchant work link')
         area = unique((e for e in entities if e.get('EntityId') == work.get('TargetId')), 'source work area')
         # Shop markers can live in source layers, just like their work areas.
+        # Layers without the class name cannot hold one, so skip parsing them.
+        present = {e.get('EntityId') for e in entities}
         for entry in archive.namelist():
             if entry.lower().startswith('layers/') and entry.lower().endswith('.xml'):
-                for entity in ET.fromstring(read(archive, entry)).iter('Entity'):
-                    if entity.get('EntityClass') == 'Shop' and not any(e.get('EntityId') == entity.get('EntityId') for e in entities):
+                blob = read(archive, entry)
+                # UTF-16 and XML character references can spell Shop without
+                # that literal byte sequence. Only skip plain UTF-8 layers.
+                if b'Shop' not in blob and b'\x00' not in blob and b'&' not in blob:
+                    continue
+                for entity in ET.fromstring(blob).iter('Entity'):
+                    if entity.get('EntityClass') == 'Shop' and entity.get('EntityId') not in present:
                         entities.append(entity)
+                        present.add(entity.get('EntityId'))
         shop_entity = unique((e for e in entities if e.get('EntityClass') == 'Shop' and e.find('Properties') is not None
                               and e.find('Properties').get('iShopId') == shop['shop_id']), 'placed source shop')
     person.update(shop=shop, stock=stock, area=copy.deepcopy(area), shop_entity=copy.deepcopy(shop_entity))

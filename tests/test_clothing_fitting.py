@@ -58,26 +58,28 @@ class OutfitFittingTests(unittest.TestCase):
                         covered=accept(np.arange(len(upper.faces)),np.full(len(upper.faces),.2),np.full(len(upper.faces),.2))
                         np.testing.assert_array_equal(covered,np.full(len(upper.faces),alpha!=0))
 
-    def test_authored_body_fit_uses_only_same_gender_cover_and_preserves_exposed_skin(self):
+    def test_body_keeps_source_shape_with_or_without_equipment_for_both_genders(self):
         source=sample_skin(morph=True)
         chunks=read_chunks(source);chunk=next(c for c in chunks if c.kind==0x2002)
         data=bytearray(chunk.data.replace(b'#V_001\0',b'#A_Shrink\0'))
         struct.pack_into('<I',data,8,len(b'#A_Shrink\0'))
         source=write_chunks(chunks,{chunk.id:bytes(data)})
         fitter=object.__new__(OutfitFitting)
-        fitter.parts=[dict(kind='body',gender_id='1'),dict(kind='cloth',gender_id='1'),dict(kind='cloth',gender_id='2')]
         fitter.contracts={1:{'foot':1},2:{'foot':1}};fitter.memberships={}
         covers=[]
         def cover(i,lod): covers.append((i,lod));return i
         fitter.cover=cover
-        covered=np.array([1,1,1,0,0,0.])
-        with patch('clothing_fitting.fit_mask',return_value=covered):
-            weights,masks=fitter.weights(0,source,None)
-        self.assertEqual(covers,[(1,0)])
-        out,_=upgrade_skin(source,source,morph_weights=weights,morph_masks=masks)
-        before,after=CompiledSkin(source),CompiledSkin(out)
-        np.testing.assert_allclose(after.vertices[:3],before.vertices[:3]+[0,0,2])
-        np.testing.assert_array_equal(after.vertices[3:],before.vertices[3:])
+        for gender in ('1', '2'):
+            for equipped in (False, True):
+                fitter.parts=[dict(kind='body',gender_id=gender)]
+                if equipped:
+                    fitter.parts += [dict(kind='cloth',gender_id='1'),dict(kind='cloth',gender_id='2')]
+                with self.subTest(gender=gender, equipped=equipped):
+                    weights,masks=fitter.weights(0,source,None)
+                    self.assertEqual((weights,masks), ({},{}))
+                    out,_=upgrade_skin(source,source,morph_weights=weights,morph_masks=masks)
+                    np.testing.assert_array_equal(CompiledSkin(out).vertices,CompiledSkin(source).vertices)
+        self.assertEqual(covers,[])
 
     def test_uses_source_layer_order_and_shared_subparts_not_file_names(self):
         parts=[dict(kind='cloth', armor_archetype_id=str(i), gender_id='1', model='arbitrary') for i in range(3)]

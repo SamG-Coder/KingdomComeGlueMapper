@@ -20,7 +20,9 @@ from clothing_regions import Chunk, read_chunks, write_chunks
 class CompiledSkin:
     def __init__(self, blob):
         self.blob=blob
-        self.info,vertices,faces=inspect_mesh(blob)
+        # Conversion validates every stream but does not need audit-only chunk
+        # hashes and weighted-bone summaries on every intermediate mesh.
+        self.info,vertices,faces=inspect_mesh(blob, diagnostics=False)
         self.chunks=read_chunks(blob);self.by_id={c.id:c for c in self.chunks}
         self.mesh=self.one(0x1000);self.bones=self.one(0x2000)
         self.vertices=np.asarray(vertices,dtype=np.float64)
@@ -34,7 +36,8 @@ class CompiledSkin:
             raise ValueError('Unsupported internal skin vertices')
         self.ninternal=(len(self.internal.data)-32)//64
         if np.any(self.remap>=self.ninternal):raise ValueError('Invalid internal remap')
-        internal=np.array([struct.unpack_from('<3f',self.internal.data,32+64*int(i)+12) for i in self.remap])
+        internal=np.ndarray((self.ninternal, 3), dtype='<f4', buffer=self.internal.data,
+                            offset=44, strides=(64, 4))[self.remap]
         if not np.allclose(internal,self.vertices,rtol=0,atol=1e-5):
             raise ValueError('Render/internal positions disagree before conversion')
         weight=self.streams.get(9)

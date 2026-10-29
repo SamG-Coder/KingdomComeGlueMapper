@@ -27,6 +27,7 @@ class SetupPopulationTests(unittest.TestCase):
                 self.assertGreater(staging_self_test(output)['path_length'], 260)
                 self.assertEqual(profiles, ['any_source_profile'])
                 self.assertFalse(kwargs['update_receipt'])
+                kwargs['progress']('Convert source character appearances', 3, 8, 'example: Checking clothing coverage')
                 staged = output/'package'; clone_missing(baseline, staged)
                 replacement = staged/'Data/replacement'; replacement.write_bytes(b'new archive')
                 replacement.replace(staged/'Data/change.pak')
@@ -34,7 +35,11 @@ class SetupPopulationTests(unittest.TestCase):
                 return dict(version=1, level='kcd1_travel', profiles=profiles, people=2,
                     service_validation=[{}], work={'pending': [{'person':'unsupported_job'}]})
             with patch('build_profile_population_upgrade.build', side_effect=build):
-                changed, report = upgrade(package, root/'source', root/'target', ('any_source_profile',))
+                events = []
+                changed, report = upgrade(package, root/'source', root/'target', ('any_source_profile',),
+                    notify=lambda *event: events.append(event))
+            self.assertEqual(events[0][1:3], (0, 0))
+            self.assertIn(('Convert source character appearances', 3, 8, 'example: Checking clothing coverage'), events)
             self.assertEqual(changed, {n: digest(package/n) for n in ('Data/change.pak','Data/actor.pak')})
             self.assertEqual(original.read_bytes(), b'old archive')
             self.assertEqual((package/RECEIPT).read_bytes(), receipt)

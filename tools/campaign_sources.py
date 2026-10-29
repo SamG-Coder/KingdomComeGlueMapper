@@ -1,5 +1,6 @@
 """Read campaign evidence from retail KCD1 archives; no editor database required."""
 from collections import Counter
+import copy
 from contextlib import ExitStack
 import hashlib
 import math
@@ -53,6 +54,12 @@ def opening_sources(game):
     return retail_sources(game, OPENING_FILES)
 
 
+# Resolved entries shared by every reader in this process, so the many short-lived
+# readers in a build do not reopen and re-index the same retail archives. Each
+# record is reused only while its archives keep the same size and mtime.
+_RESOLVED = {}
+
+
 class MissingRetailSource(ValueError):
     """The entry is absent from every applicable installed retail archive."""
 
@@ -97,6 +104,11 @@ class RetailSourceReader:
     def __exit__(self, *args):
         return self.stack.__exit__(*args)
 
+    def signature(self, pak):
+        """Size and mtime of every archive that can supply an entry of this pak."""
+        paths = [*self.family_archives(pak), *(path for _, path in self.patches)]
+        return tuple((path, s.st_size, s.st_mtime_ns) for path in paths for s in [path.stat()])
+
     def archive(self, path):
         path = Path(path).resolve()
         if not path.is_relative_to(self.game / 'Data'):
@@ -120,6 +132,14 @@ class RetailSourceReader:
             cache_key = (key(pak), key(entry))
             if cache_key in self.absent:
                 raise MissingRetailSource('Missing effective retail source: ' + entry)
+            if cache_key not in self.cache:
+                signature = self.signature(pak)
+                shared = _RESOLVED.get((self.game, cache_key))
+                if shared is not None and shared[0] == signature:
+                    if shared[1] is None:
+                        self.absent.add(cache_key)
+                        raise MissingRetailSource('Missing effective retail source: ' + entry)
+                    self.cache[cache_key] = dict(shared[1], entry=entry, candidates=copy.deepcopy(shared[1]['candidates']))
             if cache_key not in self.cache:
                 data, candidates = None, []
                 for path in self.family_archives(pak):
@@ -145,8 +165,10 @@ class RetailSourceReader:
                     data = incoming
                 if data is None:
                     self.absent.add(cache_key)
+                    _RESOLVED[self.game, cache_key] = signature, None
                     raise MissingRetailSource('Missing effective retail source: ' + entry)
                 self.cache[cache_key] = dict(entry=entry, data=data, candidates=candidates)
+                _RESOLVED[self.game, cache_key] = signature, dict(data=data, candidates=copy.deepcopy(candidates))
             result[label] = self.cache[cache_key]
         return result
 

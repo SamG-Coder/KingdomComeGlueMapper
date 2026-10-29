@@ -31,6 +31,22 @@ def weighted_triangle():
 
 
 class CharacterAuditTests(unittest.TestCase):
+    def test_conversion_inspection_keeps_validation_and_geometry(self):
+        import numpy as np
+        blob = weighted_triangle()
+        full, vertices, faces = inspect_mesh(blob)
+        fast, v, f = inspect_mesh(blob, diagnostics=False)
+        np.testing.assert_array_equal(vertices, v)
+        np.testing.assert_array_equal(faces, f)
+        for key in ('bones', 'bounds', 'streams', 'subset_records', 'extra_influenced_vertices', 'has_extra_weights'):
+            self.assertEqual(full[key], fast[key])
+        chunks = read_chunks(blob)
+        weights = bytearray(next(c.data for c in chunks if c.id == 23))
+        struct.pack_into('<H', weights, 24, 200)
+        for diagnostics in (True, False):
+            with self.assertRaisesRegex(ValueError, 'Bone index outside'):
+                inspect_mesh(write_chunks(chunks, {23: bytes(weights)}), diagnostics=diagnostics)
+
     def test_extra_weights_count_as_two_blocks_for_one_vertex_set(self):
         info,positions,faces=inspect_mesh(weighted_triangle())
         self.assertEqual(len(positions),3)

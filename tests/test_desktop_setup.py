@@ -13,7 +13,9 @@ from desktop_setup import Cancelled, CONVERTERS, EventLog, conversion_plan, inst
 from setup_campaign import MOD_ID, RECEIPT, verify_package
 from campaign_start_policy import POLICY
 from build_recipe import VERSION as RECIPE_VERSION
+from character_person_appearance import APPEARANCE_POLICY_VERSION
 from setup_gameplay import STAGE_IDS, STATIC_WORLD_PROFILES
+from setup_crime_services import VERSION as CRIME_VERSION
 
 
 class DesktopSetupTests(unittest.TestCase):
@@ -59,7 +61,9 @@ class DesktopSetupTests(unittest.TestCase):
                      'source_work_coverage', 'setup_work_coverage', 'character_dice_resources',
                      'character_dice_policy', 'character_gambler_work', 'setup_gambler_work', 'campaign_work_metaroles',
                      'campaign_market_speech', 'setup_work_speech', 'gambler_dialogue_registration',
-                     'gambler_schedule_activation'):
+                     'gambler_schedule_activation', 'setup_crime_services', 'world_crime_services',
+                     'world_crime_graphs', 'crime_site_geometry', 'cinematic_scene', 'cinematic_scene_profiles',
+                     'cinematic_scene_cast', 'cinematic_scene_ground', 'world_actor_contracts', 'audit_world_scenes'):
             self.assertIn(name, CONVERTERS)
         for module in ('setup_animal_population', 'build_animal_population_upgrade',
                        'animal_population', 'animal_population_sources', 'animal_native_templates',
@@ -97,6 +101,9 @@ class DesktopSetupTests(unittest.TestCase):
                                                     steps=[{'id': identity} for identity in STAGE_IDS],
                                                     content_validation={'actors': 11, 'start_policy': POLICY}, streaming_validation={'proxies': 1}, shader_validation={'compiled': True, 'installation': 'mod_private_root'}),
                                                 surface_placement={'version':1},
+                                                crime_services={'version':CRIME_VERSION,'status':'bound_native_services'},
+                                                source_appearance_upgrade={'version':APPEARANCE_POLICY_VERSION, 'mode':'source_converter',
+                                                    'equipment_validation':True},
                                                 static_navigation_profiles={'version':1, 'mode':'materialized_static_profiles',
                                                     'profiles':[{'profile':p} for p in STATIC_WORLD_PROFILES]},
                                                 animal_population={'version':2, 'mode':'supported_native_ambient',

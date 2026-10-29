@@ -17,12 +17,13 @@ DONOR = '20382'
 ROLES = ('attachable', 'chairPointIn', 'chairPointOut', '')
 
 
-def inventory(source, kind='Chair'):
+def inventory(source, kind='Chair', *, notify=lambda message: None):
     entities, active = {}, set()
-    for path in source.namelist():
+    paths = [path for path in source.namelist() if path.lower() == 'objects_mission0.xml'
+             or (path.lower().startswith('layers/') and path.lower().endswith('.xml'))]
+    for number, path in enumerate(paths):
+        notify(f'Scanning source {kind} objects ({number + 1}/{len(paths)}): {path}')
         main = path.lower() == 'objects_mission0.xml'
-        if not main and not (path.lower().startswith('layers/') and path.lower().endswith('.xml')):
-            continue
         for node in ET.fromstring(read(source, path)).iter('Entity'):
             key = node.get('EntityId')
             entities.setdefault(key, node)

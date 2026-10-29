@@ -45,8 +45,9 @@ def source_contract(program):
         raise ValueError('Source sleep preference contract changed')
 
 
-def catalog(archive, tables):
-    entities, beds, _ = inventory(archive, 'Bed')
+def catalog(archive, tables, *, notify=lambda message: None):
+    entities, beds, _ = inventory(archive, 'Bed', notify=notify)
+    notify('Checking source bed ownership and home boundaries')
     incoming = {}
     for e in entities.values():
         for link in e.findall('EntityLinks/Link'):

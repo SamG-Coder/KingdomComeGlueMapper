@@ -17,7 +17,7 @@ from .validation import validate
 
 CONTRACT_REVIEW = {'native_rules_unavailable', 'native_layer_difference',
                    'shared_armor_archetype', 'cross_outfit_masks', 'native_region_selection'}
-VALIDATION_CONTRACT = 4
+VALIDATION_CONTRACT = 7
 
 
 def contract_passed(result):

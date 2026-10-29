@@ -18,6 +18,7 @@ import re
 import struct
 import xml.etree.ElementTree as ET
 import zipfile
+import numpy as np
 
 from campaign_sources import retail_sources
 from clothing_regions import read_chunks
@@ -90,11 +91,17 @@ def bone_table(chunks):
     return result
 
 
-def inspect_mesh(blob):
+def inspect_mesh(blob, *, diagnostics=True):
+    """Validate geometry; conversion can skip report-only hashes and summaries.
+
+    The compact path returns NumPy buffers. Both paths check the same stream
+    sizes, finite positions, render indices, subsets and active bone indices.
+    """
     chunks = read_chunks(blob); by_id = {c.id:c for c in chunks}
-    report = dict(chunks=[dict(kind=hex(c.kind), version=hex(c.version), id=c.id,
-                               bytes=len(c.data), sha256=hashlib.sha256(c.data).hexdigest()) for c in chunks],
-                  bones=bone_table(chunks))
+    report = dict(bones=bone_table(chunks))
+    if diagnostics:
+        report['chunks'] = [dict(kind=hex(c.kind), version=hex(c.version), id=c.id,
+                                bytes=len(c.data), sha256=hashlib.sha256(c.data).hexdigest()) for c in chunks]
     meshes = [c for c in chunks if c.kind == 0x1000]
     if len(meshes) != 1 or meshes[0].version not in (0x800, 0x801) or len(meshes[0].data) != 264:
         raise ValueError('Expected one standard mesh')
@@ -113,13 +120,13 @@ def inspect_mesh(blob):
         streams[kind] = (c, count, width)
     report['streams'] = {str(k):dict(count=n, width=w) for k, (_,n,w) in streams.items()}
     if streams[0][2] != 12: raise ValueError('Unsupported vertex positions')
-    positions = list(struct.iter_unpack('<3f', streams[0][0].data[24:]))
-    if not all(math.isfinite(x) for p in positions for x in p): raise ValueError('Nonfinite position')
-    report['bounds'] = [[min(p[k] for p in positions), max(p[k] for p in positions)] for k in range(3)]
+    positions = np.frombuffer(streams[0][0].data, dtype='<f4', offset=24).reshape(-1, 3)
+    if not np.isfinite(positions).all(): raise ValueError('Nonfinite position')
+    report['bounds'] = np.stack((positions.min(axis=0), positions.max(axis=0)), axis=1).tolist()
     inds, count, width = streams[5]
     if width not in (2,4) or count % 3: raise ValueError('Unsupported indices')
-    faces = list(struct.iter_unpack('<3'+('H' if width==2 else 'I'), inds.data[24:]))
-    if any(i>=nv for f in faces for i in f): raise ValueError('Invalid render vertex index')
+    faces = np.frombuffer(inds.data, dtype='<u2' if width == 2 else '<u4', offset=24).reshape(-1, 3)
+    if np.any(faces >= nv): raise ValueError('Invalid render vertex index')
     subset_chunk = by_id[sid]
     subsets = subset_chunk.data
     if (subset_chunk.kind != 0x1017 or subset_chunk.version != 0x800 or
@@ -128,25 +135,31 @@ def inspect_mesh(blob):
     report['subset_records'] = [dict(zip(('first_index','num_indices','first_vertex','num_vertices','material_id'),
                                             struct.unpack_from('<5I',subsets,16+i*36))) for i in range(ns)]
     if 3 in streams and streams[3][2] == 4:
-        colors = list(struct.iter_unpack('<4B',streams[3][0].data[24:]))
-        report['vertex_color_channels'] = [dict(Counter(str(c[k]) for c in colors)) for k in range(4)]
+        colors = np.frombuffer(streams[3][0].data, dtype='u1', offset=24).reshape(-1, 4)
+        report['vertex_color_channels'] = []
+        for channel in colors.T:
+            counts = np.bincount(channel, minlength=256)
+            report['vertex_color_channels'].append({str(i): int(counts[i]) for i in np.flatnonzero(counts)})
     if 9 in streams and streams[9][2] == 12:
         data = streams[9][0].data
-        influence = Counter(); extra = Counter(); weight_sums = [0]*nv; extra_vertices = 0
-        for record,o in enumerate(range(24,len(data),12)):
-            target = influence if record < nv else extra
-            weights = data[o+8:o+12]
-            weight_sums[record % nv] += sum(weights)
-            if record >= nv and any(weights): extra_vertices += 1
-            for i,w in zip(struct.unpack_from('<4H',data,o),weights):
-                if w:
-                    if i>=len(report['bones']): raise ValueError('Bone index outside table')
-                    target[report['bones'][i]['name']] += w
-        report['primary_weight_totals'] = dict(influence)
-        report['extra_weight_totals'] = dict(extra)
-        report['extra_influenced_vertices'] = extra_vertices
-        report['weight_sum_histogram'] = dict(Counter(weight_sums))
+        records = np.frombuffer(data, dtype=np.dtype([('ids', '<u2', 4), ('weights', 'u1', 4)]), offset=24)
+        active = records['weights'] != 0
+        if np.any(records['ids'][active] >= len(report['bones'])):
+            raise ValueError('Bone index outside table')
+        report['extra_influenced_vertices'] = int(active[nv:].any(axis=1).sum())
+        if diagnostics:
+            influence = Counter(); extra = Counter()
+            for record,o in enumerate(range(24,len(data),12)):
+                target = influence if record < nv else extra
+                for i,w in zip(struct.unpack_from('<4H',data,o),data[o+8:o+12]):
+                    if w: target[report['bones'][i]['name']] += w
+            report['primary_weight_totals'] = dict(influence)
+            report['extra_weight_totals'] = dict(extra)
+            sums = records['weights'].sum(axis=1).reshape(-1, nv).sum(axis=0)
+            report['weight_sum_histogram'] = dict(Counter(sums.tolist()))
         report['has_extra_weights'] = bool(flags & 4)
+    if diagnostics:
+        return report, list(map(tuple, positions.tolist())), list(map(tuple, faces.tolist()))
     return report, positions, faces
 
 

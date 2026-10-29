@@ -3,12 +3,27 @@ from itertools import combinations, product
 import math
 
 import numpy as np
-from clothing_coverage import normals, alpha_intersections
+from clothing_coverage import normals, alpha_intersections, exterior_coverage
 from .geometry import Surface
 
 
 def finding(code, message, components=(), severity='review', **evidence):
     return dict(code=code, severity=severity, message=message, components=list(components), **evidence)
+
+
+def material_alpha(catalog, materials):
+    surfaces = []
+    for mat in materials:
+        if mat.get('shader', '').lower() == 'nodraw':
+            surfaces.append((0, [np.zeros((1, 1))]))
+            continue
+        if mat.get('opacity', 1) != 1:
+            raise ValueError('Translucent material cannot prove opaque skin coverage')
+        if not mat['texture']:
+            raise ValueError('No alpha texture; geometry coverage is unverified')
+        pixels, _ = catalog.assets.pixels(mat['texture'])
+        surfaces.append((mat['threshold'], [pixels[:, :, 3]]))
+    return surfaces
 
 
 def active_masks(catalog, selected):
@@ -60,6 +75,12 @@ def rendered_vertices(mesh, hidden):
 def validate(catalog, selected, geometry=False, lod=0, inspect_assets=True):
     selected = list(dict.fromkeys(selected))
     findings, meshes, slots, roles, families = [], [], {}, {}, set()
+    for check in getattr(catalog, 'inventory_checks', []):
+        preset = catalog.presets.get(check['namespace']+'_root')
+        if preset and set(preset['parts']) == set(selected) and check['status'] == 'error':
+            findings.append(finding('equipped_outfit_unreachable',
+                'The NPC equipment references do not resolve to a valid outfit.', selected, 'error',
+                person=check['person'], equipment_issues=check['issues']))
     if not catalog.native_roles or not catalog.layer_order:
         findings.append(finding('native_rules_unavailable','Select a KCD2 installation to validate native clothing roles.',selected))
     genders = {catalog.parts[i]['gender'] for i in selected}
@@ -172,15 +193,7 @@ def validate(catalog, selected, geometry=False, lod=0, inspect_assets=True):
                     surface=catalog.coverage_surface(model,element['MaterialResolved'],mask)
                     covers.append((identity,element,(surface,model,element['MaterialResolved'],mask)))
                     continue
-                surfaces=[]
-                for mat in materials:
-                    if mat.get('shader','').lower()=='nodraw':
-                        surfaces.append((0,[np.zeros((1,1))]));continue
-                    if mat.get('opacity',1) != 1:
-                        raise ValueError('Translucent material cannot prove opaque skin coverage')
-                    if not mat['texture']: raise ValueError('No alpha texture; geometry coverage is unverified')
-                    pixels,_ = catalog.assets.pixels(mat['texture'])
-                    surfaces.append((mat['threshold'],[pixels[:,:,3]]))
+                surfaces = material_alpha(catalog, materials)
                 visible = ~hidden[mesh.faces].any(axis=1)
                 accept = alpha_intersections(mesh,surfaces,visible)
                 covers.append((identity,element,Surface(mesh.vertices[mesh.faces[visible]],accept)))
@@ -192,6 +205,63 @@ def validate(catalog, selected, geometry=False, lod=0, inspect_assets=True):
                 source,_=loaded_model(element)
                 return catalog.coverage_hits(source,cover,material,mask,inward,outward)
             return surface.covers(mesh.vertices,normals(mesh),inward,outward)
+        # A composed outfit can contain both the hidden inner surface and its
+        # outer cover. Sampling only Body misses holes in those garments. Use
+        # removed face centroids, not shared vertices touching a surviving face.
+        for identity, element, mesh, hidden, materials in meshes:
+            kind = catalog.parts[identity]['kind']
+            if kind == 'Head' and hidden.any():
+                def outward(points, directions):
+                    covered = np.zeros(len(points), bool)
+                    for _, _, surface in covers:
+                        surface = surface[0] if isinstance(surface, tuple) else surface
+                        covered |= surface.covers(points, directions, inward=0, outward=.12)
+                    return covered
+                supported = exterior_coverage(mesh.vertices, normals(mesh), outward, hidden)
+                unsupported = hidden & ~supported
+                if unsupported.any():
+                    findings.append(finding('hidden_head_without_exterior_cover',
+                        'Head/neck hiding vertices lack opaque outward coverage around their surface normal.',
+                        [identity], vertices=int(unsupported.sum()),
+                        sample_vertices=np.flatnonzero(unsupported)[:32].tolist(),
+                        model=element.get('ModelResolved'), inward_metres=0, outward_metres=.12))
+            if kind == 'Clothing' and not element_replaced(catalog, selected, catalog.parts[identity], element):
+                removed = np.flatnonzero(hidden[mesh.faces].any(axis=1))
+                if len(removed):
+                    try:
+                        selected_faces = np.zeros(len(mesh.faces), bool)
+                        selected_faces[removed] = True
+                        accept = alpha_intersections(mesh, material_alpha(catalog, materials), selected_faces)
+                        barycentric = np.full(len(removed), 1/3)
+                        removed = removed[accept(np.arange(len(removed)), barycentric, barycentric)]
+                    except (ValueError, OSError, KeyError) as exc:
+                        findings.append(finding('opacity_unverified', str(exc), [identity], 'error'))
+                        continue
+                    triangles = mesh.vertices[mesh.faces[removed]]
+                    directions = np.cross(triangles[:,1]-triangles[:,0], triangles[:,2]-triangles[:,0])
+                    lengths = np.linalg.norm(directions,axis=1)
+                    valid = lengths > 1e-12
+                    removed, triangles, directions = removed[valid], triangles[valid], directions[valid]
+                    directions /= lengths[valid,None]
+                    covered = np.zeros(len(removed),bool)
+                    for _, _, surface in covers:
+                        surface = surface[0] if isinstance(surface,tuple) else surface
+                        covered |= surface.covers(triangles.mean(axis=1),directions,inward=.02,outward=.12)
+                    if (~covered).any():
+                        findings.append(finding('hidden_cloth_without_cover',
+                            'Culled garment triangles have no surviving opaque cover along their centroid normal.',
+                            [identity],triangles=int((~covered).sum()),sample_triangles=removed[~covered][:32].tolist(),
+                            model=element.get('ModelResolved'),inward_metres=.02,outward_metres=.12))
+            if kind in ('Hair','Beard'):
+                visible = rendered_vertices(mesh,hidden)
+                for other, cover_element, surface in covers:
+                    if cover_element.get('EquipmentPart') not in ('head','face','beard','neck'):
+                        continue
+                    intersects = hits(mesh,element,surface,inward=.025,outward=.06) & visible
+                    if intersects.any():
+                        findings.append(finding('unmasked_hair_under_headwear',
+                            'Visible hair or beard intersects the headwear coverage band; inspect native masking.',
+                            [identity,other],vertices=int(intersects.sum()),sample_vertices=np.flatnonzero(intersects)[:32].tolist()))
         for identity,element,mesh,hidden,_ in meshes:
             if catalog.parts[identity]['kind'] != 'Body': continue
             region = element.get('EquipmentPart'); covered = np.zeros(mesh.n,bool)

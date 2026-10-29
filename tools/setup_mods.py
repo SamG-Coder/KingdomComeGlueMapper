@@ -169,6 +169,7 @@ def _worker(path):
     path=Path(path).resolve();job=path.parent;c=json.loads(path.read_text());events=legacy.EventLog(job/'events.jsonl')
     import setup_progress
     previous_sink=setup_progress.sink;setup_progress.sink=events.progress
+    previous_work_sink=setup_progress.work_sink;setup_progress.work_sink=events.work_progress
     cancel=lambda:(job/'cancel.requested').exists()
     try:
         resumed=bool(c.get('resume_from'))
@@ -176,7 +177,8 @@ def _worker(path):
             from setup_resume import load_job, preflight as resume_preflight, map_receipt
             c=load_job(c['resume_from']);root=Path(c['resume_from'])
             events.emit('stage',index=0,total=1,label='Verify saved work')
-            resume_preflight(c)
+            check=resume_preflight(c)
+            for message in (check or {}).get('messages',[]):events.emit('log',message=message)
             saved=map_receipt(root,hashes=False) if 'map' in c['mods'] and c['action']!='install' else None
         else:
             c=checked_config(c);root=job;saved=None
@@ -195,6 +197,7 @@ def _worker(path):
             else:
                 code=legacy.worker(cp)
                 setup_progress.sink=events.progress
+                setup_progress.work_sink=events.work_progress
                 if code==2:raise legacy.Cancelled('KCD1 Map cancelled. Build output retained.')
                 if code:
                     detail = 'See map-job/setup.log.'
@@ -261,4 +264,5 @@ def _worker(path):
     except BaseException as e:events.emit('error',message=str(e),traceback=traceback.format_exc());return 1
     finally:
         setup_progress.sink=previous_sink
+        setup_progress.work_sink=previous_work_sink
         events.stream.close();events.text.close()

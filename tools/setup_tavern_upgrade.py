@@ -114,6 +114,8 @@ def upgrade(package,source,target):
     work.mkdir(exist_ok=True)
     model_path=work/'quest-ir.json'
     if not present:
-        model,_=import_quest(Path(source),QUEST)
+        from campaign_sources import RetailSourceReader
+        with RetailSourceReader(source) as reader:
+            model,_=import_quest(Path(source),QUEST,source_reader=reader)
         model_path.write_text(json.dumps(model),encoding='utf-8')
     return build(source,target,package,work,model_path,'ska_blanka','gm_tavern',ENTRY,LEVEL,PROJECT)

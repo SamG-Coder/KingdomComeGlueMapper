@@ -3,8 +3,10 @@
 Keeps existing actors and packages. Does not install or claim dialogue conversion.
 """
 import argparse
+import copy
 import hashlib
 import json
+import time
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import zipfile
@@ -24,18 +26,44 @@ from upgrade_map import read, xml
 ACTOR_PAK_LIMIT = 900 * 1024**2
 
 
+def conversion_souls(requested, registered):
+    """Count actual conversions, excluding duplicates, existing and filtered souls."""
+    return {r['soul_id'] for r in requested.values() if r.get('soul_id')
+            and not r.get('soul_class_id') and not r.get('soul_faction_id')} - set(registered)
+
+
+def conversion_person(a, name, sid):
+    person = getattr(a, 'resolved_people', {}).get(name)
+    if person is None:
+        return resolve_person(a.source, name, a.source_level)
+    if (person['name'] != name or person['soul']['soul_id'] != sid
+            or person['source_level'] != a.source_level
+            or person['instance'].findtext('SharedSoulGuid') != sid or person.get('ai') is None):
+        raise ValueError('Discovered source person does not match conversion: ' + name)
+    return copy.deepcopy(person)
+
+
 def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
     """Pack and validate streamed assets, including families crossing ZIP32 shards."""
     from texture_streaming import checked_entries, generated_entries
+    from setup_progress import work_progress
     libs, paks, pak = {}, [], None
     used, count = 22, 0
+    paths = sorted(p for p in appearance.rglob('*') if p.is_file())
+    from character_asset_selection import runtime_paths
+    paths = runtime_paths(appearance, paths, namespace)
+    asset_count = sum(p.relative_to(appearance).as_posix().startswith('objects/') for p in paths)
+    work_progress('Pack character assets', 0, asset_count)
     def entries():
-        for p in sorted(appearance.rglob('*')):
-            if not p.is_file(): continue
+        completed, written = 0, 0
+        for p in paths:
             name = p.relative_to(appearance).as_posix()
             if name.startswith('Libs/'): libs[name] = p.read_bytes()
             if not name.startswith('objects/'): continue
             yield name, p.read_bytes()
+            completed += 1; written += p.stat().st_size
+            work_progress('Pack character assets', completed, asset_count, f'{written / 1024**2:.1f} MiB processed')
+        work_progress('Validate texture families', 0, 0, 'Checking packed mip chains')
     try:
         # Appearance conversion emits complete RGBA16F macro textures and
         # byte-channel masks. They need the same native streaming layout as
@@ -59,10 +87,17 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
             pak = zipfile.ZipFile(paks[0], 'x', zipfile.ZIP_STORED, allowZip64=False)
     finally:
         if pak is not None: pak.close()
+    work_progress('Pack character assets', asset_count, asset_count, 'Assets packed and validated')
     return paks, libs
 
 
 def build(a):
+    from character_build_cache import appearance_batch
+    with appearance_batch():
+        return _build(a)
+
+
+def _build(a):
     if a.output.exists(): raise FileExistsError('Choose a fresh stage')
     a.output.mkdir(parents=True)
     package = a.output / 'package'
@@ -129,6 +164,14 @@ def build(a):
                 ET.fromstring(read(z,'whdata_0')), documents, a.source_profile)
         for actor in profile_actors:
             requested['profile_actor_' + actor['entity_guid']] = dict(soul_id=actor['soul_id'])
+    total, completed = len(conversion_souls(requested, registered)), 0
+    def progress(message):
+        callback = getattr(a, 'progress', None)
+        if callback is not None:
+            callback('Convert source character appearances', completed, total, message)
+        else:
+            getattr(a, 'notify', print)(message)
+    progress(f'{total} new characters to convert')
     for aid, row in requested.items():
         if getattr(a, 'cancelled', lambda: False)():
             raise InterruptedError('Cancelled before actor conversion')
@@ -140,19 +183,25 @@ def build(a):
         if sid in registered:
             existing.append(dict(soul_id=sid, person=source_souls.get(sid))); continue
         if sid not in source_souls: raise ValueError('Missing source soul: ' + sid)
-        person = resolve_person(a.source, source_souls[sid], a.source_level)
+        started = time.perf_counter()
+        progress('Resolving source character: ' + source_souls[sid])
+        person = conversion_person(a, source_souls[sid], sid)
         if aid.startswith('profile_actor_') and person['actor'].get('EntityGuid', '').lower() != aid[14:].lower():
             raise ValueError('Profile actor resolved to a different source placement: ' + person['name'])
         namespace = 'gm_person_' + sid.replace('-', '')
-        getattr(a, 'notify', print)('Converting source appearance: ' + person['name'])
+        progress('Converting source appearance: ' + person['name'])
         appearance = a.output / 'people' / namespace
         try:
-            character = build_appearance(a.source, a.target, person, namespace, appearance)
+            character = build_appearance(a.source, a.target, person, namespace, appearance,
+                notify=lambda message: progress(person['name'] + ': ' + message))
         except ValueError as error:
             pending.append(dict(asset=aid, person=person['name'], reason=str(error)))
             print(json.dumps(pending[-1]), flush=True)
+            completed += 1
+            progress('Appearance conversion failed: ' + person['name'] + ': ' + str(error))
             continue
         from character_weapon_inventory import stage as stage_weapons
+        progress(person['name'] + ': Converting carried equipment')
         weapon_result = stage_weapons(a.source, a.target, a.mod, person, character, namespace,
                                       a.output / 'equipment' / namespace)
         character['source_weapons'] = weapon_result['items']
@@ -168,6 +217,7 @@ def build(a):
             native_soul_name='ttac_procek', native_role_name='PREVOZNIK_TROSECKO', resources=resources)
         # Keep each actor's geometry in its own ZIP32 archive. The shared world
         # archive is already large and must not grow past the engine's limit.
+        progress(person['name'] + ': Packing and validating character assets')
         resources.update(write_actor_paks(appearance, package / 'Data', namespace)[1])
         strings = appearance / 'Localization/English/text_ui_items.xml'
         if strings.exists(): item_tables.append(strings.read_bytes())
@@ -178,10 +228,16 @@ def build(a):
         register_person(add, wh, person, placement)
         people.append(person); registered.add(sid)
         converted.append(dict(person=person['name'], soul_id=sid, position=(placement or person['actor']).get('Pos'),
-                              source_level=person['source_level'], namespace=namespace))
+                              source_level=person['source_level'], namespace=namespace,
+                              elapsed_seconds=time.perf_counter()-started,
+                              appearance_timings_seconds=character.get('timings_seconds', {})))
+        completed += 1
+        progress(f'{person["name"]}: completed ({completed}/{total}) in {time.perf_counter()-started:.1f} s')
     from bake_pool import release
     from static_assets import release_library_index
     release(); release_library_index()  # the people are converted; free the bake workers and archives
+    if getattr(a, 'progress', None) is not None:
+        a.progress('Bind source characters to the world', 0, 0, 'Writing schedules, world placements and shared archives')
     files['objects_mission0.xml'], files['whdata_0'] = xml(mission), xml(wh)
     files, world = register_person_world(files, people, a.source, a.target)
     markers = dict(converted=[])

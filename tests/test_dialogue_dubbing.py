@@ -52,6 +52,22 @@ class DubbingTests(unittest.TestCase):
             again,_=dubbing_index(root,media,blob)
             self.assertEqual(blob,again)
 
+    def test_changed_native_archive_replaces_the_cached_baseline(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'Localization').mkdir()
+            samples=[f'tmck_native_line_{i}_aBcD' for i in range(16)]
+            def write(duration):
+                table=ET.Element('database',name='barbora')
+                rows=ET.SubElement(table,'DialogueDubbingData',version='1')
+                for stem in samples:ET.SubElement(rows,'DialogueDubbing',FileHash=str(zlib.crc32(stem.encode())),Duration=duration)
+                with zipfile.ZipFile(root/'Localization/english-part0.pak','w') as archive:
+                    archive.writestr(DEPOT,ET.tostring(table))
+                    for stem in samples:archive.writestr('dialog/native/'+stem+'.ogg',ogg())
+            write('2.0');first,_=dubbing_index(root,{})
+            write('2.500');second,_=dubbing_index(root,{})
+            self.assertIn(b'Duration="2.0"',first);self.assertIn(b'Duration="2.500"',second)
+            with self.assertRaisesRegex(ValueError,'native baseline'):dubbing_index(root,{},first)
+
     def test_imported_soul_gets_own_character_voice(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'Data').mkdir()

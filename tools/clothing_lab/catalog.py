@@ -2,6 +2,7 @@
 import base64
 from functools import lru_cache
 import hashlib
+import json
 import posixpath
 from pathlib import Path
 import struct
@@ -54,6 +55,7 @@ class Catalog:
         self.assets = Assets(package, overlay)
         self.parts, self.presets, self.groups, self.souls, self.errors = {}, {}, {}, {}, []
         self.private_groups = set()
+        self.nonvisual_parts = set()
         self.native_roles, self.rule_evidence, self.layer_order = {}, [], {}
         self.equipment = None
         if target:
@@ -89,6 +91,22 @@ class Catalog:
                     raise ValueError('Native body-layer order table is empty')
                 self.rule_evidence.append(dict(file=str(path), member=name, sha256=hashlib.sha256(data).hexdigest()))
         names = list(self.assets.index)
+        imported_people = {}
+        for name in names:
+            if not name.startswith('libs/gluemapper/personimport/') or not name.endswith('.json'):
+                continue
+            try:
+                receipt = json.loads(self.assets.read(name))
+                namespace, person = receipt.get('namespace'), receipt.get('person')
+                if not isinstance(namespace,str) or not isinstance(person,str) or not person:
+                    raise ValueError('Missing imported appearance identity')
+                if name != 'libs/gluemapper/personimport/'+namespace.lower()+'.json':
+                    raise ValueError('Imported appearance receipt name differs')
+                if namespace in imported_people and imported_people[namespace] != person:
+                    raise ValueError('Conflicting imported appearance identity')
+                imported_people[namespace] = person
+            except (ValueError, OSError) as exc:
+                self.errors.append(dict(asset=name,error=str(exc)))
         for name in names:
             if not name.startswith('libs/tables/') or not name.endswith('.xml'): continue
             try:
@@ -101,7 +119,9 @@ class Catalog:
                     self._groups(doc)
                 elif '/charactercomponent__' in name:
                     for part in resolved_nodes(ET.fromstring(self.assets.read(name))):
-                        if not part['elements']: continue
+                        if not part['elements']:
+                            self.nonvisual_parts.add(part['id'])
+                            continue
                         if part['id'] in self.parts: raise ValueError('Duplicate component: '+part['id'])
                         part['table'] = name
                         part['label'] = part['id']
@@ -109,7 +129,8 @@ class Catalog:
             except (ValueError, ET.ParseError) as exc: self.errors.append(dict(asset=name, error=str(exc)))
         for part in self.parts.values():
             identity = part['family'].removesuffix('_root').removeprefix('gm_person_')
-            actor = self.souls.get(identity, {}).get('soul_name', part['family'].removesuffix('_root'))
+            actor = imported_people.get(part['family'].removesuffix('_root'),
+                self.souls.get(identity, {}).get('soul_name', part['family'].removesuffix('_root')))
             part['actor'] = actor
             part['label'] = actor+' · '+part['id'].removeprefix(part['family'].removesuffix('_root')+'_')
             self.presets.setdefault(part['family'], dict(id=part['family'], label=actor, gender=part['gender'], parts=[]))['parts'].append(part['id'])
@@ -117,6 +138,23 @@ class Catalog:
         # Underwear is a fallback, not an additional equipped copy of its source dress.
         for preset in self.presets.values():
             preset['parts'] = [p for p in preset['parts'] if not (self.parts[p]['kind']=='Clothing' and not self.parts[p]['attributes'].get('ArmorType'))]
+        from clothing_inventory import audit_assets
+        self.inventory_checks = audit_assets(self.assets, imported_people)
+        for check in self.inventory_checks:
+            preset = self.presets.get(check['namespace']+'_root')
+            if preset is not None:
+                preset['equipment_status'] = check['status']
+                if check['status'] == 'checked':
+                    missing = set(check['components'])-set(self.parts)-self.nonvisual_parts
+                    if missing:
+                        self.errors.append(dict(asset=check['namespace'],
+                            error='Equipped clothing has no renderable component: '+', '.join(sorted(missing))))
+                    else:
+                        preset['parts'] = [p for p in preset['parts'] if self.parts[p]['kind'] != 'Clothing'] + [
+                            p for p in check['components'] if p in self.parts]
+            for issue in check['issues']:
+                self.errors.append(dict(asset=check['namespace'], error=issue['message'],
+                                        code=issue['code'], person=check['person']))
 
     def _groups(self, doc):
         for g in doc.iter('HidingGroup'):
@@ -129,7 +167,7 @@ class Catalog:
         return dict(package=str(self.assets.root), signature=self.assets.signature(), parts=list(self.parts.values()),
                     presets=list(self.presets.values()), groups=self.groups, errors=self.errors,
                     native_rules=bool(self.native_roles and self.layer_order), layer_order=self.layer_order,
-                    rule_evidence=self.rule_evidence)
+                    rule_evidence=self.rule_evidence, inventory_checks=self.inventory_checks)
 
     @lru_cache(maxsize=1024)
     def mesh(self, name):

@@ -51,13 +51,15 @@ def validate_dependency_scopes(graphs, wrapper_path, native_definitions):
         scope = (children, *parents)
         for node in modules[path].findall('Nodes/*'):
             if node.tag in builtin: continue
-            context = scope
             namespace = node.get('Namespace', '')
+            contexts = scope
             for part in namespace.split('.') if namespace else ():
-                target = next((s[part] for s in context if part in s), None)
-                if target is None: raise ValueError(f'Unresolved namespace {namespace} in {path}')
-                context = (local(target),)
-            if not any(node.tag in s for s in context):
+                # Native modules can have a local "utils" and also refer to
+                # the project-qualified utils.crime.punishment. Resolve the
+                # complete namespace, not only its first matching component.
+                contexts = tuple(local(s[part]) for s in contexts if part in s)
+                if not contexts: raise ValueError(f'Unresolved namespace {namespace} in {path}')
+            if not any(node.tag in s for s in contexts):
                 raise ValueError(f'Unresolved node type {namespace}.{node.tag} in {path}')
         for child in children.values(): walk(child, scope, (*stack, path))
 
@@ -87,6 +89,20 @@ def package_dependencies(graphs, entry_path, wrapper_path, scripts):
     libraries = {}
     library_symbols = {}
 
+    def library_shell(namespace):
+        if namespace not in libraries:
+            path = 'quests/final/barbora/' + namespace.replace('.', '/') + '.xml'
+            if path not in names:
+                raise ValueError('Missing native namespace: ' + namespace)
+            shell = ET.fromstring(read(scripts, names[path]))
+            target = shell.find('Skald')[0]
+            for section in ('Definitions', 'Nodes'):
+                node = target.find(section)
+                if node is not None: target.remove(node)
+                ET.SubElement(target, section)
+            libraries[namespace] = shell
+        return libraries[namespace].find('Skald')[0]
+
     def symbols(namespace):
         if namespace not in library_symbols:
             path = 'quests/final/barbora/' + namespace.replace('.', '/') + '.xml'
@@ -113,15 +129,7 @@ def package_dependencies(graphs, entry_path, wrapper_path, scripts):
             raise ValueError('Missing native namespace: ' + namespace)
         source = ET.fromstring(read(scripts, names[path]))
         host = source.find('Skald')[0]
-        if namespace not in libraries:
-            shell = copy.deepcopy(source)
-            target = shell.find('Skald')[0]
-            for section in ('Definitions', 'Nodes'):
-                node = target.find(section)
-                if node is not None: target.remove(node)
-                ET.SubElement(target, section)
-            libraries[namespace] = shell
-        target = libraries[namespace].find('Skald')[0]
+        target = library_shell(namespace)
         child = symbols(namespace).get(symbol)
         if child is None:
             raise ValueError(f'Cannot resolve native namespace symbol {namespace}.{symbol}')
@@ -150,15 +158,24 @@ def package_dependencies(graphs, entry_path, wrapper_path, scripts):
             namespace = node.get('Namespace', '')
             if namespace.startswith('utils.'):
                 utility(namespace, node.tag)
-            elif namespace and inherited_namespace and ('quests/final/barbora/utils/' + namespace.replace('.', '/') + '.xml') in names:
-                # Utility modules also refer to sibling libraries by a short
-                # namespace such as "rpg", relative to their parent utils.
-                utility('utils.' + namespace, node.tag)
+            elif namespace and inherited_namespace and namespace.split('.')[0] not in local:
+                # Resolve relative namespaces from the enclosing library out
+                # to utils, preserving lexical precedence at arbitrary depth.
+                parts = inherited_namespace.split('.')
+                for size in range(len(parts), 0, -1):
+                    candidate = '.'.join(parts[:size]) + '.' + namespace
+                    if ('quests/final/barbora/' + candidate.replace('.', '/') + '.xml') in names:
+                        utility(candidate, node.tag)
+                        break
             elif not namespace and inherited_namespace and node.tag not in local:
                 # An empty Namespace means lexical lookup, not no dependency.
-                # E.g. utils.money.getmoney calls its sibling converters.
-                if node.tag in symbols(inherited_namespace):
-                    utility(inherited_namespace, node.tag)
+                # Nested libraries can also call helpers in their parents.
+                parts = inherited_namespace.split('.')
+                for size in range(len(parts), 1, -1):
+                    candidate = '.'.join(parts[:size])
+                    if node.tag in symbols(candidate):
+                        utility(candidate, node.tag)
+                        break
         for definition in root.findall('.//Definitions/Definition'):
             child = posixpath.normpath(posixpath.join(posixpath.dirname(path), definition.get('File')))
             definition.set('File', copy_graph(child, inherited_namespace))
@@ -176,17 +193,33 @@ def package_dependencies(graphs, entry_path, wrapper_path, scripts):
             path = matches[0]
         definition.set('File', 'native/' + copy_graph(path))
     if libraries:
+        # A nested namespace needs each intervening library instance. Copy its
+        # native declaration, but only include the requested branch; copying the
+        # whole crime library would activate unrelated regional controllers.
+        for namespace in sorted(tuple(libraries), key=lambda n: -n.count('.')):
+            child = namespace
+            while child.count('.') > 1:
+                parent, symbol = child.rsplit('.', 1)
+                target = library_shell(parent)
+                filename = 'utils_' + child[len('utils.'):] + '.xml'
+                if not any(d.get('File') == filename for d in target.findall('Definitions/Definition')):
+                    ET.SubElement(target.find('Definitions'), 'Definition', File=filename)
+                    source = ET.fromstring(read(scripts, names['quests/final/barbora/' + parent.replace('.', '/') + '.xml']))
+                    instances = [n for n in source.findall('.//Skald/*/Nodes/*') if n.tag == symbol]
+                    if len(instances) != 1:
+                        raise ValueError('Missing or ambiguous native library instance: ' + child)
+                    target.find('Nodes').append(copy.deepcopy(instances[0]))
+                child = parent
         root = ET.Element('Database', Name='brambora')
         module = ET.SubElement(ET.SubElement(root, 'Skald'), 'Module', Name='utils', VoiceNamespace='true')
         definitions = ET.SubElement(module, 'Definitions')
         nodes = ET.SubElement(module, 'Nodes')
         for namespace, library in sorted(libraries.items()):
-            if namespace.count('.') != 1:
-                raise ValueError('Unsupported native namespace nesting: ' + namespace)
-            name = namespace.split('.')[1]
+            name = namespace[len('utils.'):]
             filename = 'utils_' + name + '.xml'
-            ET.SubElement(definitions, 'Definition', File=filename)
-            ET.SubElement(nodes, name, Name=name)
+            if namespace.count('.') == 1:
+                ET.SubElement(definitions, 'Definition', File=filename)
+                ET.SubElement(nodes, name, Name=name)
             graphs[posixpath.dirname(destination) + '/native/' + filename] = xml(library)
         graphs[posixpath.dirname(destination) + '/native/utils.xml'] = xml(root)
         host = wrapper.find('Skald')[0]

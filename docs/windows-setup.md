@@ -1,17 +1,16 @@
 # Windows setup
 
-Download `KingdomComeGlueMapper-Setup-0.3.16-win64.exe` from [GitHub Releases](https://github.com/SamG-Coder/KingdomComeGlueMapper/releases/tag/v0.3.16). This is an experimental prerelease for Windows x64. Python is bundled; Microsoft Edge WebView2 is required for the local interface. See the [release notes](releases/v0.3.16.md) for validation and limits.
+Download `KingdomComeGlueMapper-Setup-0.3.28-win64.exe` from [GitHub Releases](https://github.com/SamG-Coder/KingdomComeGlueMapper/releases/tag/v0.3.28). This is an experimental prerelease for Windows x64. Python is bundled; Microsoft Edge WebView2 is required for the local interface. See the [release notes](releases/v0.3.28.md) for changes, contributor credits, validation and limits.
 
 Choose the executable under **Assets**, not **Source code (zip)**. Download
 `SHA256SUMS.txt` from the same release if you want to compare the executable's
 SHA-256 with PowerShell's `Get-FileHash -Algorithm SHA256`.
 
-This guide also describes **current source behavior**. The published v0.3.16
-tag uses recipe 40; the source reviewed at `a9a40cd` uses recipe 51 while still
-displaying setup version 0.3.16. Newer source features are not automatically in
-that download. See [release, source and runtime status](status.md) before
-choosing an upgrade path. Recipe numbers describe package conversion rules,
-not campaign completion.
+The **v0.3.28** release uses gameplay recipe **61** and appearance policy **2**.
+Its runtime source includes changes through `cae0d3e`; the tag also contains the
+release documentation. Later source changes require a newer build. See
+[release, source and runtime status](status.md) before choosing an upgrade path.
+Recipe numbers describe package conversion rules, not campaign completion.
 
 **KCD1 Map requires the official KCD2 Modding Tools from Steam before building, installing an existing package, or resuming installation.** Setup detects the tools and offers Browse, Recheck, and Install through Steam. It uses your installed tools to compile shaders; Warhorse's tools are not bundled. Fishing alone does not require them.
 
@@ -50,7 +49,7 @@ The setup version and mod package versions are separate. KCD1 Map does not conve
 
 All modes include visible buildings and vegetation. Optional surface baking prepares data for indirect illumination; the separate shader stage compiles or reuses matching verified shaders for fresh KCD1 Map builds, including No Baking. Setup does not clear retail shader caches. The surface bake uses two compiled CPU workers for tiles below one million triangles, persistent OptiX for dense tiles, and 64-brick GPU batches with CPU preparation/encoding overlap. GPU failures fall back to CPU with the reason recorded. Baking remains experimental, including approximations for layered materials and foliage.
 
-### Shared build cache (current source)
+### Shared build cache
 
 Setup keeps reusable outputs under the selected build folder, separate from dated jobs:
 
@@ -63,7 +62,7 @@ D:\BuildKCDMod\<dated-job>\       This build's packages, logs and resume checkpo
 
 Reuse is automatic. Select **Rebuild lighting and shaders for this build** on the Lighting screen to bypass reuse for a new build. This checkbox resets after starting a build and when reopening setup. Buildings and All (Forest) use separate cache entries; changing back can reuse the earlier matching result. No Baking skips surface baking while retaining the other entries. Installing an existing package uses its recorded outputs. Resuming a completed bake does not regenerate it.
 
-Lighting reuse checks the preset, terrain, brush/vegetation placements, effective asset catalog (including meshes, materials and textures), conversion code and bake settings. Shader reuse checks native Engine archives, tool binaries, seed/configuration files and repair code. A changed input or damaged cached output causes a rebuild. Completed lighting and shader entries carry output SHA-256 hashes and are published only after successful completion; cancellation leaves the previous complete entry available.
+Lighting reuse first checks the exact build key, then discovers existing workspace caches against the planned static scene and its actual material dependencies. Unrelated NPC assets therefore need not force a rebake. New cache metadata records scene inputs; legacy entries without those inputs are checked by output hashes and tile layout and explicitly reported as having unrecorded input compatibility. Ambiguous legacy matches are rebuilt. Shader reuse checks native Engine archives, tool binaries, seed/configuration files and repair code. Completed lighting and shader entries carry output SHA-256 hashes and are published only after successful completion; cancellation leaves the previous complete entry available. Existing workspace cache discovery does not require selecting its originating job.
 
 Only baked voxel shards are reused from the lighting cache. Setup applies the lighting configuration to the **new** world archives, retaining that build's quests, NPCs, schedules and other world content. Packages receive independent copies of cached outputs. Cache entries occupy additional disk space; they can be removed when no build is running, at the cost of rebuilding those outputs next time. Dated jobs retain their own resume checkpoints.
 
@@ -83,19 +82,19 @@ The bundled GPU binary currently targets `sm_120` (the tested development GPU). 
 
 A fresh map build reserves **200 GiB** in the build location and **64 GiB** for installation staging. Add the chosen bake allowance and another **10 GiB** for the optional movie. Requirements combine when build and game folders share a drive. Fishing alone needs approximately 1 GiB for build and staging. These are planning allowances, not final installed sizes. Existing build folders and older backups are not automatically removed. Successful map replacement retains no additional full-mod backup.
 
-Post-release source includes parallel tile baking with contributor measurements for a full 1,220-tile Buildings bake and one cold build. See [performance evidence](status.md#performance-evidence) for the measured configuration and scope. Those results do not establish the time for v0.3.16, All (Forest), installation on your machine or later recipes. CPU, storage, memory, shader compilation and selected coverage affect duration.
+Setup v0.3.28 includes parallel tile baking and fresh NPC appearance performance improvements. See [performance evidence](status.md#performance-evidence) for the measured configuration and scope. The historical Buildings benchmark does not establish a full v0.3.28 build time, All (Forest) timing or installation time on your machine. CPU, storage, memory, shader compilation and selected coverage affect duration.
 
 ## Continue a failed setup
 
 1. Keep the original job folder and its output.
 2. Stop any older setup run for that job. Open this updated setup.
-3. Go to **Activity → Resume failed setup…**.
+3. Go to **Activity → Restore / upgrade build…** (called **Resume failed setup…** in older builds).
 4. Select the timestamped folder containing `job.json`, `package`, and `map-job`. Do not select `map-job`, `baking`, or the installed Mods folder.
 5. Setup reads the saved options, verifies completed packages and resumes remaining operations. Watch the new attempt's log.
 
 For a failure in optional baking, a completed map package from the current recipe is reused. A completed movie or selected bake is skipped when its package receipt confirms completion. Compatible completed bake tiles are verified and reused. Missing or damaged tiles are rebuilt. Interrupted scene planning restarts that planning phase.
 
-**Completed packages from supported older recipes can be upgraded through Resume failed setup.** The v0.3.16 tag supports migration from recipes 3-39 to recipe 40; the reviewed source supports recipes 3-50 to recipe 51. These ranges are eligibility checks, not a guarantee that every saved package will pass validation. Select the original job folder containing `job.json`; a completed job is accepted too. Setup verifies the original package and stages the migration before replacing it. Direct installation requires the recipe expected by the setup you are running and does not perform migration. Incomplete world conversion may still need rebuilding. Keep the build workspace for [current-source stale LOD repair](stale-section-repair.md); that repair postdates the v0.3.16 tag.
+**Completed packages from supported older recipes can be upgraded through Restore / upgrade build.** Setup v0.3.28 accepts receipts from recipes 3–61 for checking and migrates supported older packages to recipe 61. These are eligibility checks, not a guarantee that every saved package will pass validation. Select the original job folder containing `job.json`; a completed job is accepted too. Setup verifies the original package and stages the migration before replacing it. It upgrades saved source appearances through the normal converter and accounts for retained work when checking remaining build space. Direct installation requires the recipe expected by the setup you are running and does not perform migration. Incomplete world conversion may still need rebuilding. Keep the build workspace for [stale LOD repair](stale-section-repair.md).
 
 If map conversion failed before a complete package existed, the map phase restarts. Resume does not checkpoint every individual world-converter stage. Partial outputs remain for diagnosis. Modified or incomplete packages are rejected rather than treated as successful.
 
@@ -112,7 +111,7 @@ If the old map contains an embedded fishing test, standalone fishing installatio
 
 ## Install existing packages
 
-Choose **Install existing packages** and select the job's parent `package` folder, which contains `map` and/or `fishing`. The selected packages must match their receipts and the map must have completed the recipe required by that setup: 40 at the v0.3.16 tag, or 51 in the reviewed source. Use **Resume failed setup** first for supported older packages. An older executable cannot install a newer-recipe package. The official Modding Tools are required for map installation even when compilation was already completed. Direct installation does not rerun conversion or change bake settings.
+Choose **Install existing packages** and select the job's parent `package` folder, which contains `map` and/or `fishing`. The selected packages must match their receipts and the map must have completed the recipe required by that setup: 61 in v0.3.28, including its current appearance and content validation. Use **Restore / upgrade build** first for supported older packages. An older executable cannot install a newer-recipe package. The official Modding Tools are required for map installation even when compilation was already completed. Direct installation does not rerun conversion or change bake settings.
 
 ## Logs and reporting problems
 

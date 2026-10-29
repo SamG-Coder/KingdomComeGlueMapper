@@ -33,6 +33,9 @@ def eligible(receipt):
     migrate_step_ids(report)
     report.setdefault('content_validation', {})['start_policy'] = POLICY
     candidate['single_playable_world'] = True
+    from character_person_appearance import APPEARANCE_POLICY_VERSION
+    candidate['source_appearance_upgrade'] = dict(version=APPEARANCE_POLICY_VERSION,
+        mode='source_converter', equipment_validation=True)
     # Eligibility describes work this migration can perform, not proof it has
     # already run. The real receipt is written only after conversion succeeds.
     from setup_gameplay import STATIC_WORLD_PROFILES
@@ -48,6 +51,8 @@ def eligible(receipt):
         profiles=list(STATIC_WORLD_PROFILES), scheduler_validation=True)
     from terrain_object_tree import VERSION as PLACEMENT_VERSION
     candidate['surface_placement'] = dict(version=PLACEMENT_VERSION)
+    from setup_crime_services import VERSION as CRIME_VERSION
+    candidate['crime_services'] = dict(version=CRIME_VERSION,status='bound_native_services')
     require_current(candidate)
 
 
@@ -94,8 +99,7 @@ def finalize(package, *, source=None, target=None, repair_roots=(), notify=lambd
     files, report = repair_female_clothing(package, receipt)
     receipt['files'].update(files); receipt['female_clothing'] = report
     # Recipe 52 already contains the complete world, schedules and training.
-    # These revisions repair collision, static gates and lesson handoff, so
-    # do not rebuild people, lighting or terrain in a completed saved build.
+    # Reuse lighting and terrain; refresh outdated appearances separately.
     if (receipt.get('build_recipe',{}).get('version') in range(52, VERSION + 1)
             and receipt['build_recipe'].get('status') == 'complete'
             and receipt.get('quest_training') and (package/'quest-training.json').exists()):
@@ -146,6 +150,17 @@ def finalize(package, *, source=None, target=None, repair_roots=(), notify=lambd
         from setup_world_encounters import upgrade as upgrade_encounters
         files, report = upgrade_encounters(package, source, target)
         receipt['files'].update(files); receipt['world_encounters'] = report
+        from setup_crime_services import upgrade as upgrade_crime
+        files, report = upgrade_crime(package, source, target, notify=notify)
+        receipt['files'].update(files); receipt['crime_services'] = report
+        from world_speech_audio import upgrade as upgrade_world_speech
+        files, report = upgrade_world_speech(package, target, notify)
+        receipt['files'].update(files); receipt['world_speech_audio'] = report
+        from setup_source_appearances import apply as upgrade_appearances
+        upgrade_appearances(package, receipt, source, target, notify, cancelled)
+        from world_actor_contracts import upgrade as upgrade_actor_contracts
+        files, report = upgrade_actor_contracts(package, target)
+        receipt['files'].update(files); receipt['world_actor_contracts'] = report
         receipt['quest_training'] = validate_training(package)
         receipt['quest_invitation'] = validate_invitation(package)
         receipt['build_recipe']['content_validation'] = validate(package)
@@ -210,7 +225,9 @@ def finalize(package, *, source=None, target=None, repair_roots=(), notify=lambd
                 raise ValueError('KCD1 source folder required to restore quest objective markers')
             from quest_import import import_quest
             from campaign_quest_people import bind_markers
-            model, _ = import_quest(Path(source), QUEST)
+            from campaign_sources import RetailSourceReader
+            with RetailSourceReader(source) as reader:
+                model, _ = import_quest(Path(source), QUEST, source_reader=reader)
             with zipfile.ZipFile(package/'Data/Levels/kcd1_travel/level.pak') as level_archive:
                 wh = ET.fromstring(read(level_archive, 'whdata_0'))
             registered = {s.findtext('SharedSoulGuid') for s in wh.findall('SoulList/Souls/Soul')}
@@ -289,10 +306,6 @@ def finalize(package, *, source=None, target=None, repair_roots=(), notify=lambd
         format_level_changes.update(quest_level)
         receipt['source_quest_inventories'] = quest_report
     rewrite(package, travel, changes, lambda n: n == legacy_world)
-    from world_speech_audio import upgrade as upgrade_world_speech
-    speech_files, speech_report = upgrade_world_speech(package, target, notify)
-    receipt['files'].update(speech_files)
-    receipt['world_speech_audio'] = speech_report
     level = 'Data/Levels/kcd1_travel/level.pak'
     if format_level_changes:
         rewrite(package, level, format_level_changes)
@@ -485,6 +498,19 @@ def finalize(package, *, source=None, target=None, repair_roots=(), notify=lambd
     from setup_world_encounters import upgrade as upgrade_encounters
     encounter_files, encounter_report = upgrade_encounters(package, source, target)
     receipt['files'].update(encounter_files); receipt['world_encounters'] = encounter_report
+    from setup_crime_services import upgrade as upgrade_crime
+    crime_files, crime_report = upgrade_crime(package, source, target, notify=notify)
+    receipt['files'].update(crime_files); receipt['crime_services'] = crime_report
+    # Resolve recordings from the final graph closure, including controllers
+    # added by encounters/crime. The completed-build path must do this too.
+    from world_speech_audio import upgrade as upgrade_world_speech
+    speech_files, speech_report = upgrade_world_speech(package, target, notify)
+    receipt['files'].update(speech_files); receipt['world_speech_audio'] = speech_report
+    from setup_source_appearances import apply as upgrade_appearances
+    upgrade_appearances(package, receipt, source, target, notify, cancelled)
+    from world_actor_contracts import upgrade as upgrade_actor_contracts
+    actor_files, actor_report = upgrade_actor_contracts(package, target)
+    receipt['files'].update(actor_files); receipt['world_actor_contracts'] = actor_report
     receipt['build_recipe']['content_validation'] = validate(package)
     from setup_pak_limits import split_assets, validate as validate_pak_limits
     receipt['files'].update(split_assets(package))

@@ -21,7 +21,7 @@ import uuid
 from setup_campaign import MOD_ID, RECEIPT, build_campaign, validate_games, verify_package
 import setup_progress
 
-APP_VERSION = '0.3.22'
+APP_VERSION = '0.3.28'
 GIB = 1024 ** 3
 BUILD_WORKSPACE_GIB = 200
 INSTALL_STAGING_GIB = 64
@@ -30,7 +30,7 @@ CONVERTERS = ('upgrade_map', 'build_vegetation_probe', 'build_water_probe',
               'build_entity_probe', 'build_landscape_surface_probe', 'repair_tree_materials',
               'world_ledges',
               'region_travel', 'prepare_spatial_hlod', 'build_recipe', 'campaign_start_policy',
-              'setup_package_upgrade', 'setup_tavern_upgrade', 'campaign_merchant_work',
+              'setup_package_upgrade', 'setup_source_appearances', 'setup_tavern_upgrade', 'campaign_merchant_work',
               'setup_merchant_upgrade', 'source_merchant_upgrade', 'character_station_work',
               'campaign_dialogue_requests', 'campaign_script_import', 'item_icons', 'item_icon_atlas',
               'smart_area_registration', 'area_geometry_contract',
@@ -39,6 +39,7 @@ CONVERTERS = ('upgrade_map', 'build_vegetation_probe', 'build_water_probe',
               'build_animal_population_upgrade', 'animal_population',
               'animal_population_sources', 'animal_native_templates', 'setup_profile_population',
               'build_profile_population_upgrade', 'profile_population_upgrade', 'character_market_jobs',
+              'character_build_cache', 'character_asset_selection',
               'character_city_work', 'character_city_benches', 'character_seated_work', 'character_shop_guard_work',
               'character_fence_work', 'character_home_rest', 'character_farmer_work', 'character_horse_handler_work',
               'character_chopping_work', 'character_chopping_source', 'character_chopping_native',
@@ -59,7 +60,10 @@ CONVERTERS = ('upgrade_map', 'build_vegetation_probe', 'build_water_probe',
               'character_dice_policy', 'character_gambler_work', 'setup_gambler_work', 'campaign_work_metaroles',
               'campaign_market_speech', 'setup_work_speech', 'gambler_dialogue_registration',
               'gambler_schedule_activation', 'setup_world_encounters', 'world_encounter_graphs',
-              'world_encounter_sites', 'world_encounter_registration')
+              'world_encounter_sites', 'world_encounter_registration',
+              'setup_crime_services', 'world_crime_services', 'world_crime_graphs', 'crime_site_geometry',
+              'cinematic_scene', 'cinematic_scene_profiles', 'cinematic_scene_cast',
+              'cinematic_scene_ground', 'world_actor_contracts', 'world_crime_factions', 'audit_world_scenes')
 
 
 class Cancelled(Exception):
@@ -225,7 +229,10 @@ def install_transaction(package, target, notify=lambda *args: None, cancelled=la
     reusable = {n for n,h in receipt['files'].items() if previous_receipt['files'].get(n) == h}
     remaining_copy = sum((package / n).stat().st_size for n in receipt['files'] if n not in reusable)
     remaining_copy += (package / RECEIPT).stat().st_size
-    if free_space(target) < remaining_copy + GIB: raise ValueError('Insufficient free space to stage the mod safely')
+    if free_space(target) < remaining_copy + GIB:
+        raise ValueError(f'Completed package retained at {package}. Installation needs '
+                         f'{(remaining_copy+GIB)/GIB:.1f} GiB free for changed files; '
+                         f'{free_space(target)/GIB:.1f} GiB available. Free space and resume this job to retry installation.')
     mods.mkdir(exist_ok=True)
     backup = None
     legacy_backup = None
@@ -290,6 +297,9 @@ class EventLog:
         self.stream = Path(path).open('a', encoding='utf-8', buffering=1)
         self.text = Path(path).with_name('setup.log').open('a', encoding='utf-8', buffering=1)
         self.last_progress = 0
+        self.progress_label = None
+        self.last_work_progress = 0
+        self.work_label = None
         self.directory, self.profile = Path(path).parent, profile
         self.stage, self.times = None, []
 
@@ -299,7 +309,7 @@ class EventLog:
         if kind in ('done', 'error', 'cancelled') and self.times:
             self.summarize_times()
         self.stream.write(json.dumps(dict(kind=kind, time=time.time(), **values)) + '\n')
-        if kind != 'progress':
+        if kind not in ('progress', 'work_progress'):
             self.text.write(f'[{datetime.now():%H:%M:%S}] {values.get("message", values.get("label", kind))}\n')
             if 'traceback' in values: self.text.write(values['traceback'] + '\n')
         if kind == 'stage':
@@ -334,9 +344,16 @@ class EventLog:
 
     def progress(self, label, current, total, detail=''):
         now = time.monotonic()
-        if now - self.last_progress < 0.2 and current != total: return
-        self.last_progress = now
+        if label == self.progress_label and now - self.last_progress < 0.2 and current != total: return
+        self.last_progress, self.progress_label = now, label
         self.emit('progress', label=label, current=current, total=total, detail=detail)
+
+    def work_progress(self, label, current, total, detail=''):
+        now = time.monotonic()
+        if label == self.work_label and now - self.last_work_progress < 0.2 and current != total:
+            return
+        self.last_work_progress, self.work_label = now, label
+        self.emit('work_progress', label=label, current=current, total=total, detail=detail)
 
 
 class LogWriter(io.TextIOBase):
@@ -361,6 +378,7 @@ def worker(config_path):
     events = EventLog(job / 'events.jsonl', profile=os.environ.get('GLUEMAPPER_PROFILE') == '1')
     output = LogWriter(events)
     setup_progress.sink = events.progress
+    setup_progress.work_sink = events.work_progress
     cancel = lambda: (job / 'cancel.requested').exists()
     original_cwd, original_argv = Path.cwd(), sys.argv[:]
     shaders = None
@@ -446,4 +464,5 @@ def worker(config_path):
         else:os.environ['KCD2_MOD_TOOLS']=original_sdk
         output.flush(); events.stream.close(); events.text.close()
         setup_progress.sink = None
+        setup_progress.work_sink = None
         os.chdir(original_cwd); sys.argv = original_argv

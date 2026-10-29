@@ -37,7 +37,7 @@ function selection(){
 }
 function setBusy(value){busy=value;$$('[data-select],[data-browse],#detect,#check-mod-tools,#install-mod-tools,input').forEach(e=>e.disabled=value);$('#cancel').disabled=!value;$('#resume').disabled=value;$('#activity-dot').style.display=value?'block':'none';selection();syncLaunch();$('#inspector-select').disabled=busy||launching;}
 function log(message){logLines.push(message);logLines=logLines.slice(-350);$('#log').textContent=logLines.join('\n');$('#log').scrollTop=$('#log').scrollHeight;}
-function event(e){if(e.mp_profile){config.mp_profile=e.mp_profile;$('#mp_profile').value=e.mp_profile;}trackEvent(e);if(e.kind==='stage'){$('#stage').textContent=e.label;$('#stage-detail').textContent='Working on this stage. Large conversions can take several minutes.';$('.progress-track').classList.add('working');$('#progress-label').textContent=activeCheck?`Step ${$$('#job-checklist li').indexOf(activeCheck)+1} of ${$$('#job-checklist li').length} · selected installation plan`:'Preparing selected operations';log(e.label);}else if(e.kind==='progress'){if(e.total>0){$('.progress-track').classList.remove('working');$('#progress-fill').style.width=Math.min(100,100*e.current/e.total)+'%';$('#progress-label').textContent=`${e.label} · ${Math.round(100*e.current/e.total)}%`;}$('#stage-detail').textContent=e.detail||e.label;}else if(e.kind==='log'){log(e.message||e.label||'');}else if(['done','error','cancelled'].includes(e.kind)){$('.progress-track').classList.remove('working');$('#job-state').textContent={done:'COMPLETE',error:'NEEDS ATTENTION',cancelled:'CANCELLED'}[e.kind];$('#stage').textContent=e.message;$('#stage-detail').textContent=e.package?`Package folder: ${e.package}`:'Your log and completed output are retained.';$('#progress-fill').style.width=e.kind==='done'?'100%':'0%';$('#progress-label').textContent=e.kind==='done'?'All selected operations completed':'See activity log';log(e.message);if(e.traceback)log(e.traceback);showNotice(e.message,e.kind==='error'?'error':'info');}}
+function event(e){if(e.kind==='work_progress'){renderWorkProgress(e);return;}if(['stage','progress','done','error','cancelled'].includes(e.kind))$('#work-progress').hidden=true;if(e.mp_profile){config.mp_profile=e.mp_profile;$('#mp_profile').value=e.mp_profile;}trackEvent(e);if(e.kind==='stage'){$('#stage').textContent=e.label;$('#stage-detail').textContent='Working on this stage. Large conversions can take several minutes.';$('.progress-track').classList.add('working');$('#progress-label').textContent=activeCheck?`Step ${$$('#job-checklist li').indexOf(activeCheck)+1} of ${$$('#job-checklist li').length} · selected installation plan`:'Preparing selected operations';log(e.label);}else if(e.kind==='progress'){$('#stage').textContent=e.label;if(e.total>0){$('.progress-track').classList.remove('working');$('#progress-fill').style.width=Math.min(100,100*e.current/e.total)+'%';$('#progress-label').textContent=`${e.label} · ${e.current} / ${e.total} · ${Math.round(100*e.current/e.total)}%`;}else{$('.progress-track').classList.add('working');$('#progress-fill').style.width='0%';$('#progress-label').textContent=e.label+' · In progress';}$('#stage-detail').textContent=e.detail||e.label;}else if(e.kind==='log'){log(e.message||e.label||'');}else if(['done','error','cancelled'].includes(e.kind)){$('.progress-track').classList.remove('working');$('#job-state').textContent={done:'COMPLETE',error:'NEEDS ATTENTION',cancelled:'CANCELLED'}[e.kind];$('#stage').textContent=e.message;$('#stage-detail').textContent=e.package?`Package folder: ${e.package}`:'Your log and completed output are retained.';$('#progress-fill').style.width=e.kind==='done'?'100%':'0%';$('#progress-label').textContent=e.kind==='done'?'All selected operations completed':'See activity log';log(e.message);if(e.traceback)log(e.traceback);showNotice(e.message,e.kind==='error'?'error':'info');}}
 async function guarded(fn){try{return await fn();}catch(e){showNotice(e.message||String(e),'error');}}
 function reviewRow(label,value){const row=document.createElement('div');row.className='review-row';const title=document.createElement('span');title.textContent=label;row.append(title,document.createTextNode(value));$('#review-content').append(row);}
 async function review(){if(busy||launching||checking||!api)return;checking=true;selection();$('#review').textContent='Checking locations…';try{const c=collect();c.imported_cache=await chooseImportedCache(c);config.imported_cache=c.imported_cache;const result=await api.check(c);if(!result.ok){wizard(0);showNotice(result.error,'error');return;}$('#notice').hidden=true;$('#review-content').replaceChildren();reviewRow('SELECTED MODS',c.mods.map(m=>names[m]+' v'+versions[m]).join(' + '));if(c.mods.includes('map'))reviewRow('LIGHTING BAKE',c.action==='install'?'As recorded in the existing package':bakeNames[c.baking]);if(c.mods.includes('map'))reviewRow('OPENING MOVIE',c.action==='install'?'As recorded in the package':c.cutscenes==='opening'?'Convert and install KCD1 opening (replaces shared New Game intro)':'Not selected');if(c.imported_cache)reviewRow('OLDER BUILD OUTPUTS','Use selected imported lighting/shaders where available; rebuild incompatible shaders');reviewRow('KCD2 INSTALLATION',c.kcd2);reviewRow('BUILD FOLDER',c.workspace);if(c.mods.includes('map')&&c.action!=='install')reviewRow('CACHED OUTPUTS',c.rebuild_cache?'Rebuild lighting and shaders':'Reuse matching lighting and shaders');if(c.action==='install')reviewRow('PACKAGE COLLECTION',c.package);if(c.mods.includes('mp')){reviewRow('MULTIPLAYER SOURCE',c.mp_source||(c.mods.includes('map')?'Map built in this job':'Installed KCD1 Map'));reviewRow('CLIENT / SERVER',c.mp_client+' / '+c.mp_server);reviewRow('SERVER SETTINGS',c.mp_server_name+' · port '+c.mp_port+' · '+c.mp_max_players+' players · PvP '+(c.mp_pvp?'on':'off'));reviewRow('JOIN ADDRESS',c.mp_host);}for(const message of result.messages)reviewRow('LOCATION CHECK',message);$('#start').textContent={build_install:'Build & install',build_only:'Build packages',install:'Install packages'}[c.action];$('#confirm-title').textContent={build_install:'Ready to build & install.',build_only:'Ready to build.',install:'Ready to install.'}[c.action];$('#confirm').showModal();}finally{checking=false;$('#review').textContent='Configure installation →';selection();}}
@@ -117,12 +117,20 @@ function activateStep(label){
  $('#stage').textContent=label;
 }
 function trackEvent(e){
- if(e.kind==='stage'||(e.kind==='progress'&&$$('#job-checklist li').some(li=>li.dataset.label===e.label))){
+ if(e.kind==='stage'){
   activateStep(e.label);
   progressSample=null;$('#eta').textContent='Stage ETA: measuring… · Total ETA unavailable until all stages have timing data.';
- }else if(e.kind==='progress'&&e.total>0){
+ }else if(e.kind==='progress'){
+  activateStep(e.label);
+  if(!(e.total>0)){
+   progressSample=null;$('#eta').textContent='Current task ETA unavailable until measurable work starts.';
+   return;
+  }
   const now=e.time?e.time*1000:Date.now();
-  if(!progressSample||progressSample.label!==e.label||progressSample.total!==e.total||e.current<progressSample.current)progressSample={label:e.label,total:e.total,current:e.current,time:now};
+  if(!progressSample||progressSample.label!==e.label||progressSample.total!==e.total||e.current<progressSample.current){
+   progressSample={label:e.label,total:e.total,current:e.current,time:now};
+   $('#eta').textContent='Current task ETA: measuring completed work…';
+  }
   const count=e.current-progressSample.current,elapsed=(now-progressSample.time)/1000;
   if(count>0&&elapsed>=2){const left=(e.total-e.current)*elapsed/count;$('#eta').textContent='Current task ETA: '+(left<60?'under a minute':Math.ceil(left/60)+' min')+' · Estimate from measured throughput; later stages are additional.';}
  }else if(['done','error','cancelled'].includes(e.kind)){
@@ -228,3 +236,12 @@ async function refreshMPProfile(){
  collectMP();Object.assign(config,r.config);fillMP();$('#mp-status').textContent='Loaded the saved multiplayer profile settings.';
 }
 $('#mp_profile').addEventListener('change',()=>guarded(refreshMPProfile));
+
+function renderWorkProgress(e){
+ $('#work-progress').hidden=false;
+ const known=e.total>0;
+ $('#work-label').textContent=known?`${e.label}: ${e.current} / ${e.total} (${Math.round(100*e.current/e.total)}%)`:`${e.label}: in progress`;
+ if(e.detail)$('#work-label').textContent+=' · '+e.detail;
+ $('.work-track').classList.toggle('working',!known);
+ $('#work-fill').style.width=known?Math.min(100,100*e.current/e.total)+'%':'0%';
+}

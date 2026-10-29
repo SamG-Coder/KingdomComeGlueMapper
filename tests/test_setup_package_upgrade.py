@@ -16,6 +16,10 @@ from region_travel_companions import travel_player_resources
 
 
 class UpgradeTests(unittest.TestCase):
+    def test_completed_build_relocates_speech_after_new_service_graphs(self):
+        self.speech_fast_resume = True
+        self.test_migrates_legacy_world_without_changing_shared_assets()
+
     def test_recipe36_resolves_quest_start_layout_through_shared_finalization(self):
         self.source_recipe = 36
         self.test_migrates_legacy_world_without_changing_shared_assets()
@@ -245,6 +249,16 @@ class UpgradeTests(unittest.TestCase):
             self.enterContext(patch('setup_gambler_work.upgrade', return_value=({}, {'runtime_verified': False})))
             self.enterContext(patch('setup_work_speech.upgrade', return_value=({}, {'runtime_verified': False})))
             encounters = self.enterContext(patch('setup_world_encounters.upgrade', return_value=({}, {'runtime_verified': False})))
+            speech_order = []
+            def add_crime(*args, **kwargs):
+                speech_order.append('crime')
+                return {}, {'version':1,'status':'bound_native_services','runtime_verified':False}
+            crime = self.enterContext(patch('setup_crime_services.upgrade', side_effect=add_crime))
+            from world_speech_audio import upgrade as real_speech
+            def relocate_speech(*args, **kwargs):
+                speech_order.append('speech')
+                return real_speech(*args, **kwargs)
+            self.enterContext(patch('world_speech_audio.upgrade', side_effect=relocate_speech))
             self.enterContext(patch('setup_quest_invitation.validate', return_value={'runtime_verified': False}))
             invitation_upgrade = self.enterContext(patch('setup_quest_invitation.upgrade', return_value=({}, {'runtime_verified': False})))
             self.enterContext(patch('character_water_work.upgrade_well_bodies', return_value=({}, {'repaired': []})))
@@ -256,6 +270,10 @@ class UpgradeTests(unittest.TestCase):
                     result=finalize(p, source=as_job(p), target=as_job(p/'native') if getattr(self, 'retail_initializers', False) else None,
                                     notify=lambda *args: progress.append(args))
                     self.assertTrue(progress and all(3 <= len(args) <= 4 for args in progress), progress)
+                    self.assertEqual(crime.call_count,1)
+                    self.assertEqual(speech_order,['crime','speech'])
+                    self.assertEqual(result['crime_services']['status'],'bound_native_services')
+                    self.assertEqual(result['world_actor_contracts']['player_context'],'player_henry')
                     intro_upgrade.assert_called_once_with(p, p, p/'native' if getattr(self, 'retail_initializers', False) else None)
                     inventory_upgrade.assert_called_once_with(p, p/'native' if getattr(self, 'retail_initializers', False) else None)
                     invitation_upgrade.assert_called_once_with(p, p, p/'native' if getattr(self, 'retail_initializers', False) else None)
@@ -264,6 +282,17 @@ class UpgradeTests(unittest.TestCase):
                     lights_upgrade.assert_called_once_with(p, p, p/'native' if getattr(self, 'retail_initializers', False) else None)
                     self.assertEqual(result['procedural_lights'], lights_report)
                     encounters.assert_called_once()
+                    if getattr(self, 'speech_fast_resume', False):
+                        # Enable the completed-world branch with its retained
+                        # training receipt, then exercise real finalization again.
+                        (p/'quest-training.json').write_text('{}')
+                        saved = json.loads((p/RECEIPT).read_text())
+                        saved['files']['quest-training.json'] = digest(p/'quest-training.json')
+                        (p/RECEIPT).write_text(json.dumps(saved))
+                        resumed = finalize(p, source=p)
+                        self.assertEqual(speech_order,['crime','speech','crime','speech'])
+                        self.assertIn('world_speech_audio',resumed)
+                        self.assertEqual(resumed['world_actor_contracts']['player_context'],'player_henry')
                     self.assertEqual(len(result['female_clothing']['corrected_components']), 1)
                     with zipfile.ZipFile(p/'Data/pickup-clothing.pak') as z:
                         self.assertEqual(ET.fromstring(z.read(female_member)).find('.//SkinElement').get('KeepBodyLayer'), 'true')
@@ -330,6 +359,8 @@ class UpgradeTests(unittest.TestCase):
             self.assertEqual(shared.read_bytes(),shared_before)
             with zipfile.ZipFile(p/'Data/gluemappertravel.pak') as z:
                 validate_start_policy(z.read(PROJECT),OPENING)
+                context = ET.fromstring(z.read(PROJECT)).find(".//GameContextTrigger[@Name='gm_player_henry_context']")
+                self.assertEqual(context.find('Constant').get('Value'),'player_henry')
                 self.assertNotIn(b'GlueTravelHorseRecovery',z.read('Scripts/Entities/actor/player.lua'))
                 self.assertEqual(z.read('keep'),b'unchanged')
             with zipfile.ZipFile(p/f'Data/{MOD_ID}.pak') as z:

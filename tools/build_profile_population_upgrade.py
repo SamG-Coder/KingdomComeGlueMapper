@@ -62,7 +62,8 @@ def refresh_receipt(package, report):
     verify_package(package,hashes=False)
 
 
-def upgrade_work(source, target, package, source_level, level, people, new_people, merchants, tables, reader):
+def upgrade_work(source, target, package, source_level, level, people, new_people, merchants, tables, reader,
+                 notify=lambda message: None):
     from character_schedule import plan
     from character_schedule_world import resolve_arrivals, bind_arrivals, arrival_resources, baseline_schedule_names
     from character_schedule_jobs import bind_jobs, population_work_supports, job_resources
@@ -94,6 +95,7 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
             if actor is None or actor.get('EntityClass') != 'NPC' or not any(
                     job.startswith('gm_schedule_' + name + '_') for job in owned_jobs):
                 continue
+            notify('Checking existing work: ' + name)
             schedule = plan(person, tables)
             housework = [e for e in schedule['resolved'] if
                 (e['behavior']['tree_file'].replace('\\', '/').lower(), e['behavior']['tree_name'])
@@ -104,6 +106,7 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
             files, repaired = repair_housework_bindings(files, {name: entries}, archive)
             pending.extend(repaired)
         for name in sorted(eligible):
+            notify('Converting source schedule: ' + name)
             person=people[name];schedule=plan(person,tables)
             if schedule['pending'] or not schedule['resolved']:
                 pending.append(dict(person=name, reason='Source schedule is unresolved', schedule=schedule));continue
@@ -127,6 +130,7 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
         for name in sorted(set(people)-eligible-set(merchants)):
             if not any(n.startswith('gm_schedule_'+name+'_') for n in owned_city_hubs):
                 continue
+            notify('Extending city work: ' + name)
             person = people[name]
             schedule = plan(person, tables)
             city = [e for e in schedule['resolved'] if city_supports(e)]
@@ -151,22 +155,28 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
             if actor is None or actor.get('EntityClass') not in ('NPC', 'NPC_Female') or not any(
                     n.startswith('gm_schedule_'+name+'_') for n in arrival_names):
                 continue
+            notify('Resolving household schedule: ' + name)
             person = people[name]; schedule = plan(person, tables)
             work = [e for e in schedule['resolved'] if fence_supports(e)]
             if not schedule['pending'] and work:
                 housework_schedules[name] = resolve_arrivals(dict(schedule, resolved=work), archive, person, source, reader, target)
         if housework_schedules:
+            notify('Binding fence work')
             files, repaired = upgrade_fences(files, housework_schedules, archive, target)
             from character_home_rest import upgrade as upgrade_rest
+            notify('Binding household rest places')
             files, resting = upgrade_rest(files, housework_schedules, archive, target)
             repaired.extend(resting)
             from character_chopping_work import upgrade as upgrade_chopping
+            notify('Binding chopping workplaces')
             files, chopping = upgrade_chopping(files, housework_schedules, archive, target, items)
             repaired.extend(chopping)
             from character_household_work import upgrade as upgrade_household
+            notify('Binding household workplaces')
             files, household = upgrade_household(files, housework_schedules, archive, target, source, reader, tables)
             repaired.extend(household)
             from character_water_work import upgrade as upgrade_water
+            notify('Binding water workplaces')
             files, water = upgrade_water(files, housework_schedules, archive, target, source, reader, tables, items)
             repaired.extend(water)
             changed = {r['person'] for r in repaired if not r.get('extension_only')}
@@ -176,12 +186,15 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
         # Source sleeps take precedence; prologue all-day work routines receive
         # deterministic job-based sleep windows. Native beds remain shared.
         from character_sleep_work import upgrade as upgrade_sleep
-        files, sleeping = upgrade_sleep(files, people, archive, target, tables, reader, source)
+        notify('Assigning source beds and sleeping schedules')
+        files, sleeping = upgrade_sleep(files, people, archive, target, tables, reader, source, notify=notify)
         converted.extend(sleeping)
         from character_pub_cleaning import extend_people as extend_pub_cleaning
+        notify('Binding pub cleaning and rest activities')
         files, cleaning = extend_pub_cleaning(files, people, tables, archive, target, source, reader)
         converted.extend(cleaning)
     import seating_animations
+    notify('Installing sitting animations and writing schedule archives')
     with zipfile.ZipFile(package/lp) as archive:
         for name in (seating_animations.HELPERS, seating_animations.ANIMATIONS):
             files[name] = read(archive, name)
@@ -199,7 +212,7 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
 
 def build(source,target,baseline,output,profiles, *, source_level='rataje',level='kcd1_travel',
           entry='Quests/GlueTravel/entry/kcd1_travel.xml',actor_stage=None,
-          update_receipt=True, notify=print, cancelled=lambda: False):
+          update_receipt=True, notify=print, cancelled=lambda: False, progress=None):
     from build_quest_people_test import build as build_actors
     from source_merchant_upgrade import build as build_service
     from setup_package_upgrade import rewrite
@@ -225,7 +238,7 @@ def build(source,target,baseline,output,profiles, *, source_level='rataje',level
             build_actors(SimpleNamespace(source=source,target=target,mod=baseline,output=actor_stage,model=None,
                 person=[],source_level=source_level,level=level,source_profile=profiles,
                 dialogue_profile=[],dialogue_model=[],project_path=None,quest_path=None,
-                notify=notify,cancelled=cancelled))
+                notify=notify,cancelled=cancelled,progress=progress,resolved_people=people))
         actor_stage=Path(actor_stage)
         actors=json.loads((actor_stage/'report.json').read_text())
         if actors['pending'] or actors['source_profile_actors'] != roster:
@@ -237,8 +250,10 @@ def build(source,target,baseline,output,profiles, *, source_level='rataje',level
         clone_missing(baseline,package)
         existing=registered_shops(package)
         services=[];preserved=[]
-        for shop in shops:
+        for index, shop in enumerate(shops):
             if cancelled(): raise InterruptedError('Cancelled before source shop conversion')
+            if progress is not None:
+                progress('Convert source shops', index, len(shops), shop['shop']['shop_name'])
             identity=str(20000+int(shop['shop']['shop_id']))
             if identity in existing:
                 preserved.append(shop);continue
@@ -246,11 +261,21 @@ def build(source,target,baseline,output,profiles, *, source_level='rataje',level
             service=build_service(source,target,package,package,shop['person'],shop['namespace'],entry,level,
                 source_level=source_level,restock_policy=('source_daily' if shop['shop']['restock_day_mask']=='127' else 'native_merchant'))
             services.append(service);existing.add(identity)
+        if shops and progress is not None:
+            progress('Convert source shops', len(shops), len(shops), 'Shop conversion complete')
+        def work_progress(message):
+            if progress is not None:
+                progress('Convert source jobs and schedules', 0, 0, message)
+            else:
+                notify(message)
+        work_progress('Resolving source work and schedule bindings')
         work=upgrade_work(source,target,package,source_level,level,people,
-            [r['person'] for r in actors['converted']],[r['person'] for r in shops],tables,reader)
+            [r['person'] for r in actors['converted']],[r['person'] for r in shops],tables,reader,notify=work_progress)
         work=retain_work(previous.get('work',{}),work,people)
         (output/'work-report.json').write_text(json.dumps(work,indent=2),encoding='utf-8')
     lp='Data/Levels/'+level+'/level.pak'
+    if progress is not None:
+        progress('Validate source population', 0, 0, 'Checking placements, schedules and shop bindings')
     with zipfile.ZipFile(package/lp) as archive:
         count=validate_people(roster,E.fromstring(read(archive,'objects_mission0.xml')),E.fromstring(read(archive,'whdata_0')))
         validate_scheduler_targets(E.fromstring(read(archive,'tables/ai/scheduler.xml')))

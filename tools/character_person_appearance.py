@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import struct
 import tempfile
+import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -30,6 +31,7 @@ from character_source_clothing import female_role, native_role, source_item
 from character_native_materials import convert_character_materials
 from character_lods import source_lods, filename as lod_filename, emit_regions, validate_chain
 from bake_pool import Bakes
+from setup_progress import work_progress
 
 
 def write_staged(output, files):
@@ -88,8 +90,17 @@ def align_internal_translation(blob, *, max_translation=.01):
     from every corresponding render position. Only a uniform translation is
     supported; deformed, ambiguous or large discrepancies still fail closed.
     """
-    _, vertices, _ = inspect_mesh(blob)
     chunks = read_chunks(blob)
+    # Older 0x801 exports omit the final reserved word. The streams and bounds
+    # have the same layout; normalize only the known zero-reserved extension.
+    meshes = [c for c in chunks if c.kind == 0x1000]
+    if len(meshes) == 1 and meshes[0].version == 0x801 and len(meshes[0].data) == 260:
+        mesh = meshes[0]
+        if any(mesh.data[136:]):
+            raise ValueError('Unsupported legacy mesh reserved data')
+        blob = write_chunks(chunks, {mesh.id: mesh.data + bytes(4)})
+        chunks = read_chunks(blob)
+    _, vertices, _ = inspect_mesh(blob, diagnostics=False)
     internal = [c for c in chunks if c.kind == 0x2005]
     remaps = [c for c in chunks if c.kind == 0x2006]
     if len(internal) != 1 or len(remaps) != 1:
@@ -114,27 +125,47 @@ def align_internal_translation(blob, *, max_translation=.01):
     return write_chunks(chunks, {internal.id: bytes(payload)}), offset.tolist()
 
 
-def build_appearance(source, target, person, namespace, output):
-    result = _build_appearance(source, target, person, namespace, output)
+# Advance whenever the source geometry, attachments, masks or material policy
+# requires existing saved appearances to be rebuilt by normal Setup.
+APPEARANCE_POLICY_VERSION = 2
+
+
+def build_appearance(source, target, person, namespace, output, *, notify=lambda message: None):
+    timings = {}
+    previous, started = None, time.perf_counter()
+    def phase(message):
+        nonlocal previous, started
+        now = time.perf_counter()
+        if previous is not None:
+            timings[previous] = timings.get(previous, 0.) + now - started
+        previous, started = message, now
+        if message is not None:
+            notify(message)
+    result = _build_appearance(source, target, person, namespace, output, notify=phase)
     accessories = result.pop('nonvisual_equipment', [])
     if accessories:
+        phase('Converting accessories')
         from character_accessories import register_accessories
         result['accessories'] = register_accessories(source, target, Path(output), namespace, accessories)
         result['localization'] = 'Localization/English/text_ui_items.xml'
+    result['appearance_policy'] = APPEARANCE_POLICY_VERSION
+    phase(None)
+    result['timings_seconds'] = timings
     return result
 
 
-def _build_appearance(source, target, person, namespace, output):
+def _build_appearance(source, target, person, namespace, output, *, notify=lambda message: None):
     """Stage a namespaced fixed outfit. Never change existing NPC definitions."""
     output = Path(output)
     if output.exists():
         raise FileExistsError('Choose a fresh person character directory')
     output.mkdir(parents=True)
+    notify('Resolving source parts and asset archives')
     prefix = 'objects/characters/gluetravel/' + namespace + '/'
     folder = prefix.removeprefix('objects/characters/')
     with ExitStack() as stack:
-        reader = stack.enter_context(RetailSourceReader(source))
-        tables = SourceTables(source, reader)
+        from character_build_cache import character_inputs
+        tables, native = character_inputs(source, target, stack)
         from character_instance import effective_soul
         source_soul = effective_soul(person['soul'], person['instance'])
         parts = resolve_parts(source_soul, lambda table: tables.get(table)['rows'])
@@ -146,7 +177,6 @@ def _build_appearance(source, target, person, namespace, output):
         if len(bodies) != 1 or bodies[0].get('gender_id') not in ('1', '2'):
             raise ValueError('Source person requires a resolved body definition: ' + person['name'])
         sex = {'1': 'male', '2': 'female'}[bodies[0]['gender_id']]
-        native = Assets(Path(target), stack)
         skeleton, rig = native.get(f'objects/characters/humans/{sex}/skeleton/{sex}.chr')
         cache = stack.enter_context(tempfile.TemporaryDirectory(prefix='person-assets-', dir=output.parent))
         index, emitted, material, mesh = asset_pack(stack, Path(source).parent, prefix, cache)
@@ -165,6 +195,8 @@ def _build_appearance(source, target, person, namespace, output):
         appearance, garments, evidence = {}, [], []
         for number, part in enumerate(parts):
             kind = part['kind']; stem = 'part' + str(number)
+            notify(f'Converting {kind} mesh and LODs ({number + 1}/{len(parts)})')
+            work_progress('Body and clothing parts', number, len(parts), kind + ' mesh and LODs')
             model = asset_path(index, part, 'model', '.skin')
             if sex == 'female' and kind == 'body':
                 from character_female_body import complete_source_body
@@ -179,14 +211,8 @@ def _build_appearance(source, target, person, namespace, output):
             blob, internal_offset = align_internal_translation(blob)
             fitting = None
             morphs = [m['name'] for c in read_chunks(blob) if c.kind == 0x2002 for m in read_morphs(c)]
-            if sex == 'female' and kind == 'body' and any(
-                    p['kind'] == 'cloth' and female_role(p, tables)[1] == 'torso' for p in parts):
-                # Use the source's authored chest fit, not a larger native body.
-                chest = [name for name in morphs if name.split(':')[-1].lstrip('#') == 'A_Chest']
-                if len(chest) > 1:
-                    raise ValueError('Ambiguous source chest fitting morph')
-                if chest:
-                    fitting = {chest[0]: 1.0}
+            # Bodies must also work without their initial outfit. Do not bake
+            # clothing-dependent A_Chest/A_Shrink fits into persistent skin.
             variant, variant_evidence = resolve_variant(part, morphs,
                 tables.get('item/clothing')['rows'] if kind == 'cloth' else [])
             fitting_masks = None
@@ -257,25 +283,31 @@ def _build_appearance(source, target, person, namespace, output):
                                  variant=variant_evidence,
                                  lods=source_lods(index, model),
                                  internal_translation=internal_offset))
+        work_progress('Body and clothing parts', len(parts), len(parts), 'Meshes and LODs converted')
         if 'beard' not in appearance:
             appearance['beard'] = namespace + '_empty_beard'
             ET.SubElement(derived, 'Beard', Name=appearance['beard'])
+        from character_clothing_attachments import attach_source_details
+        notify('Converting clothing attachments and layers')
+        attachment_report = attach_source_details(garments, tables, index, mesh, material, emitted,
+                                                  prefix, skeleton, geometry_field)
         if sex == 'female':
             result = finish_female(source, target, tables, namespace, output, prefix, emitted,
-                                 document, derived, appearance, garments, evidence, rig, native)
+                                 document, derived, appearance, garments, evidence, rig, native, notify=notify)
             result['nonvisual_equipment'] = accessories
             result['fitting'] = outfit_fitting.evidence()
+            result['clothing_attachments'] = attachment_report
             return result
         # Canonical palette and native body regions are shared with the accepted
         # generic character upgrade, preserving source geometry across all parts.
-        from clothing_coverage import apply_membership
+        from clothing_coverage import apply_fitted_membership
         for garment in garments:
             membership = garment['source_coverage']
             if membership:
-                garment['skin'] = apply_membership(garment['skin'], {4: np.maximum.reduce(list(membership.values())).astype(bool)})
+                garment['skin'] = apply_fitted_membership(garment['skin'], membership)
             for level, membership in garment['lod_coverage'].items():
                 if membership:
-                    garment['lods'][level] = apply_membership(garment['lods'][level], {4: np.maximum.reduce(list(membership.values())).astype(bool)})
+                    garment['lods'][level] = apply_fitted_membership(garment['lods'][level], membership)
         canonical = canonicalize_skin_skeletons([g['skin'] for g in garments])
         from character_skin_upgrade import CompiledSkin, matrix
         bones = CompiledSkin(canonical[0]).info['bones']
@@ -349,6 +381,7 @@ def _build_appearance(source, target, person, namespace, output):
             'clothing_preset', clothing_preset_id=str(uuid.uuid5(uuid.NAMESPACE_URL, item_id)),
             clothing_preset_name=namespace + '_outfit', gender=sex.title(), prefers_hood_on='false')
         ET.SubElement(ET.SubElement(clothing_preset, 'Items'), 'Guid').text = item_id
+        notify('Writing meshes and source textures')
         write_staged(output, {**emitted, 'Libs/Tables/Character/CharacterComponent__' + namespace + '.xml': xml(document),
             'Libs/Tables/item/item__' + namespace + '.xml': xml(item_root),
             'Libs/Tables/item/clothing_preset__' + namespace + '.xml': xml(clothing_root),
@@ -357,22 +390,26 @@ def _build_appearance(source, target, person, namespace, output):
         # the fixed outfit otherwise keeps legacy Illum colourisation (issue #1).
         # The float bakes run in worker processes; leaving the block waits for them
         # (or, on failure, cancels and joins them) before anything reads the outputs.
-        with Bakes() as bakes:
+        notify('Baking native materials and textures')
+        with Bakes(reuse=True) as bakes:
             material_report = convert_character_materials(output, document.find('CharacterComponents/Component'),
                                                           native, namespace, sex, bakes, preserve_hiding=True)
         from clothing_coverage import register_fixed_body_coverage
+        notify('Checking body, hair and clothing coverage')
         coverage = register_fixed_body_coverage(output, component, namespace)
+        notify('Writing character definitions')
         (output / ('Libs/Tables/Character/CharacterComponent__' + namespace + '.xml')).write_bytes(xml(document))
     return dict(appearance=appearance, inventory=namespace + '_clothes', gender=sex,
                 archetype=native_soul_archetype(archetypes, sex.title()), parts=evidence, rig=rig,
                 nonvisual_equipment=accessories, materials=material_report,
+                texture_bakes=bakes.stats,
                 coverage=coverage,
-                fitting=outfit_fitting.evidence(),
+                fitting=outfit_fitting.evidence(), clothing_attachments=attachment_report,
                 outfit_mode='Fixed source outfit, using the existing skin upgrader', runtime_verified=False)
 
 
 def finish_female(source, target, tables, namespace, output, prefix, emitted,
-                  document, derived, appearance, garments, evidence, rig, native):
+                  document, derived, appearance, garments, evidence, rig, native, *, notify=lambda message: None):
     """Resolve native roles, then bundle source layers sharing a draw region."""
     with zipfile.ZipFile(Path(target) / 'Data/Tables.pak') as archive:
         from clothing_equipment import NativeEquipment
@@ -439,13 +476,17 @@ def finish_female(source, target, tables, namespace, output, prefix, emitted,
         'Libs/Tables/item/InventoryPreset__' + namespace + '_clothes.xml': xml(preset_root),
         'Localization/English/text_ui_items.xml': xml(localization),
     }
+    notify('Writing meshes and source textures')
     write_staged(output, {**emitted, **additions})
-    with Bakes() as bakes:
+    notify('Baking native materials and textures')
+    with Bakes(reuse=True) as bakes:
         material_report = convert_character_materials(output, document.find('CharacterComponents/Component'),
                                                       native, namespace, 'female', bakes)
     from clothing_coverage import register_coverage
+    notify('Checking body and clothing coverage')
     coverage = register_coverage(output, document.find('CharacterComponents/Component'), garments, tables, namespace)
     from clothing_native_composition import compose_source_regions
+    notify('Composing native clothing layers')
     composition = compose_source_regions(output, document.find('CharacterComponents/Component'), items, preset, layer_order)
     (output / ('Libs/Tables/Character/CharacterComponent__' + namespace + '.xml')).write_bytes(xml(document))
     (output / ('Libs/Tables/item/item__' + namespace + '.xml')).write_bytes(xml(item_root))
@@ -453,5 +494,6 @@ def finish_female(source, target, tables, namespace, output, prefix, emitted,
     return dict(appearance=appearance, inventory=namespace + '_clothes', gender='female',
         archetype=native_soul_archetype(archetypes, 'Female'), parts=evidence, rig=rig,
         items=item_report, composition=composition,
+        texture_bakes=bakes.stats,
         outfit_mode='Source female outfits composed per native draw region', runtime_verified=False,
         localization='Localization/English/text_ui_items.xml', materials=material_report, coverage=coverage)

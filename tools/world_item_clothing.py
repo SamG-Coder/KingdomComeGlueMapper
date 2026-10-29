@@ -18,7 +18,7 @@ from clothing_appearance import apply_armor_colorization
 from clothing_regions import assign_upper_garment_regions, split_skin_regions, read_chunks
 from garment_contracts import clothing_role, source_variant
 from character_source_clothing import female_role
-from character_layer_contract import region_layers, project_regions
+from character_layer_contract import region_layers, project_regions, source_mesh_regions, source_mesh_region
 from upgrade_map import read, xml
 from character_native_materials import bake_float_dds, convert_character_materials
 
@@ -143,6 +143,8 @@ class ClothingAdapter:
         missing_variant = None
         internal_offset = None
         if part.get('model'):
+            if sex != 'female':
+                native_layers = source_mesh_regions(original, self.parents, self.equipment, armor_archetype)
             a = self.assets; before = set(a.emitted)
             source_part = dict(part, kind='cloth')
             def resolve(field, extension):
@@ -184,6 +186,8 @@ class ClothingAdapter:
                     # Native sleeved tunics use this group to hide just the
                     # underlying upper arm, retaining hands and bare forearms.
                     node.set('HidingGroups', 'MaleBodyUpperArms')
+            else:
+                regions = {source_mesh_region(region, native_layers): blob}
             elements = ET.SubElement(node,'Elements')
             # Native layer values are inherited by role; do not reuse KCD1's
             # numerical layers as KCD2 layers.

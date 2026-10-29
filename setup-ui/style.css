@@ -232,3 +232,9 @@ dialog ul { padding-left: 20px; }
 @media(max-width:1100px) { :root { --rail: 208px; } .brand { gap: 7px; } .brand strong { font-size: 10px; } main { padding: 25px 24px; } .topbar, .install-bar { padding-left: 24px; padding-right: 24px; } .locations-grid { gap: 14px; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); } .settings-panel { padding: 18px; } .section-meta { display: none; } .field-tag { display: none; } .panel-heading h2 { font-size: 13px; } .library-layout { grid-template-columns: minmax(0,1fr) 250px; gap: 20px; } .cards { gap: 16px; } .inspector-body { padding: 18px; } .cover-wordmark { left: 14px; } .cover-wordmark strong { font-size: 24px; } .wizard-steps>span { font-size: 11px; gap: 7px; } #install-hint { display: none; } }
 @media(max-width:880px) { .locations-grid { grid-template-columns: 1fr; } .library-layout { grid-template-columns: 1fr; } .mod-inspector { display: none; } .library-toolbar { flex-wrap: wrap; } .page-heading { align-items: flex-start; } .platform { display: none; } .install-actions { gap: 12px; } .install-actions>.primary { min-width: 130px; } .wizard-steps>span { font-size: 10px; } }
 @media(prefers-reduced-motion:reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+#work-progress { margin-top: 18px; }
+#work-label { color: #b9c8d0; font-size: 12px; }
+.work-track { height: 4px; background: #111719; border-radius: 3px; overflow: hidden; }
+#work-fill { height: 100%; width: 0%; background: #75b8b0; transition: width .15s; }
+.work-track.working #work-fill { width: 28%!important; animation: working 1.7s ease-in-out infinite; }

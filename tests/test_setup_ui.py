@@ -62,6 +62,44 @@ class SetupUITests(unittest.TestCase):
     def settings(self):
         self.page.locator('button.nav[data-page=settings]').click()
 
+    def test_population_progress_replaces_stale_heading_and_shows_real_count(self):
+        page=self.page
+        page.evaluate("""() => {
+            initializeChecklist(['KCD1 New Game menu']);
+            event({kind:'stage',label:'KCD1 New Game menu'});
+            event({kind:'progress',label:'Convert source character appearances',current:0,total:8,time:100,detail:'actor: resolving source'});
+            event({kind:'progress',label:'Convert source character appearances',current:2,total:8,time:160,detail:'actor: checking clothing coverage'});
+        }""")
+        self.assertEqual(page.locator('#stage').text_content(),'Convert source character appearances')
+        self.assertIn('2 / 8',page.locator('#progress-label').text_content())
+        self.assertIn('25%',page.locator('#progress-label').text_content())
+        self.assertIn('3 min',page.locator('#eta').text_content())
+        self.assertIn('checking clothing coverage',page.locator('#stage-detail').text_content())
+        page.evaluate("event({kind:'progress',label:'Convert source jobs and schedules',current:0,total:0,detail:'Binding work'})")
+        self.assertIn('working',page.locator('.progress-track').get_attribute('class'))
+        self.assertNotIn('%',page.locator('#progress-label').text_content())
+        self.assertNotIn('3 min',page.locator('#eta').text_content())
+
+    def test_checklisted_progress_keeps_throughput_sample_for_eta(self):
+        self.page.evaluate("""() => {
+            initializeChecklist(['Convert appearances']);
+            event({kind:'progress',label:'Convert appearances',current:0,total:10,time:100});
+            event({kind:'progress',label:'Convert appearances',current:2,total:10,time:160});
+        }""")
+        self.assertIn('4 min',self.page.locator('#eta').text_content())
+
+    def test_current_character_counts_do_not_replace_batch_progress(self):
+        self.page.evaluate("""() => {
+            event({kind:'progress',label:'Convert source character appearances',current:3,total:8,detail:'Example character: baking materials'});
+            event({kind:'work_progress',label:'Native textures',current:7,total:20,detail:'3 reused from identical source pixels'});
+        }""")
+        self.assertIn('3 / 8',self.page.locator('#progress-label').text_content())
+        self.assertIn('7 / 20 (35%)',self.page.locator('#work-label').text_content())
+        self.assertIn('3 reused',self.page.locator('#work-label').text_content())
+        self.assertFalse(self.page.locator('#work-progress').get_attribute('hidden'))
+        self.page.evaluate("event({kind:'progress',label:'Convert source character appearances',current:4,total:8,detail:'Next character'})")
+        self.assertIsNotNone(self.page.locator('#work-progress').get_attribute('hidden'))
+
     def test_locations_layout_keeps_one_action_and_fixed_navigation(self):
         page=self.page;self.settings()
         for width,height in ((1280,900),(980,720)):

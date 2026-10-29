@@ -1,9 +1,12 @@
 """Retail source adapters used by automatic campaign dependency import."""
+from collections import OrderedDict
 import copy
 import hashlib
 from pathlib import Path, PurePosixPath
 import re
+import threading
 import uuid
+import weakref
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -17,19 +20,108 @@ from static_assets import asset_pack, character_definition
 from upgrade_map import read
 
 
+# Parsed rows shared by every SourceTables in the process, keyed by the content hash the
+# retail reader already computed, so a changed archive can never serve stale rows. A build
+# creates SourceTables per import and parsed tables about 1,400 times. Bounded by the size
+# of the cached table XML, least recently used first.
+_ROWS = OrderedDict()
+_ROWS_LOCK = threading.Lock()
+ROWS_CACHE_BYTES = 64 * 1024 ** 2
+
+
+def _table_rows(table, item, row_factory=dict):
+    key = (table, item['candidates'][-1]['sha256'], len(item['data']))
+    with _ROWS_LOCK:
+        cached = _ROWS.get(key)
+        if cached is not None:
+            _ROWS.move_to_end(key)
+    if cached is None:
+        cached = (tuple(dict(r.attrib) for r in ET.fromstring(item['data']).findall('./table/rows/row')), len(item['data']))
+        with _ROWS_LOCK:
+            _ROWS[key] = cached
+            while sum(size for _, size in _ROWS.values()) > ROWS_CACHE_BYTES:
+                _ROWS.popitem(last=False)
+    return [row_factory(row) for row in cached[0]]
+
+
+def _row_edit(operation):
+    def edit(self, *args, **kwargs):
+        try:
+            return operation(self, *args, **kwargs)
+        finally:
+            self._invalidate()
+    return edit
+
+
+class _SourceRow(dict):
+    """Keep the existing editable row contract without leaving stale indexes."""
+    __slots__ = ('_invalidate',)
+
+    def __init__(self, values, invalidate):
+        super().__init__(values)
+        self._invalidate = invalidate
+
+    __setitem__ = _row_edit(dict.__setitem__)
+    __delitem__ = _row_edit(dict.__delitem__)
+    __ior__ = _row_edit(dict.__ior__)
+    clear = _row_edit(dict.clear)
+    pop = _row_edit(dict.pop)
+    popitem = _row_edit(dict.popitem)
+    setdefault = _row_edit(dict.setdefault)
+    update = _row_edit(dict.update)
+
+    def __copy__(self):
+        return dict(self)
+
+    def __deepcopy__(self, memo):
+        return copy.deepcopy(dict(self), memo)
+
+    def __reduce__(self):
+        return dict, (dict(self),)
+
+
 class SourceTables:
     def __init__(self, source, reader):
-        self.source, self.reader, self.cache = source, reader, {}
+        self.source, self.reader, self.cache, self.indexes = source, reader, {}, {}
+        self.exposed = set()
 
-    def get(self, table):
+    def _invalidate(self, table):
+        for key in list(self.indexes):
+            if key[0] == table:
+                del self.indexes[key]
+
+    def _get(self, table):
         if table not in self.cache:
             item = self.reader(self.source, {'table': ('Tables.pak', 'Libs/Tables/' + table + '.xml')})['table']
-            self.cache[table] = dict(rows=[dict(r.attrib) for r in ET.fromstring(item['data']).findall('./table/rows/row')],
-                                     provenance=item['candidates'])
+            owner = weakref.ref(self)
+            def invalidate():
+                tables = owner()
+                if tables is not None:
+                    tables._invalidate(table)
+            rows = _table_rows(table, item, lambda row: _SourceRow(row, invalidate))
+            self.cache[table] = dict(rows=rows, provenance=item['candidates'])
         return self.cache[table]
 
+    def get(self, table):
+        # The caller can retain this list, insert ordinary dicts or replace it.
+        # Such edits cannot be observed through row callbacks, so keep the old
+        # scan semantics for exposed tables. Pure row lookups retain indexing.
+        self.exposed.add(table)
+        self._invalidate(table)
+        return self._get(table)
+
     def row(self, table, field, value, optional=False):
-        matches = [r for r in self.get(table)['rows'] if r.get(field, '').lower() == value.lower()]
+        rows = self._get(table)['rows']
+        if table in self.exposed:
+            matches = [r for r in rows if r.get(field, '').lower() == value.lower()]
+        else:
+            index = self.indexes.get((table, field))
+            if index is None:
+                index = {}
+                for r in rows:
+                    index.setdefault(r.get(field, '').lower(), []).append(r)
+                self.indexes[table, field] = index
+            matches = index.get(value.lower(), [])
         if not matches and optional:
             return {}
         if len(matches) != 1:

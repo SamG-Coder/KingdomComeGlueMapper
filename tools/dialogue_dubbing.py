@@ -53,12 +53,8 @@ def ogg_duration(data, *, allow_missing_eos=False):
     return last/rate
 
 
-def dubbing_index(target, media, existing=None):
-    """Merge duration metadata, retaining the entire native English index.
-
-    Native FileHash is CRC32 of the case-sensitive filename stem (no path or
-    extension). Verify this against native assets each build before using it.
-    """
+def _native_root(target):
+    """The native English dubbing index and up to 32 native recording stems."""
     roots=[]
     samples=[]
     for pak in sorted((Path(target)/'Localization').glob('*.pak')):
@@ -69,36 +65,75 @@ def dubbing_index(target, media, existing=None):
             if DEPOT in names:roots.append(ET.fromstring(read(archive,DEPOT)))
             if not samples:samples=[n.rsplit('/',1)[-1][:-4] for n in names if n.endswith('.ogg')][:32]
     if len(roots)!=1:raise ValueError('Expected one native English dubbing index')
+    return roots[0],samples
+
+
+# Serialized native index per unchanged set of English archives. A build merges into
+# it a dozen times; reopening the 65k-entry archives and copying and serializing the
+# whole native tree each time cost about 5 s per merge.
+_NATIVE={}
+
+
+def _native_index(target):
+    paks=[p for p in sorted((Path(target)/'Localization').glob('*.pak'))
+          if p.name.lower().startswith('english-') or p.name.lower() in ('english.pak','ipl_english.pak')]
+    signature=tuple((p.resolve(),s.st_size,s.st_mtime_ns) for p in paks for s in [p.stat()])
+    if signature not in _NATIVE:
+        root,samples=_native_root(target)
+        rows=root.find('DialogueDubbingData')
+        durations={r.get('FileHash'):r.get('Duration') for r in rows}
+        if len(samples)<16 or not all(str(zlib.crc32(s.encode('utf-8'))) in durations for s in samples):
+            raise ValueError('Native dubbing filename hash contract changed')
+        # Rows appended to DialogueDubbingData serialize just before its closing tag.
+        blob=xml(root);end=blob.rindex(b'</DialogueDubbingData>')
+        _NATIVE[signature]=dict(prefix=blob[:end],suffix=blob[end:],durations=durations,count=len(rows),samples=len(samples))
+    return _NATIVE[signature]
+
+
+def _custom_rows(existing, native, target):
+    """Rows an earlier merge added after the native baseline."""
+    prefix,suffix=native['prefix'],native['suffix']
+    if existing.startswith(prefix) and existing.endswith(suffix) and len(existing)>=len(prefix)+len(suffix):
+        holder=ET.fromstring(b'<rows>'+existing[len(prefix):len(existing)-len(suffix)]+b'</rows>')
+        if not (holder.text or '').strip():return list(holder)
+    # Not this build's serialization of the baseline: compare native rows one by one.
+    previous=ET.fromstring(existing).find('DialogueDubbingData')
+    rows=_native_root(target)[0].find('DialogueDubbingData')
+    if previous is None or len(previous)<len(rows) or any(
+            a.attrib!=b.attrib for a,b in zip(rows,list(previous)[:len(rows)])):
+        raise ValueError('Existing dubbing index does not preserve this native baseline')
+    return list(previous)[len(rows):]
+
+
+def dubbing_index(target, media, existing=None):
+    """Merge duration metadata, retaining the entire native English index.
+
+    Native FileHash is CRC32 of the case-sensitive filename stem (no path or
+    extension). Verify this against native assets each build before using it.
+    """
     # Retail contains repeated hashes with different durations. Preserve every
     # native row and its order instead of inventing a collision-resolution rule.
-    root=copy.deepcopy(roots[0])
-    rows=root.find('DialogueDubbingData')
-    indexed={r.get('FileHash'):r for r in rows}
-    if len(samples)<16 or not all(str(zlib.crc32(s.encode('utf-8'))) in indexed for s in samples):
-        raise ValueError('Native dubbing filename hash contract changed')
-    native_count=len(rows)
-    if existing:
-        previous=ET.fromstring(existing).find('DialogueDubbingData')
-        if previous is None or len(previous)<native_count or any(
-                a.attrib!=b.attrib for a,b in zip(rows,list(previous)[:native_count])):
-            raise ValueError('Existing dubbing index does not preserve this native baseline')
-        for row in list(previous)[native_count:]:
-            key=row.get('FileHash')
-            if key in indexed:raise ValueError('Duplicate custom dubbing hash: '+str(key))
-            indexed[key]=copy.deepcopy(row);rows.append(indexed[key])
+    native=_native_index(target)
+    indexed=dict(native['durations']);rows=[]
+    for row in (_custom_rows(existing,native,target) if existing else []):
+        key=row.get('FileHash')
+        if key in indexed:raise ValueError('Duplicate custom dubbing hash: '+str(key))
+        indexed[key]=row.get('Duration');rows.append(row)
     additions=[]
     for name,data in media.items():
         stem=name.rsplit('/',1)[-1][:-4]
         key=str(zlib.crc32(stem.encode('utf-8')))
         duration=ogg_duration(data)
         if key in indexed:
-            if abs(float(indexed[key].get('Duration'))-duration)>0.002:
+            if abs(float(indexed[key])-duration)>0.002:
                 raise ValueError('Dubbing hash collision or changed audio: '+stem)
         else:
-            indexed[key]=ET.SubElement(rows,'DialogueDubbing',FileHash=key,Duration=f'{duration:.6f}')
+            row=ET.Element('DialogueDubbing',FileHash=key,Duration=f'{duration:.6f}')
+            indexed[key]=row.get('Duration');rows.append(row)
         additions.append(dict(path=name,file_hash=key,duration=duration))
-    return xml(root),dict(native_entries=native_count,total_entries=len(rows),
-                          verified_native_hash_samples=len(samples),recordings=additions)
+    blob=native['prefix']+b''.join(ET.tostring(row,encoding='utf-8') for row in rows)+native['suffix']
+    return blob,dict(native_entries=native['count'],total_entries=native['count']+len(rows),
+                     verified_native_hash_samples=native['samples'],recordings=additions)
 
 
 def import_source_voices(resources, native, source_rows, prefixes):

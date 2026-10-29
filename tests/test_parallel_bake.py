@@ -13,7 +13,8 @@ import zipfile
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from world_surface_tiles import _TileBaker, _bounded_setting, gpu_lanes, heavy_slots, tile_workers, GIB, HEAVY_TRIANGLES
+from world_surface_tiles import (_TileBaker, _bounded_setting, gpu_budget, gpu_free_memory, gpu_lanes, heavy_slots,
+                                 interleaved, select_backend, tile_workers, GIB, HEAVY_TRIANGLES)
 
 
 class ParallelBakeSettingsTests(unittest.TestCase):
@@ -69,6 +70,63 @@ class ParallelBakeSettingsTests(unittest.TestCase):
             self.assertEqual(_TileBaker.estimated_triangles(baker, dict(light, vegetation=[0, 1])), 100_000)
             self.assertEqual(set(baker.mesh_triangles), set(sizes))  # each header read once
 
+    def test_dense_tiles_use_optix_only_when_they_fit_the_gpu(self):
+        large = 32 * GIB; small = 6 * GIB   # free GPU memory of a 32 GB and an 8 GB card
+        self.assertEqual(gpu_budget(1, large), 31 * GIB)
+        self.assertEqual(gpu_budget(2, large), 31 * GIB // 2)
+        self.assertEqual(gpu_budget(1, GIB // 2), 0)
+        self.assertEqual(select_backend('auto', 500_000, gpu_budget(1, small)), ('compiled', None))
+        self.assertEqual(select_backend('auto', 2_000_000, gpu_budget(1, small)), ('optix', None))
+        self.assertEqual(select_backend('auto', 18_600_000, gpu_budget(1, large)), ('optix', None))
+        selected, reason = select_backend('auto', 18_600_000, gpu_budget(1, small))
+        self.assertEqual(selected, 'compiled'); self.assertIn('GPU memory', reason)
+        self.assertEqual(select_backend('auto', 18_600_000, None), ('optix', None))   # unknown memory: try, fall back
+        for backend in ('compiled', 'cuda', 'optix'):   # an explicit backend is never rerouted
+            self.assertEqual(select_backend(backend, 18_600_000, 0), (backend, None))
+
+    def test_unknown_gpu_memory_is_none(self):
+        with patch('ctypes.CDLL', side_effect=OSError('no NVIDIA driver')):
+            self.assertIsNone(gpu_free_memory())
+        free = gpu_free_memory()   # whatever this machine reports
+        self.assertTrue(free is None or free >= 0)
+
+    def test_partial_nvml_does_not_abort_bake(self):
+        with patch('ctypes.CDLL', return_value=SimpleNamespace()):
+            self.assertIsNone(gpu_free_memory())
+
+    def test_nvml_uses_smallest_device_budget_and_shuts_down_on_query_failure(self):
+        stopped = []
+        def count(pointer):
+            pointer._obj.value = 2
+            return 0
+        def handle(index, pointer):
+            pointer._obj.value = index + 1
+            return 0
+        def memory(device, pointer):
+            pointer._obj.free = (12 if device.value == 1 else 4) * GIB
+            return 0
+        nvml = SimpleNamespace(nvmlInit_v2=lambda: 0, nvmlShutdown=lambda: stopped.append(True),
+                               nvmlDeviceGetCount_v2=count, nvmlDeviceGetHandleByIndex_v2=handle,
+                               nvmlDeviceGetMemoryInfo=memory)
+        with patch('ctypes.CDLL', return_value=nvml):
+            self.assertEqual(gpu_free_memory(), 4 * GIB)
+            nvml.nvmlDeviceGetMemoryInfo = lambda *args: 1
+            self.assertIsNone(gpu_free_memory())
+            self.assertEqual(len(stopped), 2)
+
+    def test_dense_tiles_are_spread_through_the_submission_order(self):
+        # Plan order clusters a town's dense tiles; submission spreads them, each kind in plan order.
+        dense = [False, True, True, True, False, False, False, False, False]
+        order = interleaved(dense)
+        self.assertEqual(sorted(order), list(range(len(dense))))
+        self.assertEqual([i for i in order if dense[i]], [1, 2, 3])
+        self.assertEqual([i for i in order if not dense[i]], [0, 4, 5, 6, 7, 8])
+        positions = [order.index(i) for i in (1, 2, 3)]
+        self.assertTrue(all(b - a >= 2 for a, b in zip(positions, positions[1:])))
+        self.assertEqual(interleaved([False] * 4), [0, 1, 2, 3])  # nothing dense: plan order
+        self.assertEqual(interleaved([True] * 3), [0, 1, 2])
+        self.assertEqual(interleaved([]), [])
+
 
 def empty_scene(root, tiles):
     """A valid scene of empty tiles with an empty asset root, baked by the real tile code."""
@@ -109,6 +167,32 @@ class ParallelBakeCancellationTests(unittest.TestCase):
                     self.assertEqual(lane.entries, int(backend in ('cuda', 'optix')))
                 finally:
                     baker.assets.close()
+
+    def test_parallel_bake_with_fewer_dense_slots_reports_in_plan_order(self):
+        from world_surface_tiles import build
+        settings = {'GLUEMAPPER_BAKE_TILE_WORKERS': '2', 'GLUEMAPPER_BAKE_HEAVY_TILES': '1'}
+        with tempfile.TemporaryDirectory() as t, patch.dict(os.environ, settings):
+            scene = empty_scene(t, 4)
+            # Make submission order differ from plan order without constructing huge meshes.
+            with patch('world_surface_tiles._TriangleEstimate.estimated_triangles', side_effect=[1_000_000, 1_000_000, 0, 0]):
+                results = build(scene)
+            self.assertEqual([r['origin'] for r in results], [tile['origin'] for tile in json.loads((scene / 'plan.json').read_text())['tiles']])
+            self.assertTrue(all(r['status'] == 'built' for r in results))
+
+    def test_cancellation_during_order_planning_starts_no_workers(self):
+        from world_surface_tiles import build
+        settings = {'GLUEMAPPER_BAKE_TILE_WORKERS': '2', 'GLUEMAPPER_BAKE_HEAVY_TILES': '1'}
+        with tempfile.TemporaryDirectory() as t, patch.dict(os.environ, settings):
+            scene = empty_scene(t, 4)
+            messages = []
+            with patch('world_surface_tiles._TriangleEstimate.estimated_triangles', return_value=0) as estimate, \
+                 patch('world_surface_tiles.ProcessPoolExecutor') as pool:
+                with self.assertRaises(InterruptedError):
+                    build(scene, progress=lambda *args: messages.append(args), cancelled=lambda: bool(messages))
+                self.assertEqual(estimate.call_count, 1)
+                pool.assert_not_called()
+            self.assertEqual(messages[0][:3], ('Plan lighting tile order', 0, 4))
+            self.assertEqual(list((scene / 'tiles').glob('*.vox')), [])
 
     def test_a_cancelled_parallel_bake_starts_no_tile(self):
         from world_surface_tiles import build

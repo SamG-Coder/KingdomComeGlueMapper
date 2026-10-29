@@ -19,6 +19,28 @@ def model():
 
 
 class QuestPeopleTests(unittest.TestCase):
+    def test_discovered_people_are_reused_with_identity_checks_and_no_mutation(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from build_quest_people_test import conversion_person
+        person=dict(name='actor',soul={'soul_id':'sid'},source_level='level',ai={},
+                    instance=E.fromstring('<Soul><SharedSoulGuid>sid</SharedSoulGuid></Soul>'))
+        args=SimpleNamespace(source_level='level',resolved_people={'actor':person})
+        with patch('build_quest_people_test.resolve_person') as resolver:
+            result=conversion_person(args,'actor','sid')
+            resolver.assert_not_called()
+            result['ai']['changed']=True
+            self.assertNotIn('changed',person['ai'])
+            with self.assertRaisesRegex(ValueError,'does not match'):
+                conversion_person(args,'actor','wrong')
+
+    def test_progress_total_counts_only_unique_new_explicit_souls(self):
+        from build_quest_people_test import conversion_souls
+        requested = {str(i):row for i,row in enumerate([
+            dict(soul_id='new'),dict(soul_id='new'),dict(soul_id='existing'),
+            dict(soul_id='filtered',soul_class_id='class'),dict(soul_id='faction',soul_faction_id='group'),{}])}
+        self.assertEqual(conversion_souls(requested,{'existing'}),{'new'})
+
     def test_unregistered_soul_cannot_get_marker(self):
         p, q, r = bind_markers(PROJECT, QUEST, model(), set())
         self.assertFalse(r['converted']); self.assertEqual(len(r['pending']), 1)

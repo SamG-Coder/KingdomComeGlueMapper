@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from character_layer_contract import region_layers, project_regions
+from character_layer_contract import region_layers, project_regions, source_mesh_regions, source_mesh_region
 from clothing_lab.repair import repair_table
 from clothing_coverage import converted_coverage_surface
 from test_clothing_coverage import encoded
@@ -22,6 +22,25 @@ from types import MethodType
 
 
 class NativeLayerTests(unittest.TestCase):
+    def test_feature_only_role_uses_its_native_equipment_occupancy(self):
+        role=ET.fromstring('<Clothing Name="MaterialLegs"><Features><Feature Name="Mail"/></Features></Clothing>')
+        equipment=SimpleNamespace(layers={'native-id': {('legs','native-layer')}})
+        self.assertEqual(source_mesh_regions(role,{},equipment,'native-id'), {'legs':'native-layer'})
+        equipment.layers['native-id'].add(('legs','different-layer'))
+        with self.assertRaisesRegex(ValueError,'Ambiguous'):
+            source_mesh_regions(role,{},equipment,'native-id')
+
+    def test_caparison_keeps_native_visual_region_instead_of_occupied_slots(self):
+        role=ET.fromstring('<Clothing Name="HorseCover"><Elements><VClothElement EquipmentPart="horse_torso"/></Elements></Clothing>')
+        equipment=SimpleNamespace(layers={'native-id': {('horse_back','1'),('horse_torso','1')}})
+        contract=source_mesh_regions(role,{},equipment,'native-id')
+        self.assertEqual(contract, {'horse_torso':None})
+        self.assertEqual(source_mesh_region('horse_back',contract),'horse_torso')
+        with self.assertRaisesRegex(ValueError,'ambiguous'):
+            source_mesh_region('legs',{'head':'1','feet':'2'})
+        with self.assertRaisesRegex(ValueError,'no mesh'):
+            source_mesh_regions(ET.fromstring('<Clothing Name="Missing"/>'),{},equipment,'native-id')
+
     def test_native_order_not_numeric_layer_ids_controls_geometry(self):
         for inner_layer,outer_layer in [('5','4'),('8','1')]:
             c=FakeCatalog()
