@@ -10,6 +10,7 @@ from campaign_dependencies import DependencyImporter
 from campaign_sources import retail_sources, RetailSourceReader
 from campaign_dependency_adapters import SourceTables
 from campaign_ai_registration import NativeAIRegistry, MailboxAdapter
+from campaign_link_types import LinkTypeAdapter
 from campaign_profiles import STREAMING_SOURCE
 from upgrade_map import read
 from campaign_quest_graph import emit_project
@@ -57,7 +58,9 @@ def audit(models, source_game, target_game, output):
         tables = SourceTables(Path(source_game), reader)
         native = NativeAIRegistry.load(target_game, 'ControllerCoverage')
         importer = DependencyImporter(dict(ai_types=AIStructureAdapter(types,catalog['variable_types']),
-            ai_enums=AIEnumAdapter(types), mailboxes=MailboxAdapter(tables,native)))
+            ai_enums=AIEnumAdapter(types), mailboxes=MailboxAdapter(tables,native),
+            link_types=LinkTypeAdapter.load(Path(source_game),Path(target_game),reader,
+                                           'ControllerCoverage',output/'links')))
         files, report = inspect(models, catalog, importer, read(scripts,STREAMING_SOURCE))
     for name, blob in files.items():
         path = output/'compiled'/name

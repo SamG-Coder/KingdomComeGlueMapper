@@ -9,6 +9,7 @@ from campaign_quest_bridge import convert_state_operations
 from campaign_quest_graph import emit_project, validate_model
 from quest_import import import_quest
 from .campaign import write
+from .model_pool import ModelPool
 
 
 def audit(game, names, output, progress=None, follow_dependencies=False, target_game=None):
@@ -19,6 +20,7 @@ def audit(game, names, output, progress=None, follow_dependencies=False, target_
     if output.exists():
         raise ValueError('Choose a fresh controller audit directory')
     models, records = [], []
+    pool = ModelPool()
     with RetailSourceReader(Path(game)) as reader:
         tables = SourceTables(Path(game), reader)
         # Resolve all requested identities before creating output or importing.
@@ -38,7 +40,7 @@ def audit(game, names, output, progress=None, follow_dependencies=False, target_
                 validate_model(model)
                 dependencies = quest_dependencies(model)
                 write(output / 'source-ir' / (name + '.json'), model)
-                models.append(model)
+                models.append(pool.add(model))
                 record.update(status='STATE_MODEL_ACCEPTED', dependencies=dependencies)
                 if follow_dependencies:
                     for dependency in dependencies:

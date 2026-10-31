@@ -721,6 +721,28 @@ The scenario generator is `quest_lab.linked_checks.scenarios`; it accepts only
 a single literal quest-completion predicate and rejects compound conditions
 rather than simplifying them.
 
+The whole-controller audit now includes the production link-type adapter,
+alongside type, enum, mailbox and native profile-streaming dependencies. A
+regression test confirms that actor-link definitions and references convert
+together while graph traversal remains explicitly unsupported by the simulator.
+Conversion of a link does not establish runtime actor discovery.
+
+The complete 165-model accepted dependency closure was audited in
+`outputs/quest-whole-campaign-shared-20261101/report.json`: 25,686 whole behavior
+trees emitted, 67,438 blocked trees, and 76,138 interpreter structural findings.
+Counts include shared helpers emitted under individual quest owners; they are
+not unique quest counts or completed playthroughs. Major recurring blockers
+include source Lua semantics, animation events, AI LOD and scheduled-activity
+lifecycles. All native-runtime and campaign-completion flags remain false.
+
+Controller collection now shares identical read-only behavior documents across
+models. Equality includes provenance and content, so differing patched documents
+remain separate, as do quest declarations and bindings. The audit loader reused
+over 15,800 document instances from the 6.3 GB source-IR set. Tests verify pooled
+and unpooled conversion equivalence and source immutability. This reduces
+duplicate retained input; conversion and report generation still consume
+substantial memory, and no measured speedup is claimed.
+
 - [ ] Differential validation of emulator event ordering against the native runtime.
 - [ ] Native Wait-menu, AI LOD and scheduler priority/preemption behaviour.
 - [ ] Native movement, scene release, animations, bed use and combat exercises.

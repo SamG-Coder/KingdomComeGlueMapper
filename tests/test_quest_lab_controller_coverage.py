@@ -13,6 +13,22 @@ from quest_lab.controller_coverage import inspect
 
 
 class CoverageTests(unittest.TestCase):
+    def test_actor_link_conversion_is_distinct_from_traversal_execution(self):
+        from test_campaign_link_types import LinkTypeTests, Scalar
+        with tempfile.TemporaryDirectory() as tmp:
+            importer=DependencyImporter({'link_types':LinkTypeTests().adapter(tmp),'ai_types':Scalar()})
+            model=source('''<Root><GraphSearch Origin="&quot;owner&quot;">
+                <LinkDataFilter tag="&quot;StoryActor&quot;" condition="&quot;$StoryActor == 'worker'&quot;"
+                    Child="&quot;worker&quot;" prune="&quot;true&quot;"/></GraphSearch></Root>''')
+            files, report=inspect([model],catalog(),importer)
+            self.assertEqual(report['conversion']['whole_trees_emitted'],1)
+            self.assertIn('AI/LinkTagDefinitions.xml',files)
+            blob=next(data for path,data in files.items() if path.startswith('AI/') and path.endswith('/quests/q_test.xml'))
+            node=E.fromstring(blob).find('.//LinkDataFilter')
+            self.assertEqual(node.get('condition'),"$__link_imported_StoryActor == 'worker'")
+            self.assertTrue(any('GraphSearch' in item['reason'] for c in report['controllers'] for item in c['findings']))
+            self.assertFalse(report['native_runtime_verified'])
+
     def test_mailbox_dependencies_are_emitted_but_not_claimed_as_runtime_delivery(self):
         from test_campaign_ai_registration import setup, emitted
         with tempfile.TemporaryDirectory() as tmp:
