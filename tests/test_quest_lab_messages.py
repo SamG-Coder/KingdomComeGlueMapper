@@ -41,6 +41,35 @@ def scenario(steps):
 
 
 class MessageTests(unittest.TestCase):
+    def test_filtered_wait_preserves_other_messages_and_reload(self):
+        from quest_lab.behavior import Behavior
+        blob=BEHAVIOR.replace(b'condition=""',b'condition="$__content.delta == $wanted"')
+        b=Behavior('receiver',blob,Graph(source(),'Messages'),variables={'total':0,'wanted':7},
+                   callbacks={'handled':'ack'})
+        b.message('Inbox',{'delta':3},{'id':'first'})
+        task=b.start('receive')
+        self.assertEqual(b.tasks[task]['status'],'message')
+        self.assertNotIn('message',b.variables)
+        saved=b.snapshot()
+        for replay in range(2):
+            if replay: b.restore(saved)
+            b.message('Inbox',{'delta':7},{'id':'second'})
+            self.assertEqual(b.tasks[task]['status'],'success')
+            self.assertEqual(b.variables['total'],7)
+            self.assertEqual(b.variables['sender'],{'id':'second'})
+            self.assertNotIn('__content',b.variables)
+            self.assertEqual(b.inboxes['Inbox'],[{'value':{'delta':3},'sender':{'id':'first'}}])
+
+    def test_bad_filter_does_not_dequeue_or_publish_outputs(self):
+        from quest_lab.behavior import Behavior
+        for condition in ('$__content.missing', '$__content.delta', 'unknown()'):
+            blob=BEHAVIOR.replace(b'condition=""',('condition="'+condition+'"').encode())
+            b=Behavior('receiver',blob,Graph(source(),'Messages'),variables={'__content':'keep'})
+            b.message('Inbox',{'delta':3},{'id':'first'})
+            with self.assertRaises(Unsupported): b.start('receive')
+            self.assertEqual(len(b.inboxes['Inbox']),1)
+            self.assertEqual(b.variables,{'__content':'keep'})
+
     def test_compiled_handler_allows_omitted_message_outputs_and_replays(self):
         from test_campaign_ai_registration import setup
         from test_campaign_behavior import source as model_source, catalog
@@ -52,7 +81,7 @@ class MessageTests(unittest.TestCase):
                 _, _, importer, _ = setup(tmp)
                 model=model_source('<Root><Behavior><ProcessMessage Atomic="true" timeout="-1" '
                     'timeType="GameTime" variable="'+payload+'" senderInfo="'+sender+'" '
-                    'inbox="StoryInbox" condition="" answerVar=""><Success/></ProcessMessage></Behavior></Root>')
+                    'inbox="StoryInbox" condition="$__content.ready" answerVar=""><Success/></ProcessMessage></Behavior></Root>')
                 files, _, report=convert_behaviors([model],'OptionalOutputs',catalog(),importer=importer)
                 self.assertEqual(report['whole_trees_emitted'],1)
                 b=Behavior('receiver',next(iter(files.values())),graph())
@@ -61,13 +90,16 @@ class MessageTests(unittest.TestCase):
                 saved=b.snapshot()
                 for replay in range(2):
                     if replay: b.restore(saved)
+                    b.message('testcampaign_StoryInbox',{'ready':False},{'id':'other'})
+                    self.assertEqual(b.tasks[task]['status'],'message')
                     b.message('testcampaign_StoryInbox',{'ready':True},{'id':'quest'})
                     self.assertEqual(b.tasks[task]['status'],'success')
                     expected={}
                     if payload: expected[payload]={'ready':True}
                     if sender: expected[sender]={'id':'quest'}
                     self.assertEqual(b.variables,expected)
-                    self.assertEqual(b.inboxes['testcampaign_StoryInbox'],[])
+                    self.assertEqual(b.inboxes['testcampaign_StoryInbox'],
+                        [{'value':{'ready':False},'sender':{'id':'other'}}])
 
     def test_invalid_message_binding_does_not_consume_queued_message(self):
         from quest_lab.behavior import Behavior

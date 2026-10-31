@@ -340,8 +340,8 @@ class Behavior:
                 finish(node.get('doFail') == 'false')
             else: task['status'] = 'waiting'
         elif tag == 'ProcessMessage':
-            if literal(node.get('timeout','')) not in (-1, '-1') or node.get('condition',''):
-                raise Unsupported('Only unfiltered infinite mailbox waits are supported: ' + path)
+            if literal(node.get('timeout','')) not in (-1, '-1'):
+                raise Unsupported('Only infinite mailbox waits are supported: ' + path)
             if 'message' not in frame:
                 bindings = []
                 for attr, key in (('variable','value'),('senderInfo','sender')):
@@ -351,8 +351,16 @@ class Behavior:
                     bindings.append((variable,key))
                 inbox = expr(node.get('inbox',''))
                 messages = self.inboxes.get(inbox, [])
-                if not messages: task['status'] = 'message'; return
-                frame['message'] = messages.pop(0)
+                condition = node.get('condition','')
+                selected = None
+                for index, message in enumerate(messages):
+                    # Candidate content is temporary filter context, never a
+                    # published output or a mutation of controller variables.
+                    context = dict(self.variables, __content=message['value'])
+                    if not condition or boolean(evaluate(condition, context, self.graph.source.enum_value)):
+                        selected = index; break
+                if selected is None: task['status'] = 'message'; return
+                frame['message'] = messages.pop(selected)
                 for variable, key in bindings:
                     self.variables[variable] = frame['message'][key]
             if frame.pop('child_result', True) is False: finish(False); return

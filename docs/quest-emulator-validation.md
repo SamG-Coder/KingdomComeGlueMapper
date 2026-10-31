@@ -613,8 +613,14 @@ Previously those handlers consumed a queued message and then rejected the empty
 binding. Bindings are now validated before dequeueing, and omitted outputs do
 not create variables. Compiler-to-interpreter tests cover omitted sender,
 omitted payload, both omitted, waiting-handler reload, and invalid bindings
-retaining their queued message. Filtered/timed mailbox waits and native mailbox
-arbitration remain unimplemented; this change is not a full tutorial run.
+retaining their queued message. Infinite mailbox waits also evaluate authored
+conditions against each candidate's temporary `__content` and the controller
+variables. The emulator selects the first matching queued message, retaining
+nonmatching messages in order. Filter errors and nonboolean results stop the
+run without consuming or publishing the candidate. Compiler-to-interpreter
+tests cover filtered waits with optional outputs and save/reload. Finite timed
+waits and native mailbox arbitration remain unimplemented; this is not a full
+tutorial run or proof of native competing-reader ordering.
 
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
