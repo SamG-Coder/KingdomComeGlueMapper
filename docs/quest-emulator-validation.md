@@ -332,6 +332,22 @@ gameplay defects. Full campaign execution remains incomplete.
 
 ## Remaining verification boundaries
 
+### Controller bridge checkpoint — 1 November 2026
+
+Quest Lab now delivers converted AI concept signals to active native bridge
+listeners. A regression converts source SetQuestObjective operations through
+the production behavior compiler, wires the emitted bridge into the campaign,
+and executes the controller to start and complete an objective. Replay after
+graph restore, inactive listeners, and unknown notifications are checked.
+
+An original-source controller conversion for `q_skalitz` and
+`q_returnToSkalitz` emitted 389 behavior trees and withheld 1,730 across their
+dependency closures. These counts include shared helpers, not just the two
+quest controllers. Missing actor/profile/message adapters and blocked helper
+dependencies still prevent complete execution; signal support alone does not
+make either opening sequence playable. Local diagnostic conversion evidence:
+`outputs/quest-controller-20261101/report.json`.
+
 ### Inventory acquisition checkpoint — 1 November 2026
 
 The emulator now supports explicit class-and-count acquisition stimuli for the

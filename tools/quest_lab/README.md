@@ -103,6 +103,15 @@ The player alias is an explicit simulator binding, not automatic discovery of
 the live player. Reading item definitions establishes registration, not native
 model rendering, item transfer, or quest gameplay correctness.
 
+Converted `SendAIConceptSignal_*` behavior leaves deliver their notification to
+active `AIConceptSignalTrigger` listeners in the loaded graph. This exercises
+the production controller-to-quest bridge without bypassing it with a direct
+quest port call. Unknown notifications fail explicitly; inactive listeners do
+not emit. Signals must be argument-free leaves and cannot be replaced by an
+external contract. Delivery uses stable graph order, which is an emulator
+policy, not a validated reconstruction of native AI scheduling. Game-context
+conditions and continuous gates remain separate coverage requirements.
+
 Run the package-wide audit, optionally comparing and dry-running **every** source
 quest record through the production quest-state emitter:
 

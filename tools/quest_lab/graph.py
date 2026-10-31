@@ -26,7 +26,8 @@ FUNCTIONS = {
     'math::boolean::Xor': lambda v: boolean(v['A']) != boolean(v['B']),
 }
 BUILTINS = {'State', 'Function', 'IfFunction', 'If', 'TriggerSequence', 'Timer',
-            'Trace', 'HasteTrigger', 'GameStart', 'InstantSendMessage', 'ItemDescriptorTrigger'} | collection_nodes.KINDS
+            'Trace', 'HasteTrigger', 'GameStart', 'InstantSendMessage', 'ItemDescriptorTrigger',
+            'AIConceptSignalTrigger'} | collection_nodes.KINDS
 
 
 def qualified(scope, value):
@@ -295,6 +296,7 @@ class Graph:
             options = [('True' if v else 'False') if type(v) is bool else str(v) for v in self.enum_values.get(name, [])]
             return port in ('State','OnExec','OnChanged', *options, *('On'+v for v in options))
         return (kind == 'Function' and port == 'bool'
+            or kind == 'AIConceptSignalTrigger' and port == 'OnNotification'
             or kind == 'ItemDescriptorTrigger' and port in ('OnAcquire', 'OnTargetAmountAcquire')
             or kind in ('If','IfFunction') and port in ('True','False')
             or kind == 'Timer' and port == 'OnFinished'
@@ -308,11 +310,17 @@ class Graph:
                 v for n in self.nodes.values() for v in n['values'].values()}:
             if not self._known_ref(ref): self.issue(ref, 'Unresolved or unsupported source port')
         allowed = {'State': {'DefaultValue','Value'}, 'If': {'Condition'},
+            'AIConceptSignalTrigger': {'IsActive'},
             'ItemDescriptorTrigger': {'Inventory', 'ItemDescriptor', 'IsActive'},
             'IfFunction': {'ValueA','ValueB','Op','A','B','Value'}, 'Function': {'A','B','Value'},
             'Timer': {'Duration','TimeType'}, 'Trace': {'Value'},
             'TriggerSequence': set(), 'HasteTrigger': set(), 'GameStart': set()}
         for name, node in self.nodes.items():
+            if node['kind'] == 'AIConceptSignalTrigger':
+                if not node['element'].get('NotificationName'):
+                    self.issue(name, 'AI signal listener requires NotificationName')
+                if set(node['constants']) | set(node['values']) != {'IsActive'}:
+                    self.issue(name, 'AI signal listener requires IsActive only')
             if name in self.contracts or node['journal']: continue
             if name in self.native_functions: continue  # Interface remains explicitly unsupported without a contract.
             if node['kind'] == 'InstantSendMessage':
@@ -425,6 +433,24 @@ class Graph:
 
     def emit(self, event):
         self.stack.append(('event', event))
+
+    def signal(self, notification):
+        """Deliver a named controller signal to active declared listeners.
+
+        Stable XML order is emulator policy; native scheduling is not modeled.
+        Missing listeners fail explicitly rather than pretending delivery.
+        """
+        listeners = [(name, node) for name, node in self.nodes.items()
+                     if node['kind'] == 'AIConceptSignalTrigger'
+                     and node['element'].get('NotificationName') == notification]
+        if not isinstance(notification, str) or not notification or not listeners:
+            raise Unsupported('Unbound AI concept signal: ' + str(notification))
+        events = [name + '.OnNotification' for name, _ in listeners
+                  if boolean(self._args(name)['IsActive'])]
+        self.record('ai_concept_signal', notification=notification, listeners=events,
+                    boundary='modeled_signal_delivery')
+        for event in reversed(events): self.emit(event)
+        self.drain()
 
     def fire(self, event):
         if event.rpartition('.')[0] in self.native_functions:

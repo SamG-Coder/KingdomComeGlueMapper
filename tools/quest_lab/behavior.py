@@ -40,12 +40,16 @@ class Behavior:
             self.trees[key] = key
             self._index(root, key)
         for tag, contract in self.contracts.items():
-            if tag in SUPPORTED: raise ValueError('Cannot stub interpreted behavior: ' + tag)
+            if tag in SUPPORTED or tag.startswith('SendAIConceptSignal_'):
+                raise ValueError('Cannot stub interpreted behavior: ' + tag)
             if not contract.get('reason'): raise ValueError('Behavior contract requires a reason')
 
     def _index(self, node, path):
         self.nodes[path] = node
-        if node.tag not in SUPPORTED and node.tag not in self.contracts:
+        signal = node.tag.startswith('SendAIConceptSignal_') and len(node.tag) > len('SendAIConceptSignal_')
+        if signal and (len(node) or node.attrib):
+            self.unsupported.append(dict(node=path, reason='AI concept signal must be an argument-free leaf'))
+        if node.tag not in SUPPORTED and node.tag not in self.contracts and not signal:
             self.unsupported.append(dict(node=path, reason='Unsupported behavior: ' + node.tag))
         if node.tag in self.contracts and len(node):
             self.unsupported.append(dict(node=path, reason='Engine contract cannot replace a subtree'))
@@ -104,7 +108,11 @@ class Behavior:
         self.graph.tick()
         def expr(text): return evaluate(text, self.variables)
         def finish(result=True): self._finish(name, result)
-        if tag in self.contracts:
+        if tag.startswith('SendAIConceptSignal_'):
+            if len(node) or node.attrib:
+                raise Unsupported('AI concept signal must be an argument-free leaf: ' + path)
+            self.graph.signal(tag.removeprefix('SendAIConceptSignal_')); finish()
+        elif tag in self.contracts:
             if len(node): raise Unsupported('Engine contract cannot replace a subtree: ' + path)
             task['status'] = 'external'
             self.record('behavior_request', task=name, node=path, operation=tag, attributes=dict(node.attrib))
