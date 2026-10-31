@@ -41,6 +41,53 @@ def scenario(steps):
 
 
 class MessageTests(unittest.TestCase):
+    def test_behavior_sender_routes_payload_to_repeating_receiver(self):
+        sender = b'''<BehaviorTree name="send"><Root><Behavior><Sequence>
+          <InstantSendMessageToNPC target="$recipient" type="fixture:increment" values="delta($amount + 1)"/>
+          <Expression expressions="$amount = 99"/>
+          </Sequence></Behavior></Root></BehaviorTree>'''
+        receiver = BEHAVIOR.replace(b'<ProcessMessage ',b'<Loop count="-1"><ProcessMessage ').replace(
+            b'</ProcessMessage>',b'</ProcessMessage></Loop>')
+        s = scenario([dict(action='behavior_start',controller='actor',tree='receive',task='listen'),
+                      dict(action='behavior_start',controller='sender',tree='send'),
+                      dict(action='assert_behavior',controller='actor',variables={'total':4}),
+                      dict(action='assert_behavior',controller='sender',variables={'amount':99}),
+                      dict(action='save',name='first'),
+                      dict(action='behavior_start',controller='sender',tree='send'),
+                      dict(action='assert_behavior',controller='actor',variables={'total':104}),
+                      dict(action='load',name='first'),
+                      dict(action='behavior_start',controller='sender',tree='send'),
+                      dict(action='assert_behavior',controller='actor',variables={'total':104})])
+        s['behaviors'].append(dict(id='sender',file='sender.xml',variables={'recipient':'actor-17','amount':3}))
+        r=Runner(s,source=Source.blobs({'graph.xml':GRAPH,'behavior.xml':receiver,'sender.xml':sender})).run()
+        self.assertEqual(r['status'],'PASS',r.get('error'))
+        messages=[e for e in r['timeline'] if e['kind']=='message_queued']
+        self.assertEqual([m['content']['delta'] for m in messages],[4,100,100])
+
+    def test_behavior_message_variable_is_copied_and_unrouted_message_blocks_pass(self):
+        sender=b'''<BehaviorTree name="send"><Root><Behavior>
+          <InstantSendMessageToNPC target="$recipient" type="fixture:increment" variable="$payload"/>
+          </Behavior></Root></BehaviorTree>'''
+        s=scenario([dict(action='behavior_start',controller='sender',tree='send'),
+                    dict(action='behavior_set',controller='sender',values={'payload':{'delta':99}}),
+                    dict(action='assert_behavior',controller='sender',tasks={'send:1':'success'})])
+        s['message_routes']=[]
+        s['behaviors'].append(dict(id='sender',file='sender.xml',variables={'recipient':'actor-17','payload':{'delta':5}}))
+        runner=Runner(s,source=Source.blobs({'graph.xml':GRAPH,'behavior.xml':BEHAVIOR,'sender.xml':sender}))
+        self.assertEqual(runner.run()['status'],'UNSUPPORTED')
+        self.assertEqual(runner.graph.messages[0]['content'],{'delta':5})
+
+    def test_behavior_message_invalid_payloads_do_not_dispatch(self):
+        from quest_lab.behavior import Behavior
+        for fields in ('values="delta(1),delta(2)"', 'values="bad"',
+                       'variable="$payload" values="delta(2)"', 'variable="$scalar"'):
+            blob=('<BehaviorTree name="send"><Root><Behavior><InstantSendMessageToNPC '
+                  'target="$recipient" type="fixture:increment" '+fields+'/></Behavior></Root></BehaviorTree>').encode()
+            g=Graph(source(),'Messages')
+            b=Behavior('sender',blob,g,variables={'recipient':'actor-17','payload':{'delta':5},'scalar':3})
+            with self.assertRaises(Unsupported): b.start('send')
+            self.assertEqual(g.messages,[])
+
     def test_repeating_handler_consumes_routed_graph_messages_after_reload(self):
         repeated = BEHAVIOR.replace(b'<ProcessMessage ', b'<Loop count="-1"><ProcessMessage ').replace(
             b'</ProcessMessage>', b'</ProcessMessage></Loop>')

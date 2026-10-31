@@ -532,6 +532,22 @@ listeners canceled by parallel completion, and actual graph-message routing
 through `Runner` across save/reload. State rewinds on reload; diagnostic event
 counts retain replay history, consistent with the existing graph trace policy.
 
+### Behavior-to-controller messages — 1 November 2026
+
+`InstantSendMessageToNPC` now sends through the same copied-payload queue as
+Skald `InstantSendMessage`. It accepts an explicit message type and receiver,
+with either a dictionary-valued variable or named `field(expression)` payload
+initializers. The existing scenario routes select the receiver controller,
+mailbox and explicit sender metadata. Dispatch completes without assuming an
+acknowledgement; missing routes retain the message and prevent a passing run.
+
+Tests route immediate sends from one behavior controller into a repeating
+receiver, verify subsequent messages after save/reload, and check payload-copy
+semantics. Duplicate fields, malformed initializers, non-structured payloads,
+and combined variable/initializer policies remain rejected. This adds simulator
+delivery, not native message type registration, native NPC scheduling, or
+synchronous `SendMessageToNPC` request/reply semantics.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

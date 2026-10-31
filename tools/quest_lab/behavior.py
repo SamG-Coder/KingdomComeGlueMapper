@@ -7,16 +7,18 @@ must be supplied as explicit scenario outcomes.
 import copy
 import hashlib
 import json
+import re
 import xml.etree.ElementTree as E
 
 from . import Unsupported
-from .expressions import assignments, boolean, duration, evaluate, literal
+from .expressions import assignments, boolean, duration, evaluate, literal, parts
 
 
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
-    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel', 'Loop'}
+    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel', 'Loop',
+    'InstantSendMessageToNPC'}
 
 
 class Behavior:
@@ -104,6 +106,8 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Parallel requires nonempty branches and explicit All/Any policies'))
         if node.tag == 'Loop' and (set(node.attrib) != {'count'} or len(node) != 1):
             self.unsupported.append(dict(node=path, reason='Loop requires an explicit count and exactly one body'))
+        if node.tag == 'InstantSendMessageToNPC' and (len(node) or set(node.attrib) - {'target','type','variable','values'}):
+            self.unsupported.append(dict(node=path, reason='Immediate NPC message requires a leaf and known payload fields'))
         if node.tag == 'GameContextCheck' and (
                 set(node.attrib) != {'context', 'saveVersion'} or node.get('saveVersion') != '2'
                 or sorted(c.tag for c in node) != ['Else', 'Then']):
@@ -189,6 +193,24 @@ class Behavior:
             target = self.includes[path]
             self.record('behavior_include', task=name, node=path, target=target)
             task['frames'].append(dict(path=target,index=0))
+        elif tag == 'InstantSendMessageToNPC':
+            if len(node) or set(node.attrib) - {'target','type','variable','values'}:
+                raise Unsupported('Unsupported immediate NPC message schema: '+path)
+            typ = node.get('type','')
+            if not re.fullmatch(r'[A-Za-z_]\w*(?::[A-Za-z_]\w*)*',typ):
+                raise Unsupported('Immediate NPC message needs an explicit type: '+path)
+            variable, values = node.get('variable',''), node.get('values','')
+            if variable and values:
+                raise Unsupported('Combined message variable and initializer needs an adapter: '+path)
+            content = expr(variable) if variable else {}
+            if values:
+                for field in parts(values):
+                    match = re.fullmatch(r'([A-Za-z_]\w*)\s*\((.*)\)',field,re.S)
+                    if not match or match[1] in content:
+                        raise Unsupported('Malformed or duplicate message field: '+field)
+                    content[match[1]] = expr(match[2])
+            self.graph.queue_message(self.name+':'+path, typ, expr(node.get('target','')), content)
+            finish()
         elif tag in self.contracts:
             if len(node): raise Unsupported('Engine contract cannot replace a subtree: ' + path)
             task['status'] = 'external'

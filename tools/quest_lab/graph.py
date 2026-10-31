@@ -546,15 +546,23 @@ class Graph:
                 raise Unsupported('Message needs an explicit type and a nonempty receiver identity: ' + name)
             if any(k != 'Receiver' and (not k.startswith('Content_') or len(k) <= 8) for k in values):
                 raise Unsupported('Unknown message payload input: ' + name)
-            self.message_serial += 1
-            message = dict(id=self.message_serial, node=name, message_type=typ, receiver=receiver,
-                           content={k[8:]:copy.deepcopy(v) for k,v in values.items() if k.startswith('Content_')})
-            self.messages.append(message)
-            self.record('message_queued', **copy.deepcopy(message))
+            self.queue_message(name, typ, receiver,
+                               {k[8:]:v for k,v in values.items() if k.startswith('Content_')})
             # Dispatch completion is not a receiver acknowledgement. Delivery
             # and a consumer callback are separate, observable operations.
             self.emit(name + '.OnExec')
         else: raise Unsupported('Unsupported execution: ' + kind + '.' + port)
+
+    def queue_message(self, origin, message_type, receiver, content):
+        if not isinstance(message_type, str) or not message_type or not isinstance(receiver, str) or not receiver:
+            raise Unsupported('Message needs an explicit type and a nonempty receiver identity: '+origin)
+        if not isinstance(content, dict) or any(not isinstance(k,str) or not k for k in content):
+            raise Unsupported('Message content requires named fields: '+origin)
+        self.message_serial += 1
+        message = dict(id=self.message_serial, node=origin, message_type=message_type, receiver=receiver,
+                       content=copy.deepcopy(content))
+        self.messages.append(message)
+        self.record('message_queued', **copy.deepcopy(message))
 
     def drain(self):
         while self.stack:
