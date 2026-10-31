@@ -648,8 +648,7 @@ arrays/string-keyed maps are initialized. Explicit scenario fixtures may supply
 engine-owned records; absent scalar/record initializers remain unbound until
 an operation assigns them, rather than receiving guessed defaults. Separate
 invocations have separate locals; parallel branches share their invocation's
-scope. Static helpers without declarations retain their caller scope, while
-helpers with local declarations remain unsupported. Engine-owned record
+scope. Static helpers without declarations retain their caller scope. Engine-owned record
 construction and custom-keyed maps still need adapters.
 
 `assert_behavior.task_variables` checks these locals by task name, separately
@@ -683,6 +682,21 @@ their policies are not inferred from names. Re-indexing the emitted opening
 controllers removes 27 unsupported-operation findings, leaving 2,771. This is
 structural coverage rather than whole-controller execution. Evidence:
 `outputs/quest-collection-coverage-20261101.json`.
+
+Static included helpers now have per-call scopes for supported local
+declarations. A helper's declared locals shadow caller bindings, including
+uninitialized locals; undeclared references can reach the caller scope.
+Parallel branches inside the helper share its call scope, and snapshots retain
+the scope chain without relying on in-memory object aliases. Returning or
+canceling a helper releases its call-local storage. Compiler-to-simulator tests
+cover repeated calls, caller/local name collisions, parallel waits, JSON reload,
+unbound reads and cancellation. Dynamic includes and child overrides remain
+unsupported.
+
+Re-indexing the opening set now reaches 9,249 nodes, up from 8,550, and reports
+3,029 structural findings. The higher finding count includes newly reachable
+helper code; it is not a regression or a campaign completion metric. Evidence:
+`outputs/quest-call-scope-coverage-20261101.json`.
 
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly

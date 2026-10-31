@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+import json
 import xml.etree.ElementTree as E
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -27,6 +28,51 @@ def caller(file='shared.xml', name='helper'):
 
 
 class IncludeTests(unittest.TestCase):
+    def test_compiled_helper_locals_shadow_caller_and_survive_parallel_reload(self):
+        from test_quest_lab_parallel import wait
+        helper='<Root><Behavior><Sequence><Parallel successMode="All" failureMode="Any">'+\
+            '<Sequence>'+wait(1)+'<Expression expressions="$count=$count+1"/></Sequence>'+\
+            '<Expression expressions="$count=$count+1"/></Parallel>'+\
+            '<Expression expressions="$total=$total+$count"/></Sequence></Behavior></Root>'
+        model=source('<Root><Behavior><Sequence><IncludeTree File="shared.xml" Name="helper"/>'
+                     '<IncludeTree File="shared.xml" Name="helper"/></Sequence></Behavior></Root>',{
+            'libs/ai/shared.xml':dict(trees={'helper':dict(variables=[
+                dict(name='count',type='_int',values='1',form='single')],root=ast(E.fromstring(helper)))})})
+        model['behavior_documents']['libs/ai/quests/q_test.xml']['trees']['onUpdate']['variables'].append(
+            dict(name='count',type='_int',values='10',form='single'))
+        files,_,report=convert_behaviors([model],'CallScopes',catalog())
+        self.assertEqual(report['whole_trees_emitted'],2)
+        main=next(blob for path,blob in files.items() if path.endswith('/quests/q_test.xml'))
+        g=graph(files); b=Behavior('scopes',main,g,variables={'total':0})
+        self.assertFalse(b.unsupported)
+        task=b.start('onUpdate')
+        saved=json.loads(json.dumps(b.snapshot())); saved_graph=g.snapshot()
+        for replay in range(2):
+            if replay:g.restore(saved_graph);b.restore(saved)
+            while b.next_deadline() is not None:g.advance_to(b.next_deadline());b.pump()
+            self.assertEqual(b.tasks[task]['status'],'success')
+            self.assertEqual(b.tasks[task]['locals']['count'],10)
+            self.assertEqual(b.variables,{'total':6})
+            self.assertEqual(b.tasks[task]['call_scopes'],{})
+
+    def test_helper_uninitialized_local_does_not_read_caller_variable(self):
+        local=b'<BehaviorTree name="helper"><Variables><Variable name="x" type="_int"/></Variables><Root><Behavior><Expression expressions="$out=$x"/></Behavior></Root></BehaviorTree>'
+        b=Behavior('x',caller(),graph({'AI/shared.xml':local}),variables={'x':9})
+        with self.assertRaisesRegex(Unsupported,'Unbound'):b.start('main')
+        self.assertEqual(b.variables,{'x':9})
+
+    def test_canceling_waiting_helper_releases_call_locals(self):
+        from test_quest_lab_parallel import wait
+        local=('<BehaviorTree name="helper"><Variables><Variable name="x" type="_int" values="3"/>'
+               '</Variables><Root><Behavior>'+wait(10)+'</Behavior></Root></BehaviorTree>').encode()
+        main=caller().replace(b'<IncludeTree',b'<Parallel successMode="Any" failureMode="All"><IncludeTree').replace(
+            b'Name="helper"/>',b'Name="helper"/><Success/></Parallel>')
+        b=Behavior('x',main,graph({'AI/shared.xml':local}))
+        task=b.start('main')
+        self.assertEqual(b.tasks[task]['status'],'success')
+        self.assertEqual(b.tasks[task]['call_scopes'],{})
+        self.assertTrue(any(t['status']=='canceled' for t in b.tasks.values()))
+
     def test_converted_nested_helper_wait_and_objective_action_survive_restore(self):
         model = source('<Root><Behavior><IncludeTree File="shared.xml" Name="helper"/></Behavior></Root>', {
             'libs/ai/shared.xml': dict(trees={'helper': dict(variables=[], root=ast(E.fromstring(

@@ -5,7 +5,6 @@ KCD2's scheduler arbitration, navmesh, animation or perception. Those boundaries
 must be supplied as explicit scenario outcomes.
 """
 import copy
-from collections import ChainMap
 import hashlib
 import json
 import re
@@ -27,7 +26,7 @@ class Behavior:
     def __init__(self, name, blob, graph, variables=None, contracts=None, callbacks=None):
         self.name, self.graph = name, graph
         self.contracts, self.callbacks = copy.deepcopy(contracts or {}), dict(callbacks or {})
-        self.fingerprint = hashlib.sha256(b'task-local-v2\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
+        self.fingerprint = hashlib.sha256(b'call-local-v1\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
         self.root = E.fromstring(blob)
         self.nodes, self.trees = {}, {}
         self.declarations = {}
@@ -90,9 +89,12 @@ class Behavior:
                     trees = [t for t in trees if t.get('name') == name]
                     if len(trees) != 1 or len(trees[0].findall('Root')) != 1:
                         raise Unsupported('Missing/ambiguous included tree: '+file+':'+name)
-                    if trees[0].findall('./Variables/*'):
-                        raise Unsupported('Included tree local variables need a call-scope adapter')
+                    if len(trees[0].findall('Variables')) > 1:
+                        raise Unsupported('Duplicate included variable declarations')
+                    declarations=list(trees[0].findall('./Variables/*'))
+                    initialize(declarations,{},self.graph.source.enum_value,self.graph.source)
                     target = '@include:'+file+':'+name
+                    self.declarations[target] = declarations
                     self.includes[path] = target
                     used[file] = self.graph.source.hashes[file]
                     if target not in self.nodes: self._index(trees[0].find('Root'), target)
@@ -172,6 +174,8 @@ class Behavior:
     def _finish(self, name, result):
         task = self.tasks[name]
         frame = task['frames'].pop()
+        if frame.get('call_scope') and frame['path'] in self.declarations:
+            self.tasks[task.get('scope',name)].get('call_scopes',{}).pop(frame['call_scope'],None)
         self.record('behavior_return', task=name, node=frame['path'], result=result)
         if task['frames']: task['frames'][-1]['child_result'] = result
         else:
@@ -185,29 +189,36 @@ class Behavior:
         if task['status'] in ('success','fail','canceled'): return
         for frame in task['frames']:
             for child in frame.get('parallel_children', []): self._cancel(child)
+            if frame.get('call_scope') and frame['path'] in self.declarations:
+                self.tasks[task.get('scope',name)].get('call_scopes',{}).pop(frame['call_scope'],None)
         self.record('behavior_cancel', task=name, previous_status=task['status'])
         task['frames'] = []
         task['status'] = 'canceled'
 
     def _push(self, task, frame, index):
-        task['frames'].append(dict(path=frame['path'] + '/' + str(index), index=0))
+        task['frames'].append(dict(path=frame['path'] + '/' + str(index), index=0,
+                                   call_scope=frame.get('call_scope')))
 
     def _step(self, name):
         task = self.tasks[name]
         frame = task['frames'][-1]
         path = frame['path']; node = self.nodes[path]; tag = node.tag
         owner = self.tasks[task.get('scope',name)]
-        local = owner.get('locals',{})
-        declared = owner.get('declared',[])
-        # Undeclared names remain explicit controller/scenario bindings. Only
-        # declared locals are task-owned; parallel branches share that scope.
-        class Environment(ChainMap):
+        calls=owner.setdefault('call_scopes',{})
+        chain=[]; scope=frame.get('call_scope')
+        while scope is not None:
+            current=calls[scope];chain.append(current);scope=current['parent']
+        bindings=dict(self.variables); destinations={}
+        for current in [owner]+list(reversed(chain)):
+            for key in current.get('declared',[]):
+                bindings.pop(key,None)
+                destinations[key]=current['locals']
+            bindings.update(current.get('locals',{}))
+        class Environment(dict):
             def __setitem__(env, key, value):
-                if key in declared: local[key] = value
-                else:
-                    self.variables[key] = value
-                    env.maps[1][key] = value
-        variables = Environment(local, {k:v for k,v in self.variables.items() if k not in declared})
+                destinations.get(key,self.variables)[key]=value
+                super().__setitem__(key,value)
+        variables = Environment(bindings)
         self.visited.add(path)
         self.graph.tick()
         def expr(text): return evaluate(text, variables, self.graph.source.enum_value)
@@ -220,8 +231,14 @@ class Behavior:
             if path in self.include_errors: raise Unsupported(self.include_errors[path])
             if 'child_result' in frame: finish(frame.pop('child_result')); return
             target = self.includes[path]
+            self.serial += 1
+            scope = 'call:'+str(self.serial)
+            declarations=self.declarations[target]
+            calls[scope]=dict(parent=frame.get('call_scope'),
+                declared=[n.get('name') for n in declarations],
+                locals=initialize(declarations,{},self.graph.source.enum_value,self.graph.source))
             self.record('behavior_include', task=name, node=path, target=target)
-            task['frames'].append(dict(path=target,index=0))
+            task['frames'].append(dict(path=target,index=0,call_scope=scope))
         elif tag == 'InstantSendMessageToNPC':
             if len(node) or set(node.attrib) - {'target','type','variable','values'}:
                 raise Unsupported('Unsupported immediate NPC message schema: '+path)
@@ -252,7 +269,7 @@ class Behavior:
                     self.serial += 1
                     child = name + ':parallel:' + str(self.serial)
                     if child in self.tasks: raise ValueError('Duplicate parallel task: '+child)
-                    self.tasks[child] = dict(frames=[dict(path=path+'/'+str(index), index=0)],
+                    self.tasks[child] = dict(frames=[dict(path=path+'/'+str(index), index=0,call_scope=frame.get('call_scope'))],
                                             status='running', parallel_parent=name, scope=task.get('scope',name))
                     frame['parallel_children'].append(child)
                 self.record('behavior_parallel', task=name, node=path, children=frame['parallel_children'][:])
