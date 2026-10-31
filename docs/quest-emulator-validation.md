@@ -649,7 +649,7 @@ engine-owned records; absent scalar/record initializers remain unbound until
 an operation assigns them, rather than receiving guessed defaults. Separate
 invocations have separate locals; parallel branches share their invocation's
 scope. Static helpers without declarations retain their caller scope, while
-helpers with local declarations remain unsupported. Automatic structured-record
+helpers with local declarations remain unsupported. Engine-owned record
 construction and custom-keyed maps still need adapters.
 
 `assert_behavior.task_variables` checks these locals by task name, separately
@@ -658,6 +658,21 @@ declared answer in the mailbox task. Tests cover compiler-emitted defaults,
 parallel sharing, invocation isolation, copied input records, unbound reads,
 invalid declarations and JSON save/reload. Snapshot fingerprints were changed
 to reject snapshots made with the former global-only variable model.
+
+Converted `Types` registries now supply structured-record initialization when
+all required member defaults are explicit and supported. Nested record defaults
+and per-variable `field(value)` overrides are supported; native raw string
+defaults remain literal text. Missing member defaults leave an output-only
+record unbound, while malformed schemas, recursive definitions, duplicate
+overrides and type mismatches are rejected. Type registry hashes participate
+in snapshot compatibility. Explicit scenario record fixtures remain distinct
+from automatically constructed values.
+
+Running the constructor against the emitted opening registry constructed 65
+nonempty record types and reported 306 unsupported types. The largest remaining
+gaps are engine-owned WUID values and absent scalar defaults; none were guessed.
+This constructs data, not running quest controllers. Evidence:
+`outputs/quest-record-defaults-20261101.json`.
 
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly

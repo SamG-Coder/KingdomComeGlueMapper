@@ -25,6 +25,7 @@ class Source:
         self.definitions = {}
         self.hashes = {}
         self.enums = {}
+        self.types = {}
         if self.path.is_dir():
             for p in sorted(self.path.rglob('*.xml')):
                 self.add(p.relative_to(self.path).as_posix(), p.read_bytes())
@@ -41,7 +42,7 @@ class Source:
     def blobs(cls, blobs):
         obj = cls.__new__(cls)
         obj.path = Path('<generated>')
-        obj.files, obj.definitions, obj.hashes, obj.enums = {}, {}, {}, {}
+        obj.files, obj.definitions, obj.hashes, obj.enums, obj.types = {}, {}, {}, {}, {}
         for path, blob in sorted(blobs.items()): obj.add(path, blob)
         return obj
 
@@ -56,6 +57,13 @@ class Source:
         self.files[key] = root
         self.hashes[key] = hashlib.sha256(data).hexdigest()
         if root is None: return
+        for group in root.findall('./Types'):
+            def visit_types(parent, prefix=''):
+                for node in parent.findall('Type'):
+                    name = prefix + node.get('Name','')
+                    self.types.setdefault(name, []).append((key, group.get('version'), node))
+                    visit_types(node,name+':')
+            visit_types(group)
         for group in root.findall('./Enums'):
             for enum in group.findall('Enum'):
                 self.enums.setdefault(enum.get('Name'), []).append((key, group.get('version'), enum))

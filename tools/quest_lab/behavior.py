@@ -27,7 +27,7 @@ class Behavior:
     def __init__(self, name, blob, graph, variables=None, contracts=None, callbacks=None):
         self.name, self.graph = name, graph
         self.contracts, self.callbacks = copy.deepcopy(contracts or {}), dict(callbacks or {})
-        self.fingerprint = hashlib.sha256(b'task-local-v1\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
+        self.fingerprint = hashlib.sha256(b'task-local-v2\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
         self.root = E.fromstring(blob)
         self.nodes, self.trees = {}, {}
         self.declarations = {}
@@ -49,6 +49,8 @@ class Behavior:
         self._resolve_includes()
         enum_files = {p:self.graph.source.hashes[p] for declarations in self.graph.source.enums.values()
                       for p,_,_ in declarations}
+        enum_files.update({p:self.graph.source.hashes[p] for declarations in self.graph.source.types.values()
+                           for p,_,_ in declarations})
         self.fingerprint = hashlib.sha256((self.fingerprint+json.dumps(enum_files,sort_keys=True)).encode()).hexdigest()
         for tag, contract in self.contracts.items():
             if tag in SUPPORTED or tag.startswith('SendAIConceptSignal_'):
@@ -137,7 +139,7 @@ class Behavior:
         self.serial += 1
         task = task or tree + ':' + str(self.serial)
         if task in self.tasks: raise ValueError('Duplicate task: ' + task)
-        local = initialize(self.declarations[tree], self.variables, self.graph.source.enum_value)
+        local = initialize(self.declarations[tree], self.variables, self.graph.source.enum_value, self.graph.source)
         self.tasks[task] = dict(frames=[dict(path=self.trees[tree], index=0)], status='running',
                                scope=task, locals=local,
                                declared=[n.get('name') for n in self.declarations[tree]])
