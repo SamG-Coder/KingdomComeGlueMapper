@@ -357,6 +357,16 @@ These are coverage requirements, not 1,950 verified gameplay defects. Evidence:
 `outputs/quest-campaign-inventory-20261101/linked-conversion.json`.
 All 106 Quest Lab tests pass after the integration.
 
+A subsequent run reads actual KCD2 and installed-mod item definitions through
+the production registry, including placeholder replacement identities. It binds
+88 objectives, including 12 in Skatliz. All 88 pass empty-inventory, quantity and
+completion checks in the joint graph, with zero interpreter coverage findings.
+Inputs remain explicit acquisition stimuli; shop/dialogue/controller execution
+and native ownership transfer are not tested. Evidence:
+`outputs/quest-campaign-registered-20261101/registered-inventory-checks.json`.
+The registration reader has regression coverage for placeholder exclusion,
+replacement identities, and invalid installation paths (108 Quest Lab tests).
+
 ### Joint campaign execution checkpoint — 1 November 2026
 
 The source campaign compiler now assembles 265 accepted quest records together,

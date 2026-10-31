@@ -90,6 +90,19 @@ production binder accepts them. Other policies remain pending, and file hashes
 describe the final bound graphs. Isolated source probe results remain unchanged;
 they are not evidence of executing the bound joint campaign.
 
+Alternatively, read registrations directly from KCD2 and an installed mod:
+
+```powershell
+python tools/quest_lab_test.py campaign --kcd1 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance" --kcd2 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2" --mod "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2/Mods/kingdomcomegluemapper" --player-asset player --first q_skalitz q_returnToSkalitz --output outputs/campaign-registered
+```
+
+This uses the production item-definition reader and replacement registry,
+excluding development placeholders. `--mod` is optional; without it only native
+KCD2 definitions are read. It cannot be combined with `--inventory-bindings`.
+The player alias is an explicit simulator binding, not automatic discovery of
+the live player. Reading item definitions establishes registration, not native
+model rendering, item transfer, or quest gameplay correctness.
+
 Run the package-wide audit, optionally comparing and dry-running **every** source
 quest record through the production quest-state emitter:
 

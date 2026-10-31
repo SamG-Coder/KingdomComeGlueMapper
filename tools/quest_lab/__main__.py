@@ -17,6 +17,9 @@ def main():
     campaign_parser.add_argument('--output', type=Path, required=True)
     campaign_parser.add_argument('--inventory-bindings', type=Path,
         help='JSON with explicit item_map, registered target item IDs and player_asset')
+    campaign_parser.add_argument('--kcd2', type=Path, help='Read actual target item registrations')
+    campaign_parser.add_argument('--mod', type=Path, help='Include item definitions from this installed mod')
+    campaign_parser.add_argument('--player-asset', help='Player alias for target inventory tracking')
     run = sub.add_parser('run', help='Run JSON scenarios and write JSON/HTML/JUnit reports')
     run.add_argument('scenarios', type=Path, nargs='+')
     run.add_argument('--output', type=Path, required=True)
@@ -33,10 +36,21 @@ def main():
     args = parser.parse_args()
     if args.command == 'campaign':
         from .campaign import campaign
+        if args.inventory_bindings and any((args.kcd2, args.mod, args.player_asset)):
+            parser.error('--inventory-bindings cannot be combined with --kcd2, --mod or --player-asset')
+        if args.mod and not args.kcd2:
+            parser.error('--mod requires --kcd2')
+        if bool(args.kcd2) != bool(args.player_asset):
+            parser.error('--kcd2 and --player-asset must be provided together')
+        bindings = None
+        if args.kcd2:
+            from .item_bindings import installed
+            bindings = installed(args.kcd2, args.mod, args.player_asset)
+        elif args.inventory_bindings:
+            bindings = json.loads(args.inventory_bindings.read_text(encoding='utf-8'))
         result = campaign(args.kcd1, args.output, args.first,
                           lambda done, total, name, status: print(f'{done}/{total} {name}: {status}', flush=True),
-                          inventory=json.loads(args.inventory_bindings.read_text(encoding='utf-8'))
-                          if args.inventory_bindings else None)
+                          inventory=bindings)
         print(json.dumps(dict(statuses=result['statuses'], probes=result['probes']), indent=2))
         return int(any(q['status'] != 'LOCAL_STATE_PROBES_EXECUTED' for q in result['quests']))
     if args.command == 'audit':
