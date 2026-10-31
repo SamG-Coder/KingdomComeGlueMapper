@@ -13,20 +13,21 @@ import xml.etree.ElementTree as E
 from . import Unsupported
 from .expressions import assignments, boolean, duration, evaluate, literal, parts
 from .variables import initialize
+from .patterns import concatenate
 
 
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
     'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel', 'Loop',
-    'InstantSendMessageToNPC', 'SuppressFailure', 'Invertor', 'VarOperation'}
+    'InstantSendMessageToNPC', 'SuppressFailure', 'Invertor', 'VarOperation', 'Concatenation'}
 
 
 class Behavior:
     def __init__(self, name, blob, graph, variables=None, contracts=None, callbacks=None):
         self.name, self.graph = name, graph
         self.contracts, self.callbacks = copy.deepcopy(contracts or {}), dict(callbacks or {})
-        self.fingerprint = hashlib.sha256(b'call-local-v1\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
+        self.fingerprint = hashlib.sha256(b'concatenation-v1\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
         self.root = E.fromstring(blob)
         self.nodes, self.trees = {}, {}
         self.declarations = {}
@@ -114,6 +115,8 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Engine contract cannot replace a subtree'))
         if node.tag == 'Wait' and node.get('skipInLOD', 'false') != 'false':
             self.unsupported.append(dict(node=path, reason='Native LOD-dependent wait skipping is not emulated'))
+        if node.tag == 'Concatenation' and (len(node) or set(node.attrib) != {'OutString','Pattern'}):
+            self.unsupported.append(dict(node=path, reason='Concatenation requires an output, pattern and no children'))
         if node.tag == 'Parallel' and not self._parallel_schema(node):
             self.unsupported.append(dict(node=path, reason='Parallel requires nonempty branches and explicit All/Any policies'))
         if node.tag == 'Loop' and (set(node.attrib) != {'count'} or len(node) != 1):
@@ -306,6 +309,12 @@ class Behavior:
         elif tag in ('Success', 'Fail'): finish(tag == 'Success')
         elif tag == 'Expression':
             changes = assignments(node.get('expressions', ''), variables, self.graph.source.enum_value)
+            self.record('assignment', task=name, node=path, changes=changes); finish()
+        elif tag == 'Concatenation':
+            if len(node) or set(node.attrib) != {'OutString','Pattern'}:
+                raise Unsupported('Unsupported Concatenation schema: '+path)
+            value = concatenate(node.get('Pattern'), variables)
+            changes = assignments(node.get('OutString')+' = '+repr(value), variables, self.graph.source.enum_value)
             self.record('assignment', task=name, node=path, changes=changes); finish()
         elif tag == 'VarOperation':
             if len(node) or set(node.attrib)-{'varName','targetVarName','operation','argument'}:

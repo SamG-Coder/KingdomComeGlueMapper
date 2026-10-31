@@ -743,6 +743,18 @@ and unpooled conversion equivalence and source immutability. This reduces
 duplicate retained input; conversion and report generation still consume
 substantial memory, and no measured speedup is claimed.
 
+The simulator now executes `Concatenation` for explicit string/integer values,
+including member references, nonnegative literal array indices, adjacent markers
+and optional marker-ending semicolons. Native Scripts.pak examples include
+`'$timeCheck_int;s'`, `'$alias$dialogSequence'` and
+`'greeting_$greeters[0];_$greeters[1];'`. Inserted text is not re-interpreted.
+Unsupported value formatting (including WUIDs, vectors and floats) and literal
+separator forms fail explicitly. Tests cover converted local outputs, nested
+outputs, invalid-input non-mutation and save/reload. Re-indexing the opening
+controllers leaves 3,008 findings across 9,249 indexed nodes, removing 21
+unsupported-node findings; this does not execute those complete controllers.
+Evidence: `outputs/quest-pattern-coverage-20261101.json`.
+
 - [ ] Differential validation of emulator event ordering against the native runtime.
 - [ ] Native Wait-menu, AI LOD and scheduler priority/preemption behaviour.
 - [ ] Native movement, scene release, animations, bed use and combat exercises.
