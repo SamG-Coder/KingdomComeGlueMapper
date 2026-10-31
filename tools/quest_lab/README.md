@@ -51,6 +51,22 @@ the opening and return quests while retaining every later source record:
 python tools/quest_lab_test.py campaign --kcd1 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance" --first q_skalitz q_returnToSkalitz --output outputs/campaign-review
 ```
 
+To reproduce source-controller state conversion, including original callback
+registrations and externally registered entry trees:
+
+```powershell
+python tools/quest_lab_test.py controllers --kcd1 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance" --quest q_skalitz q_returnToSkalitz q_tutorials q_escapeToTalmberk q_master_main --output outputs/controller-review
+```
+
+This writes source IR, a joint graph with quest bridges, final graph hashes,
+per-site unresolved operations, and missing quest dependencies to `report.json`.
+Each completed import is checkpointed; interrupted runs retain their evidence
+but do not yet resume. Use a fresh output directory. Only the named quests are
+imported; the missing-dependency list identifies additional declarations to
+include. This is state-operation conversion, not execution of whole controllers,
+actor schedules, or the story. It returns a nonzero status because that gameplay
+boundary remains unverified. Generated game-derived files must stay local.
+
 This runs the production quest-state emitter and local probes, prints progress
 for every quest, and atomically saves `checkpoint.json` after each record.
 `campaign.json` is written when the audit finishes. Use a new output directory

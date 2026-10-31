@@ -379,6 +379,16 @@ remain unresolved. This is source-operation conversion evidence, not a played
 quest. Local reports: `outputs/quest-controller-20261101/external-entry-audit.json`
 and `external-hammer-conversion.json` in the same directory.
 
+The reproducible `quest_lab controllers` command imports requested source
+quests with their actual controller registrations, saves each source model,
+and emits a joint state graph and quest bridges. A six-controller run covering
+Skatliz, return, tutorials, escape to Talmberk, the campaign master and Lost
+Hammer converts 397 sites and retains 92 unresolved sites plus the explicit
+missing-quest dependency list. Counts cover all six controllers and do not
+claim completion. Evidence: `outputs/quest-controller-linked-20261101/report.json`.
+Tests cover failed-import exclusion, final graph hashes, interrupted checkpoints,
+and protection against overwriting an earlier run (114 Quest Lab tests pass).
+
 ### Inventory acquisition checkpoint — 1 November 2026
 
 The emulator now supports explicit class-and-count acquisition stimuli for the

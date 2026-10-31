@@ -1,0 +1,67 @@
+"""Reproducible original-controller state conversion with source registrations."""
+from pathlib import Path
+
+from campaign_sources import RetailSourceReader
+from campaign_dependency_adapters import SourceTables
+from campaign_ai_registration import controller_definition
+from campaign_compile import quest_dependencies, wire_bridge
+from campaign_quest_bridge import convert_state_operations
+from campaign_quest_graph import emit_project, validate_model
+from quest_import import import_quest
+from .campaign import write
+
+
+def audit(game, names, output, progress=None):
+    names = list(names)
+    if not names or len(names) != len(set(names)):
+        raise ValueError('Select unique source quest names')
+    output = Path(output)
+    if output.exists():
+        raise ValueError('Choose a fresh controller audit directory')
+    models, records = [], []
+    with RetailSourceReader(Path(game)) as reader:
+        tables = SourceTables(Path(game), reader)
+        # Resolve all requested identities before creating output or importing.
+        rows = [tables.row('quest/quest', 'quest_name', name) for name in names]
+        for index, (name, row) in enumerate(zip(names, rows), 1):
+            if progress: progress(index, len(names), name)
+            record = dict(quest=name, status='CONVERSION_BLOCKED')
+            try:
+                definition = controller_definition(tables, row)
+                bootstrap = sorted({entry['file'] for entry in (definition or {}).get('entry_points', [])})
+                model, _ = import_quest(Path(game), name, bootstrap=bootstrap,
+                                       source_reader=reader, require_behavior=False)
+                model['controller_registration'] = definition
+                validate_model(model)
+                dependencies = quest_dependencies(model)
+                write(output / 'source-ir' / (name + '.json'), model)
+                models.append(model)
+                record.update(status='STATE_MODEL_ACCEPTED', dependencies=dependencies)
+            except (ValueError, KeyError, FileNotFoundError) as exc:
+                record['error'] = type(exc).__name__ + ': ' + str(exc)
+            records.append(record)
+            write(output / 'checkpoint.json', dict(status='IN_PROGRESS', quests=records,
+                                                   native_runtime_verified=False))
+    report = dict(quests=records, native_runtime_verified=False, campaign_completed=False,
+                  scope='Registered source controller quest-state operations; not whole behavior execution')
+    if models:
+        files, states = emit_project(models, 'QuestLabControllers')
+        bridges, operations = convert_state_operations(models, 'QuestLabControllerBridge')
+        wire_bridge(files, 'QuestLabControllers', bridges, operations)
+        files.update({name.removeprefix('Quests/'): blob for name, blob in bridges.items()
+                      if name.startswith('Quests/')})
+        for name, blob in files.items():
+            path = output / 'compiled' / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(blob)
+        report.update(state_conversion=states, controller_operations=operations)
+        # Emitter hashes predate bridge wiring; record final files separately.
+        import hashlib
+        report['compiled_files'] = {name:hashlib.sha256(blob).hexdigest() for name,blob in files.items()}
+        accepted = {model['quest'] for model in models}
+        report['missing_quest_dependencies'] = sorted({d['quest'] for record in records
+            for d in record.get('dependencies', []) if not d['dynamic'] and d['quest'] not in accepted})
+    write(output / 'report.json', report)
+    write(output / 'checkpoint.json', dict(status='AUDIT_FINISHED', quests=records,
+                                           native_runtime_verified=False))
+    return report

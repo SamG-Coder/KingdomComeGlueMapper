@@ -11,6 +11,10 @@ from .source import Source
 def main():
     parser = argparse.ArgumentParser(description='Emulate converted quest/NPC logic without launching KCD2.')
     sub = parser.add_subparsers(dest='command', required=True)
+    controllers = sub.add_parser('controllers', help='Audit registered source controller quest-state operations')
+    controllers.add_argument('--kcd1', type=Path, required=True)
+    controllers.add_argument('--quest', nargs='+', required=True)
+    controllers.add_argument('--output', type=Path, required=True)
     campaign_parser = sub.add_parser('campaign', help='Audit every source quest with per-quest checkpoints')
     campaign_parser.add_argument('--kcd1', type=Path, required=True)
     campaign_parser.add_argument('--first', nargs='+', default=[], help='Source quest names to audit first; all remaining records follow')
@@ -34,6 +38,17 @@ def main():
     demo = sub.add_parser('demo', help='Generate runnable fixtures using the production converters')
     demo.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.command == 'controllers':
+        from .controllers import audit as controller_audit
+        result = controller_audit(args.kcd1, args.quest, args.output,
+            lambda done,total,name: print(f'{done}/{total} {name}', flush=True))
+        operations = result.get('controller_operations', {})
+        print(json.dumps(dict(converted=len(operations.get('converted', [])),
+            unresolved=len(operations.get('unresolved', [])),
+            missing_quest_dependencies=result.get('missing_quest_dependencies', []),
+            native_runtime_verified=False), indent=2))
+        # State-only conversion cannot establish a completed quest run.
+        return 1
     if args.command == 'campaign':
         from .campaign import campaign
         if args.inventory_bindings and any((args.kcd2, args.mod, args.player_asset)):
