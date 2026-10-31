@@ -41,6 +41,45 @@ def scenario(steps):
 
 
 class MessageTests(unittest.TestCase):
+    def test_compiled_handler_allows_omitted_message_outputs_and_replays(self):
+        from test_campaign_ai_registration import setup
+        from test_campaign_behavior import source as model_source, catalog
+        from campaign_behavior import convert_behaviors
+        from quest_lab.behavior import Behavior
+        from test_quest_lab_includes import graph
+        for payload, sender in (('message',''), ('','sender'), ('','')):
+            with self.subTest(payload=payload,sender=sender), tempfile.TemporaryDirectory() as tmp:
+                _, _, importer, _ = setup(tmp)
+                model=model_source('<Root><Behavior><ProcessMessage Atomic="true" timeout="-1" '
+                    'timeType="GameTime" variable="'+payload+'" senderInfo="'+sender+'" '
+                    'inbox="StoryInbox" condition="" answerVar=""><Success/></ProcessMessage></Behavior></Root>')
+                files, _, report=convert_behaviors([model],'OptionalOutputs',catalog(),importer=importer)
+                self.assertEqual(report['whole_trees_emitted'],1)
+                b=Behavior('receiver',next(iter(files.values())),graph())
+                task=b.start('onUpdate')
+                self.assertEqual(b.tasks[task]['status'],'message')
+                saved=b.snapshot()
+                for replay in range(2):
+                    if replay: b.restore(saved)
+                    b.message('testcampaign_StoryInbox',{'ready':True},{'id':'quest'})
+                    self.assertEqual(b.tasks[task]['status'],'success')
+                    expected={}
+                    if payload: expected[payload]={'ready':True}
+                    if sender: expected[sender]={'id':'quest'}
+                    self.assertEqual(b.variables,expected)
+                    self.assertEqual(b.inboxes['testcampaign_StoryInbox'],[])
+
+    def test_invalid_message_binding_does_not_consume_queued_message(self):
+        from quest_lab.behavior import Behavior
+        for attr in ('variable','senderInfo'):
+            blob=BEHAVIOR.replace((attr+'="$'+('message' if attr=='variable' else 'sender')+'"').encode(),
+                                  (attr+'="$bad.field"').encode())
+            b=Behavior('receiver',blob,Graph(source(),'Messages'))
+            b.message('Inbox',{'delta':3},{'id':'quest'})
+            with self.assertRaises(Unsupported): b.start('receive')
+            self.assertEqual(len(b.inboxes['Inbox']),1)
+            self.assertEqual(b.variables,{})
+
     def test_behavior_sender_routes_payload_to_repeating_receiver(self):
         sender = b'''<BehaviorTree name="send"><Root><Behavior><Sequence>
           <InstantSendMessageToNPC target="$recipient" type="fixture:increment" values="delta($amount + 1)"/>

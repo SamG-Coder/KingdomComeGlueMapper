@@ -343,13 +343,17 @@ class Behavior:
             if literal(node.get('timeout','')) not in (-1, '-1') or node.get('condition',''):
                 raise Unsupported('Only unfiltered infinite mailbox waits are supported: ' + path)
             if 'message' not in frame:
+                bindings = []
+                for attr, key in (('variable','value'),('senderInfo','sender')):
+                    variable = node.get(attr,'').removeprefix('$')
+                    if not variable: continue
+                    if not variable.isidentifier(): raise Unsupported('Invalid mailbox variable')
+                    bindings.append((variable,key))
                 inbox = expr(node.get('inbox',''))
                 messages = self.inboxes.get(inbox, [])
                 if not messages: task['status'] = 'message'; return
                 frame['message'] = messages.pop(0)
-                for attr, key in (('variable','value'),('senderInfo','sender')):
-                    variable = node.get(attr,'').removeprefix('$')
-                    if not variable.isidentifier(): raise Unsupported('Invalid mailbox variable')
+                for variable, key in bindings:
                     self.variables[variable] = frame['message'][key]
             if frame.pop('child_result', True) is False: finish(False); return
             index = frame['index']

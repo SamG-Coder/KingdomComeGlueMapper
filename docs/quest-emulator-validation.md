@@ -606,6 +606,16 @@ delivery or native profile playback was executed. Conditional source mailbox
 rules still block conversion. Evidence:
 `outputs/quest-controller-mailboxes-20261101/report.json`.
 
+Message execution now accepts empty optional payload/sender output bindings.
+This is required by the sword tutorial's quest-message loop: 24 of the 30
+`ProcessMessage` nodes in the emitted opening-controller set omit `senderInfo`.
+Previously those handlers consumed a queued message and then rejected the empty
+binding. Bindings are now validated before dequeueing, and omitted outputs do
+not create variables. Compiler-to-interpreter tests cover omitted sender,
+omitted payload, both omitted, waiting-handler reload, and invalid bindings
+retaining their queued message. Filtered/timed mailbox waits and native mailbox
+arbitration remain unimplemented; this change is not a full tutorial run.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
