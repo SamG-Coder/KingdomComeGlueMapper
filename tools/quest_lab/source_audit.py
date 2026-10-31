@@ -39,7 +39,7 @@ def ordered_records(records, first=()):
                                          r.get('group', ''), r['quest_name']))
 
 
-def run(game, progress=None, *, first=(), checkpoint=None):
+def run(game, progress=None, *, first=(), checkpoint=None, model_ready=None):
     game = Path(game)
     results = []
     with RetailSourceReader(game) as reader:
@@ -72,6 +72,8 @@ def run(game, progress=None, *, first=(), checkpoint=None):
                 model = dict(quest=name, quest_id=identity, tables=selected, graph=graph)
                 result['source_graph_provenance'] = record['candidates']
                 blobs, conversion = emit_project([model], 'QuestLabSource')
+                if model_ready:
+                    model_ready(model)
                 result['converter_unsupported'] = conversion['quests'][0]['unsupported']
                 result['reconciled_objectives'] = conversion['quests'][0]['objective_table_differences']
                 result['converter_unsupported_kinds'] = dict(Counter(x['kind'] for x in result['converter_unsupported']))

@@ -60,6 +60,14 @@ review order, not story chronology. Actor behavior and cross-quest progression
 remain separate verification requirements. Partial or blocked quests return a
 nonzero exit code even when the audit itself finishes.
 
+Accepted quest models are also compiled together into `compiled/`, with the
+production cross-quest predicate binder. `linked-conversion.json` records the
+resolved dependencies and remaining unsupported policies. The campaign report
+lists excluded source records explicitly. This joint graph can be used as the
+source for subsequent simulator scenarios; compiling it does not run the story
+or establish native gameplay success. The generated files contain local game
+data and belong in ignored outputs, not source control.
+
 Run the package-wide audit, optionally comparing and dry-running **every** source
 quest record through the production quest-state emitter:
 

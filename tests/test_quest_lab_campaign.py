@@ -6,11 +6,27 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from quest_lab.campaign import campaign
+from quest_lab.campaign import campaign, compile_linked
 from quest_lab.source_audit import ordered_records
 
 
 class CampaignTests(unittest.TestCase):
+    def test_joint_compilation_resolves_dependency_without_pretending_completion(self):
+        from test_campaign_quest_graph import model
+        owner, lesson = model(), model()
+        lesson['quest'] = 'lesson'
+        lesson['tables']['quest']['rows'][0]['quest_name'] = 'lesson'
+        owner['tables']['quest_objective']['rows'][1]['condition'] = "IsQuestCompleted('lesson')"
+        _, isolated = compile_linked([owner])
+        self.assertEqual(isolated['quests'][0]['converted_linked_conditions'], [])
+        files, linked = compile_linked([owner, lesson])
+        condition = linked['quests'][0]['converted_linked_conditions'][0]
+        self.assertEqual(condition['objective'], 'first')
+        self.assertIn('lesson', condition['dependencies'])
+        self.assertIn(b'lesson.completed', files['QuestLabCampaign.xml'])
+        self.assertFalse(linked['campaign_completed'])
+        self.assertFalse(linked['native_runtime_verified'])
+
     def test_priority_retains_every_record_and_rejects_unknown_names(self):
         rows = [dict(quest_name=n, group='main') for n in ('later', 'opening', 'middle')]
         self.assertEqual([r['quest_name'] for r in ordered_records(rows, ['opening'])],
