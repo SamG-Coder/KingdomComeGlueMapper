@@ -33,7 +33,7 @@ from campaign_dependency_adapters import (EntityAdapter, InventoryAdapter, ItemT
 from campaign_linker import build_links, link_entities, entity_index
 from campaign_entity_links import native_guid
 from entity_visuals import initial_layer
-from campaign_quest_bridge import convert_state_operations
+from campaign_quest_bridge import convert_state_operations, controller_scopes, scoped_operation
 from campaign_quest_graph import emit_project, identifier, validate_model, xml
 from campaign_registration import assemble_registrations
 from campaign_work_helpers import WorkHelperAdapter
@@ -56,15 +56,16 @@ from campaign_combat import assemble as assemble_combat
 def quest_dependencies(model):
     """Discover references, not which branches should run on New Game."""
     result = []
+    scopes = controller_scopes(model)
     for document, record in model['behavior_documents'].items():
         for tree, body in record['trees'].items():
             for index, node in enumerate(walk(body['root'])):
                 if node['op'] not in ('SetQuest', 'SetQuestObjective', 'QuestCondition', 'QuestObjectiveCondition', 'QuestObjectiveGate'):
                     continue
-                attrs = node['attributes']
+                attrs = scoped_operation(node, scopes.get((document.lower(), tree)))['attributes']
                 value = literal(attrs.get('quest', attrs.get('questName', '')))
                 # Empty/current-owner references are resolved at their call site.
-                if value in ('', '$this.name', 'this.name'):
+                if value in ('', '$this.name', 'this.name', model['quest']):
                     continue
                 result.append(dict(quest=value, dynamic=not bool(re.fullmatch(r'[A-Za-z_]\w*', value)),
                                    site=dict(document=document, tree=tree, preorder_index=index,

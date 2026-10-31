@@ -13,7 +13,7 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 
-from campaign_quest_bridge import OPERATIONS, QuestBridge, UnsupportedOperation
+from campaign_quest_bridge import OPERATIONS, QuestBridge, UnsupportedOperation, controller_scopes, scoped_operation
 from campaign_profiles import ProfileBridge
 from campaign_quest_graph import identifier, xml
 from campaign_sources import key
@@ -339,10 +339,8 @@ class BehaviorCompiler:
         self.variables = {}
         self.object_scopes = {}
         for owner, model in self.models.items():
-            definition = model.get('controller_registration') or {}
-            for entry in definition.get('entry_points', []):
-                if entry.get('kind') == 'behavior_callback':
-                    self.object_scopes[(owner, key(behavior_path(entry['file'])), entry['tree'])] = owner
+            for (document, tree), scope in controller_scopes(model).items():
+                self.object_scopes[(owner, document, tree)] = scope
 
     def destination(self, owner, document):
         document = key(document)
@@ -507,12 +505,7 @@ class BehaviorCompiler:
                 from campaign_work_requests import lower as lower_work_request
                 node = lower_work_request(source, self.catalog)
             elif op in OPERATIONS:
-                scoped = source
-                if (owner, record.get('source_document', document), tree) in self.object_scopes:
-                    scoped = copy.deepcopy(source)
-                    for field in ('quest', 'questName'):
-                        if literal(scoped['attributes'].get(field, '')) in ('$__object.name', '__object.name'):
-                            scoped['attributes'][field] = self.object_scopes[(owner, record.get('source_document', document), tree)]
+                scoped = scoped_operation(source, self.object_scopes.get((owner, record.get('source_document', document), tree)))
                 converted = self.bridge.lower(scoped, owner)
                 if converted['op'] == 'GameContextBarrier' and converted['op'] not in self.catalog['nodes']:
                     raise UnsupportedOperation('Native continuous quest-state barrier is unavailable')

@@ -358,6 +358,16 @@ that state-only graph. The same source-operation audit retains 134 unresolved
 operations; no complete original controller execution is claimed. Evidence:
 `outputs/quest-controller-20261101/state-feedback-checks.json`.
 
+The source-operation bridge and dependency scanner now share the full behavior
+compiler's callback-owner rules. Only a registered behavior callback proves
+that `__object.name` names the owning quest; ordinary NPC/helper scopes remain
+dynamic. With actual source controller registrations attached, the two-quest
+operation check converts 222 sites and retains 43 unresolved (previously 134).
+Remaining failures include absent referenced quests, unsupported lifecycle
+policies, and an objective-name mismatch. This fixes false dependency blockers
+in normal campaign assembly without claiming controller execution. Evidence:
+`outputs/quest-controller-20261101/registered-scope-checks.json`.
+
 ### Inventory acquisition checkpoint — 1 November 2026
 
 The emulator now supports explicit class-and-count acquisition stimuli for the

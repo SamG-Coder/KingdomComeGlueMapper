@@ -12,7 +12,8 @@ import hashlib
 import xml.etree.ElementTree as ET
 
 from campaign_quest_graph import constant, definition, edge, identifier, objective_identifier, xml
-from quest_import import literal
+from quest_import import literal, behavior_path
+from campaign_sources import key
 
 
 OPERATIONS = {'SetQuest', 'SetQuestObjective', 'QuestCondition',
@@ -29,6 +30,23 @@ OBJECTIVE_CONDITIONS = {'IsObjectiveStarted': 'Started', 'IsObjectiveCompleted':
 
 class UnsupportedOperation(ValueError):
     pass
+
+
+def controller_scopes(model):
+    """Only registered controller callbacks establish an object-owner scope."""
+    return {(key(behavior_path(entry['file'])), entry['tree']): model['quest']
+            for entry in (model.get('controller_registration') or {}).get('entry_points', [])
+            if entry.get('kind') == 'behavior_callback'}
+
+
+def scoped_operation(node, object_owner):
+    if object_owner is None:
+        return node
+    result = copy.deepcopy(node)
+    for field in ('quest', 'questName'):
+        if literal(result['attributes'].get(field, '')) in ('$__object.name', '__object.name'):
+            result['attributes'][field] = object_owner
+    return result
 
 
 class QuestBridge:
@@ -157,6 +175,7 @@ def convert_state_operations(models, namespace):
     bridge = QuestBridge(models, namespace)
     converted, unresolved = [], []
     for model in models:
+        scopes = controller_scopes(model)
         document = 'libs/ai/quests/' + model['quest'].lower() + '.xml'
         if document not in model['behavior_documents']:
             if model.get('behavior_status') == 'no_same_named_retail_program':
@@ -168,7 +187,7 @@ def convert_state_operations(models, namespace):
                     site = dict(quest=model['quest'], document=document, tree=tree, path=path,
                                 operation=node['op'], arguments=node['attributes'], ancestors=ancestors)
                     try:
-                        target = bridge.lower(node, model['quest'])
+                        target = bridge.lower(scoped_operation(node, scopes.get((document, tree))), model['quest'])
                     except UnsupportedOperation as error:
                         unresolved.append(dict(site=site, reason=str(error)))
                     else:
