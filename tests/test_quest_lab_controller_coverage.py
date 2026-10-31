@@ -3,6 +3,7 @@ import sys
 import unittest
 import xml.etree.ElementTree as E
 import hashlib
+import tempfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from campaign_dependencies import DependencyImporter
@@ -12,6 +13,27 @@ from quest_lab.controller_coverage import inspect
 
 
 class CoverageTests(unittest.TestCase):
+    def test_mailbox_dependencies_are_emitted_but_not_claimed_as_runtime_delivery(self):
+        from test_campaign_ai_registration import setup, emitted
+        with tempfile.TemporaryDirectory() as tmp:
+            tables, native, importer, _ = setup(tmp)
+            model=source('''<Root><Behavior><ProcessMessage Atomic="true" timeout="-1"
+                timeType="GameTime" variable="message" senderInfo="sender" inbox="StoryInbox"
+                condition="$__content.ready" answerVar=""><Success/></ProcessMessage></Behavior></Root>''')
+            files, report=inspect([model],catalog(),importer)
+            self.assertEqual(report['conversion']['whole_trees_emitted'],1)
+            self.assertTrue(emitted(importer,'mailbox'))
+            self.assertTrue(emitted(importer,'mailbox_filter'))
+            self.assertIn('mailboxes',report['dependency_adapters'])
+            self.assertTrue(all(p in files for p in importer.files))
+            self.assertFalse(report['controllers'][0]['executed'])
+            tables.rows['mailbox_rule'][0]['condition']='$ready == true'
+            # A fresh importer must not reuse the preceding valid registration.
+            broken=DependencyImporter(importer.adapters)
+            _, blocked=inspect([model],catalog(),broken)
+            self.assertEqual(blocked['conversion']['whole_trees_emitted'],0)
+            self.assertFalse(emitted(broken,'mailbox'))
+
     def test_complete_trees_and_import_failures_are_distinguished_without_execution(self):
         model=source('<Root><Behavior><Loop count="1"><Success/></Loop></Behavior></Root>')
         model['behavior_documents']['libs/ai/quests/q_test.xml']['trees']['blocked'] = dict(

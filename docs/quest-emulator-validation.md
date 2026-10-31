@@ -594,6 +594,18 @@ controllers removes 62 structural findings, leaving 2,411. Evidence:
 `outputs/quest-controller-whole-opening-20261101/decorator-coverage.json`.
 This re-indexing is not a native or simulated full-controller playthrough.
 
+The subsequent mailbox coverage pass uses the normal builder's `MailboxAdapter`
+and the installed native profile-streaming helper, in addition to script types
+and enums. It emits 976 whole trees (84 more), leaving 2,387 blocked trees.
+The expanded emitted set exposes 2,798 structural interpreter findings; these
+counts are not directly comparable to a smaller emitted set as a completion
+percentage. Direct `onUpdate` conversion issues remain 167 for `q_skalitz`, 19
+for `q_tutorial_swordOne`, and 106 for `q_escapeToTalmberk`. All three remain
+blocked. The report records the actual adapter set and does not claim mailbox
+delivery or native profile playback was executed. Conditional source mailbox
+rules still block conversion. Evidence:
+`outputs/quest-controller-mailboxes-20261101/report.json`.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
