@@ -16,7 +16,7 @@ from .expressions import assignments, boolean, duration, evaluate, literal
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
-    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck'}
+    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree'}
 
 
 class Behavior:
@@ -39,10 +39,55 @@ class Behavior:
             if root is None: raise ValueError('Behavior tree has no Root: ' + key)
             self.trees[key] = key
             self._index(root, key)
+        self._resolve_includes()
         for tag, contract in self.contracts.items():
             if tag in SUPPORTED or tag.startswith('SendAIConceptSignal_'):
                 raise ValueError('Cannot stub interpreted behavior: ' + tag)
             if not contract.get('reason'): raise ValueError('Behavior contract requires a reason')
+
+    def _resolve_includes(self):
+        """Index reachable static helper calls without executing or flattening them."""
+        from pathlib import PurePosixPath
+        self.includes, self.include_errors = {}, {}
+        used, checked = {}, set()
+        while True:
+            pending = [(p,n) for p,n in self.nodes.items() if n.tag == 'IncludeTree' and p not in checked]
+            if not pending: break
+            for path, node in pending:
+                checked.add(path)
+                try:
+                    if len(node) or set(node.attrib) - {'File','Name','nodeLabel'}:
+                        raise Unsupported('IncludeTree needs a static file/tree and no child overrides')
+                    file, name = literal(node.get('File','')), literal(node.get('Name',''))
+                    if not all(isinstance(v,str) and v and '$' not in v for v in (file,name)):
+                        raise Unsupported('Dynamic behavior include needs runtime dispatch')
+                    file = file.replace('\\','/').lower()
+                    if PurePosixPath(file).is_absolute() or '..' in file.split('/') or ':' in file:
+                        raise Unsupported('Invalid behavior include path')
+                    # Production fragments use AI/, installed packages Libs/AI/.
+                    relative = file.removeprefix('libs/ai/').removeprefix('ai/')
+                    matches = [p for p in (file, 'ai/'+relative, 'libs/ai/'+relative)
+                               if p in self.graph.source.files]
+                    matches = sorted(set(matches))
+                    if len(matches) != 1:
+                        raise Unsupported('Missing/ambiguous behavior include: '+file)
+                    file = matches[0]
+                    document = self.graph.source.files[file]
+                    trees = [] if document is None else ([document] if document.tag == 'BehaviorTree'
+                                                         else document.findall('BehaviorTree'))
+                    trees = [t for t in trees if t.get('name') == name]
+                    if len(trees) != 1 or len(trees[0].findall('Root')) != 1:
+                        raise Unsupported('Missing/ambiguous included tree: '+file+':'+name)
+                    if trees[0].findall('./Variables/*'):
+                        raise Unsupported('Included tree local variables need a call-scope adapter')
+                    target = '@include:'+file+':'+name
+                    self.includes[path] = target
+                    used[file] = self.graph.source.hashes[file]
+                    if target not in self.nodes: self._index(trees[0].find('Root'), target)
+                except Unsupported as error:
+                    self.include_errors[path] = str(error)
+                    self.unsupported.append(dict(node=path, reason=str(error)))
+        self.fingerprint = hashlib.sha256((self.fingerprint + json.dumps(used, sort_keys=True)).encode()).hexdigest()
 
     def _index(self, node, path):
         self.nodes[path] = node
@@ -116,6 +161,12 @@ class Behavior:
             if len(node) or node.attrib:
                 raise Unsupported('AI concept signal must be an argument-free leaf: ' + path)
             self.graph.signal(tag.removeprefix('SendAIConceptSignal_')); finish()
+        elif tag == 'IncludeTree':
+            if path in self.include_errors: raise Unsupported(self.include_errors[path])
+            if 'child_result' in frame: finish(frame.pop('child_result')); return
+            target = self.includes[path]
+            self.record('behavior_include', task=name, node=path, target=target)
+            task['frames'].append(dict(path=target,index=0))
         elif tag in self.contracts:
             if len(node): raise Unsupported('Engine contract cannot replace a subtree: ' + path)
             task['status'] = 'external'

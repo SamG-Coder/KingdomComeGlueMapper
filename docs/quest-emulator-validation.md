@@ -476,6 +476,24 @@ unresolved; this does not certify whole quest execution. Evidence:
 `outputs/quest-controller-complete-branches-20261101/report.json` and
 `newly-converted.json`. All 2,349 tests pass, with 17 skips.
 
+### Shared controller helper execution — 1 November 2026
+
+The behavior interpreter executes static `IncludeTree` calls using reachable
+converted trees from its package source. Both build-fragment `AI/` and installed
+`Libs/AI/` paths are recognized; ambiguous files and tree names are rejected.
+Calls retain separate execution frames, propagate failure, and can suspend on
+waits or explicit engine outcomes. Helper content participates in the behavior
+snapshot fingerprint. Recursive calls use the existing execution budget.
+
+The production compiler-to-simulator test calls two nested helper files, waits,
+saves and restores the suspended stack, and completes the original quest
+objective through the emitted signal bridge. Additional tests cover failed
+helpers, unused trees, missing/dynamic includes, duplicate file candidates,
+unsupported child overrides, recursive time limits, and changed helper code.
+Included trees declaring local variables remain unsupported until call-local
+initialization and persistence are implemented; they never silently share the
+controller's global variables. Native include lifecycle parity is unverified.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
