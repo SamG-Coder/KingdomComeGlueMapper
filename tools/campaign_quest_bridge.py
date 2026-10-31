@@ -166,6 +166,28 @@ class QuestBridge:
         }, wiring
 
 
+def operation_trees(model):
+    """Scan the quest program plus exact registered controller entry points."""
+    documents = model['behavior_documents']
+    main = 'libs/ai/quests/' + model['quest'].lower() + '.xml'
+    entries = (model.get('controller_registration') or {}).get('entry_points', [])
+    selected, missing = {}, []
+    if main in documents:
+        selected.update(((main, name), body) for name, body in documents[main]['trees'].items())
+    elif model.get('behavior_status') != 'no_same_named_retail_program' and not entries:
+        raise ValueError('Missing source quest behavior: ' + main)
+    for entry in entries:
+        document, tree = key(behavior_path(entry['file'])), entry['tree']
+        body = documents.get(document, {}).get('trees', {}).get(tree)
+        if body is None:
+            missing.append(dict(site=dict(quest=model['quest'], document=document, tree=tree,
+                                          registration=entry),
+                                reason='Missing registered controller entry tree'))
+        else:
+            selected[(document, tree)] = body
+    return selected, missing
+
+
 def convert_state_operations(models, namespace):
     """Resolve source sites independently, reporting every unsupported site.
 
@@ -176,12 +198,9 @@ def convert_state_operations(models, namespace):
     converted, unresolved = [], []
     for model in models:
         scopes = controller_scopes(model)
-        document = 'libs/ai/quests/' + model['quest'].lower() + '.xml'
-        if document not in model['behavior_documents']:
-            if model.get('behavior_status') == 'no_same_named_retail_program':
-                continue
-            raise ValueError('Missing source quest behavior: ' + document)
-        for tree, body in model['behavior_documents'][document]['trees'].items():
+        selected, missing = operation_trees(model)
+        unresolved.extend(missing)
+        for (document, tree), body in selected.items():
             def visit(node, path, ancestors):
                 if node['op'] in OPERATIONS:
                     site = dict(quest=model['quest'], document=document, tree=tree, path=path,

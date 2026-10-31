@@ -368,6 +368,17 @@ policies, and an objective-name mismatch. This fixes false dependency blockers
 in normal campaign assembly without claiming controller execution. Evidence:
 `outputs/quest-controller-20261101/registered-scope-checks.json`.
 
+The state-operation scan also follows exact registered controller entry points
+outside a quest's same-named file. Repeated registrations are scanned once;
+unrelated helper trees are excluded and missing registered trees are reported.
+A source-wide registration audit found 208 external entries across 71 records
+(one separate controller-definition error retained). In the original
+`ta02_lostHammer` controller, this exposes and converts 21 operations in
+`q_LostHammer.xml` that the old same-name scan omitted; two lifecycle policies
+remain unresolved. This is source-operation conversion evidence, not a played
+quest. Local reports: `outputs/quest-controller-20261101/external-entry-audit.json`
+and `external-hammer-conversion.json` in the same directory.
+
 ### Inventory acquisition checkpoint — 1 November 2026
 
 The emulator now supports explicit class-and-count acquisition stimuli for the

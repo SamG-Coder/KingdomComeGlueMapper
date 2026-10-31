@@ -18,6 +18,26 @@ def behavior(m, body):
 
 
 class QuestBridgeTests(unittest.TestCase):
+    def test_registered_external_entry_is_scanned_without_unrelated_helpers(self):
+        m = model()
+        def tree(objective):
+            return dict(root=ast(E.fromstring('<Root><SetQuestObjective quest="&quot;$__object.name&quot;" '
+                'objective="'+objective+'" function="StartObjective"/></Root>')))
+        m['behavior_documents'] = {'libs/ai/shared/controller.xml':dict(trees={
+            'registered':tree('first'), 'unrelated':tree('second')})}
+        m['behavior_status'] = 'no_same_named_retail_program'
+        entry = dict(kind='behavior_callback',file='shared/controller.xml',tree='registered',name='callback')
+        m['controller_registration'] = dict(entry_points=[entry, dict(entry)])
+        _, report = convert_state_operations([m], 'External')
+        self.assertEqual(report['unresolved'], [])
+        self.assertEqual(len(report['converted']), 1)
+        self.assertEqual(report['wiring'][0]['quest_port'], 'start_first')
+        self.assertEqual(report['converted'][0]['site']['document'], 'libs/ai/shared/controller.xml')
+        m['controller_registration']['entry_points'] = [dict(entry,tree='absent')]
+        _, report = convert_state_operations([m], 'External')
+        self.assertEqual(report['converted'], [])
+        self.assertEqual(report['unresolved'][0]['reason'], 'Missing registered controller entry tree')
+
     def test_object_owner_requires_registered_callback_and_preserves_source(self):
         import copy
         m = behavior(model(), '''<Root><SetQuestObjective quest="&quot;$__object.name&quot;"
@@ -36,7 +56,8 @@ class QuestBridgeTests(unittest.TestCase):
         self.assertEqual(m['behavior_documents'], original)
         m['controller_registration']['entry_points'][0]['tree'] = 'other_tree'
         _, report = convert_state_operations([m], 'Scoped')
-        self.assertEqual(len(report['unresolved']), 1)
+        self.assertEqual({r['reason'] for r in report['unresolved']}, {
+            'Missing registered controller entry tree', 'Unregistered or dynamic source quest: $__object.name'})
         self.assertTrue(quest_dependencies(m)[0]['dynamic'])
 
     def test_objective_gate_retains_continuous_lifecycle_and_negation(self):
