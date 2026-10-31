@@ -13,6 +13,43 @@ from quest_lab.source import Source
 
 
 class SignalTests(unittest.TestCase):
+    def test_controller_conditions_read_live_quest_state_after_restore(self):
+        model = source('''<Root><Behavior><QuestObjectiveCondition quest="" objective="first"
+          function="IsObjectiveCompleted" failSubtMissing="false">
+          <Then><SetQuestObjective quest="" objective="second" function="StartObjective"/></Then>
+          <Else><SetQuestObjective quest="" objective="first" function="CompleteObjective"/></Else>
+          </QuestObjectiveCondition></Behavior></Root>''')
+        behaviors, bridges, report = convert_behaviors([model], 'Conditions', catalog())
+        files, _ = emit_project([model], 'Campaign')
+        wire_bridge(files, 'Campaign', bridges, report)
+        files.update({p.removeprefix('Quests/'):b for p,b in bridges.items() if p.startswith('Quests/')})
+        graph = Graph(Source.blobs(files), 'Campaign')
+        self.assertEqual(graph.unsupported, [])
+        behavior = Behavior('controller', next(iter(behaviors.values())), graph)
+        self.assertEqual(behavior.unsupported, [])
+        before = graph.snapshot()
+        behavior.start('onUpdate')
+        self.assertTrue(graph.value('q_test.first_Completed'))
+        self.assertFalse(graph.value('q_test.second_Started'))
+        behavior.start('onUpdate')
+        self.assertTrue(graph.value('q_test.second_Started'))
+        graph.restore(before)
+        behavior.start('onUpdate')
+        self.assertFalse(graph.value('q_test.second_Started'))
+        self.assertEqual([r['result'] for r in graph.trace if r['kind']=='game_context_check'], [False,True,False])
+
+    def test_unknown_or_multiple_context_writers_are_not_assumed_false(self):
+        blob=b'''<Database><Skald><Project Name="Test"><Nodes>
+          <SetGameContext Name="a"><Constant Name="Context" Value="duplicate"/>
+          <Constant Name="IsActive" Value="false"/></SetGameContext>
+          <SetGameContext Name="b"><Constant Name="Context" Value="duplicate"/>
+          <Constant Name="IsActive" Value="true"/></SetGameContext>
+          </Nodes></Project></Skald></Database>'''
+        graph=Graph(Source.blobs({'test.xml':blob}), 'Test')
+        self.assertEqual(len(graph.unsupported), 2)
+        for context in ('missing','duplicate'):
+            with self.assertRaises(Unsupported): graph.game_context(context)
+
     def test_converted_controller_drives_quest_through_native_bridge(self):
         model = source('''<Root><Behavior><Sequence>
           <SetQuestObjective quest="" objective="first" function="StartObjective"/>

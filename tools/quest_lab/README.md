@@ -109,8 +109,14 @@ the production controller-to-quest bridge without bypassing it with a direct
 quest port call. Unknown notifications fail explicitly; inactive listeners do
 not emit. Signals must be argument-free leaves and cannot be replaced by an
 external contract. Delivery uses stable graph order, which is an emulator
-policy, not a validated reconstruction of native AI scheduling. Game-context
-conditions and continuous gates remain separate coverage requirements.
+policy, not a validated reconstruction of native AI scheduling.
+
+Version-2 `GameContextCheck` nodes with explicit Then/Else branches can read a
+single `SetGameContext` binding from the current graph. The chosen branch runs
+to its normal result; this is not a continuous gate. Restoring the graph also
+restores the state used by subsequent checks. Missing identities, multiple
+writers, dynamic context IDs and other branch schemas remain unsupported;
+native context arbitration and continuous gates are not approximated.
 
 Run the package-wide audit, optionally comparing and dry-running **every** source
 quest record through the production quest-state emitter:

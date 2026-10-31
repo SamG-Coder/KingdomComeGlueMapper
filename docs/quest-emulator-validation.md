@@ -348,6 +348,16 @@ dependencies still prevent complete execution; signal support alone does not
 make either opening sequence playable. Local diagnostic conversion evidence:
 `outputs/quest-controller-20261101/report.json`.
 
+The return path now supports version-2 GameContextCheck with explicit Then/Else
+branches and one live SetGameContext binding. The production-converter
+regression checks a false branch changing quest state, a later true branch,
+and a false branch again after restore. Multiple writers remain unsupported.
+The original two source quest models expose 57 readable initial conditions
+through their generated bridges, with zero interpreter coverage findings in
+that state-only graph. The same source-operation audit retains 134 unresolved
+operations; no complete original controller execution is claimed. Evidence:
+`outputs/quest-controller-20261101/state-feedback-checks.json`.
+
 ### Inventory acquisition checkpoint — 1 November 2026
 
 The emulator now supports explicit class-and-count acquisition stimuli for the

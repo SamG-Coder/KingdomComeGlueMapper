@@ -27,7 +27,7 @@ FUNCTIONS = {
 }
 BUILTINS = {'State', 'Function', 'IfFunction', 'If', 'TriggerSequence', 'Timer',
             'Trace', 'HasteTrigger', 'GameStart', 'InstantSendMessage', 'ItemDescriptorTrigger',
-            'AIConceptSignalTrigger'} | collection_nodes.KINDS
+            'AIConceptSignalTrigger', 'SetGameContext'} | collection_nodes.KINDS
 
 
 def qualified(scope, value):
@@ -311,11 +311,20 @@ class Graph:
             if not self._known_ref(ref): self.issue(ref, 'Unresolved or unsupported source port')
         allowed = {'State': {'DefaultValue','Value'}, 'If': {'Condition'},
             'AIConceptSignalTrigger': {'IsActive'},
+            'SetGameContext': {'Context', 'IsActive'},
             'ItemDescriptorTrigger': {'Inventory', 'ItemDescriptor', 'IsActive'},
             'IfFunction': {'ValueA','ValueB','Op','A','B','Value'}, 'Function': {'A','B','Value'},
             'Timer': {'Duration','TimeType'}, 'Trace': {'Value'},
             'TriggerSequence': set(), 'HasteTrigger': set(), 'GameStart': set()}
         for name, node in self.nodes.items():
+            if node['kind'] == 'SetGameContext':
+                if not isinstance(node['constants'].get('Context'), str) or not node['constants']['Context']:
+                    self.issue(name, 'Game context requires an explicit constant identity')
+                elif sum(n['kind'] == 'SetGameContext' and n['constants'].get('Context') == node['constants']['Context']
+                         for n in self.nodes.values()) != 1:
+                    self.issue(name, 'Multiple game-context writers require native arbitration semantics')
+                if set(node['constants']) | set(node['values']) != {'Context', 'IsActive'}:
+                    self.issue(name, 'Game context requires Context and IsActive only')
             if node['kind'] == 'AIConceptSignalTrigger':
                 if not node['element'].get('NotificationName'):
                     self.issue(name, 'AI signal listener requires NotificationName')
@@ -433,6 +442,14 @@ class Graph:
 
     def emit(self, event):
         self.stack.append(('event', event))
+
+    def game_context(self, context):
+        """Read a single live context binding; native multi-writer arbitration is unknown."""
+        matches = [name for name, node in self.nodes.items()
+                   if node['kind'] == 'SetGameContext' and node['constants'].get('Context') == context]
+        if not isinstance(context, str) or not context or len(matches) != 1:
+            raise Unsupported('Missing or ambiguous game context: ' + str(context))
+        return boolean(self._args(matches[0])['IsActive'])
 
     def signal(self, notification):
         """Deliver a named controller signal to active declared listeners.

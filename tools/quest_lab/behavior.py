@@ -16,7 +16,7 @@ from .expressions import assignments, boolean, duration, evaluate, literal
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
-    'SmartObjSetBehaviorState', 'Callback_empty'}
+    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck'}
 
 
 class Behavior:
@@ -55,6 +55,10 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Engine contract cannot replace a subtree'))
         if node.tag == 'Wait' and node.get('skipInLOD', 'false') != 'false':
             self.unsupported.append(dict(node=path, reason='Native LOD-dependent wait skipping is not emulated'))
+        if node.tag == 'GameContextCheck' and (
+                set(node.attrib) != {'context', 'saveVersion'} or node.get('saveVersion') != '2'
+                or sorted(c.tag for c in node) != ['Else', 'Then']):
+            self.unsupported.append(dict(node=path, reason='GameContextCheck requires explicit Then/Else branches and version 2'))
         for index, child in enumerate(node): self._index(child, path + '/' + str(index))
 
     def record(self, kind, **values):
@@ -140,6 +144,15 @@ class Behavior:
                 raise Unsupported('Unknown behavior availability: ' + path)
             self.availability[behavior] = state
             self.record('availability', task=name, behavior=behavior, state=state); finish()
+        elif tag == 'GameContextCheck':
+            if (set(node.attrib) != {'context', 'saveVersion'} or node.get('saveVersion') != '2'
+                    or sorted(c.tag for c in node) != ['Else', 'Then']):
+                raise Unsupported('Unsupported game-context branch schema: ' + path)
+            if 'child_result' in frame: finish(frame.pop('child_result')); return
+            result = self.graph.game_context(node.get('context'))
+            branch = 'Then' if result else 'Else'
+            self.record('game_context_check', task=name, context=node.get('context'), result=result)
+            self._push(task, frame, next(i for i,c in enumerate(node) if c.tag == branch))
         elif tag in ('IfCondition', 'IfElseCondition'):
             if 'child_result' in frame: finish(frame.pop('child_result')); return
             result = boolean(expr(node.get('condition', '')))
