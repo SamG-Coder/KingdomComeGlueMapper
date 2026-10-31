@@ -15,6 +15,8 @@ def main():
     campaign_parser.add_argument('--kcd1', type=Path, required=True)
     campaign_parser.add_argument('--first', nargs='+', default=[], help='Source quest names to audit first; all remaining records follow')
     campaign_parser.add_argument('--output', type=Path, required=True)
+    campaign_parser.add_argument('--inventory-bindings', type=Path,
+        help='JSON with explicit item_map, registered target item IDs and player_asset')
     run = sub.add_parser('run', help='Run JSON scenarios and write JSON/HTML/JUnit reports')
     run.add_argument('scenarios', type=Path, nargs='+')
     run.add_argument('--output', type=Path, required=True)
@@ -32,7 +34,9 @@ def main():
     if args.command == 'campaign':
         from .campaign import campaign
         result = campaign(args.kcd1, args.output, args.first,
-                          lambda done, total, name, status: print(f'{done}/{total} {name}: {status}', flush=True))
+                          lambda done, total, name, status: print(f'{done}/{total} {name}: {status}', flush=True),
+                          inventory=json.loads(args.inventory_bindings.read_text(encoding='utf-8'))
+                          if args.inventory_bindings else None)
         print(json.dumps(dict(statuses=result['statuses'], probes=result['probes']), indent=2))
         return int(any(q['status'] != 'LOCAL_STATE_PROBES_EXECUTED' for q in result['quests']))
     if args.command == 'audit':

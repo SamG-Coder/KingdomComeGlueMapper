@@ -68,6 +68,28 @@ source for subsequent simulator scenarios; compiling it does not run the story
 or establish native gameplay success. The generated files contain local game
 data and belong in ignored outputs, not source control.
 
+The joint report also runs the production item-tracking planner for every quest.
+Without mappings it records missing item IDs and unsupported tracking policies;
+location/actor tracking is not classified as an item conversion failure.
+To bind supported item objectives, pass `--inventory-bindings bindings.json`:
+
+```json
+{
+  "item_map": {"source-item-guid": "target-item-guid"},
+  "registered": ["target-item-guid"],
+  "player_asset": "player"
+}
+```
+
+Use actual UUIDs and registrations from the item importer. The binder checks
+that every mapped target appears in the declared registration list; it does not
+independently inspect the installed package. Scenario `assets` must resolve the
+same player alias to an explicitly observed soul/inventory. Converted tracking
+policies are removed from the joint report's unsupported list only after the
+production binder accepts them. Other policies remain pending, and file hashes
+describe the final bound graphs. Isolated source probe results remain unchanged;
+they are not evidence of executing the bound joint campaign.
+
 Run the package-wide audit, optionally comparing and dry-running **every** source
 quest record through the production quest-state emitter:
 

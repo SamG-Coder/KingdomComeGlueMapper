@@ -347,6 +347,16 @@ physical item creation, and the shop/dialogue path are still unverified.
 Evidence: `outputs/quest-inventory-20261101/report.json`.
 The full suite passed 2,332 tests with 17 skips.
 
+The combined campaign now applies this same production binder when explicit
+inventory mappings are supplied. A regression scenario executes acquisition
+through the nested campaign quest and verifies the quantity gate and final
+graph hashes; an unregistered mapped target is rejected. Without mappings, the
+full source run records 1,950 pending tracked objectives across 265 accepted
+quests, including non-item actor/location tracking and unsupported policies.
+These are coverage requirements, not 1,950 verified gameplay defects. Evidence:
+`outputs/quest-campaign-inventory-20261101/linked-conversion.json`.
+All 106 Quest Lab tests pass after the integration.
+
 ### Joint campaign execution checkpoint — 1 November 2026
 
 The source campaign compiler now assembles 265 accepted quest records together,

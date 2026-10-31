@@ -11,6 +11,37 @@ from quest_lab.source_audit import ordered_records
 
 
 class CampaignTests(unittest.TestCase):
+    def test_joint_inventory_binding_executes_and_keeps_unmapped_objectives_pending(self):
+        import hashlib
+        from test_campaign_quest_items import tracked, A, B
+        from test_quest_lab_inventory import bag
+        from quest_lab.graph import Graph
+        from quest_lab.source import Source
+        from quest_lab.objects import SOUL
+        from quest_lab.inventory import acquire
+        model = tracked()
+        _, pending = compile_linked([model])
+        tracking = pending['quests'][0]['inventory_tracking']
+        self.assertEqual(tracking['converted'], [])
+        self.assertIn('unmapped item ' + A, tracking['pending'][0]['reasons'])
+        options = dict(item_map={A:B}, registered=[B], player_asset='player')
+        files, report = compile_linked([model], options)
+        quest = report['quests'][0]
+        self.assertEqual(quest['inventory_tracking']['converted'][0]['objective'], 'first')
+        self.assertFalse(any(r['kind'] in {'tracked_completion','completion_policy'}
+                             and r['objective']=='first' for r in quest['unsupported']))
+        self.assertEqual(report['files'], {n:hashlib.sha256(b).hexdigest() for n,b in files.items()})
+        graph = Graph(Source.blobs(files), 'QuestLabCampaign', assets={'player':'henry'}, objects={
+            'henry':{SOUL:{'properties':{'Inventory':'player-bag'}}}, 'player-bag':bag(0)})
+        self.assertEqual(graph.unsupported, [])
+        graph.fire('arbitrary_quest.start_first'); graph.advance_to(graph.now)
+        acquire(graph,'player-bag',B,9); graph.advance_to(graph.now)
+        self.assertFalse(graph.value('arbitrary_quest.first_Completed'))
+        acquire(graph,'player-bag',B,1); graph.advance_to(graph.now)
+        self.assertTrue(graph.value('arbitrary_quest.first_Completed'))
+        with self.assertRaisesRegex(ValueError,'Unregistered target item'):
+            compile_linked([model],dict(options,registered=[]))
+
     def test_forwarded_trigger_still_audits_its_original_source(self):
         from quest_lab.graph import Graph
         from quest_lab.source import Source
