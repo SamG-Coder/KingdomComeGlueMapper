@@ -755,6 +755,17 @@ controllers leaves 3,008 findings across 9,249 indexed nodes, removing 21
 unsupported-node findings; this does not execute those complete controllers.
 Evidence: `outputs/quest-pattern-coverage-20261101.json`.
 
+Controller collection also writes per-model `actor-queries/*.json` inventories
+with source paths, authored search attributes and link-filter outputs. Nested
+searches retain separate origins. Empty origins are flagged as requiring engine
+context, never replaced with a named NPC. The opening quest files contain 75
+link queries for q_skalitz (14 implicit origins), 9 for q_tutorial_swordOne (1
+implicit origin), and 83 for q_escapeToTalmberk (44 implicit origins). Shared
+helper queries are included separately in the full inventories. The sword
+tutorial's Van­yek lookup is one such implicit-origin query. This inventory
+does not execute graph traversal or validate native selection/pruning semantics.
+Evidence: `outputs/quest-actor-queries-20261101.json`.
+
 - [ ] Differential validation of emulator event ordering against the native runtime.
 - [ ] Native Wait-menu, AI LOD and scheduler priority/preemption behaviour.
 - [ ] Native movement, scene release, animations, bed use and combat exercises.

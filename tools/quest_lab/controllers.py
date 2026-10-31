@@ -10,6 +10,7 @@ from campaign_quest_graph import emit_project, validate_model
 from quest_import import import_quest
 from .campaign import write
 from .model_pool import ModelPool
+from .actor_queries import inspect as actor_queries
 
 
 def audit(game, names, output, progress=None, follow_dependencies=False, target_game=None):
@@ -42,6 +43,10 @@ def audit(game, names, output, progress=None, follow_dependencies=False, target_
                 write(output / 'source-ir' / (name + '.json'), model)
                 models.append(pool.add(model))
                 record.update(status='STATE_MODEL_ACCEPTED', dependencies=dependencies)
+                queries = actor_queries(model)
+                write(output / 'actor-queries' / (name + '.json'), queries)
+                record['actor_link_queries'] = len(queries)
+                record['implicit_origin_queries'] = sum(q['origin_requires_engine_context'] for q in queries)
                 if follow_dependencies:
                     for dependency in dependencies:
                         target = dependency['quest']
