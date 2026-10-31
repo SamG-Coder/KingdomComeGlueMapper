@@ -67,6 +67,14 @@ include. This is state-operation conversion, not execution of whole controllers,
 actor schedules, or the story. It returns a nonzero status because that gameplay
 boundary remains unverified. Generated game-derived files must stay local.
 
+Add `--follow-dependencies` to recursively include statically named quest
+references from the selected roots. Each identity is attempted once, including
+failed imports; cycles therefore terminate. Dynamic expressions remain in the
+report and are never treated as quest names to guess. Missing source records
+are reported without discarding accepted quests. Checkpoints include the
+remaining queue, and the progress total grows as dependencies are discovered.
+This is dependency discovery order, not a claim about story chronology.
+
 This runs the production quest-state emitter and local probes, prints progress
 for every quest, and atomically saves `checkpoint.json` after each record.
 `campaign.json` is written when the audit finishes. Use a new output directory

@@ -15,6 +15,8 @@ def main():
     controllers.add_argument('--kcd1', type=Path, required=True)
     controllers.add_argument('--quest', nargs='+', required=True)
     controllers.add_argument('--output', type=Path, required=True)
+    controllers.add_argument('--follow-dependencies', action='store_true',
+        help='Recursively import statically named quest dependencies')
     campaign_parser = sub.add_parser('campaign', help='Audit every source quest with per-quest checkpoints')
     campaign_parser.add_argument('--kcd1', type=Path, required=True)
     campaign_parser.add_argument('--first', nargs='+', default=[], help='Source quest names to audit first; all remaining records follow')
@@ -41,7 +43,8 @@ def main():
     if args.command == 'controllers':
         from .controllers import audit as controller_audit
         result = controller_audit(args.kcd1, args.quest, args.output,
-            lambda done,total,name: print(f'{done}/{total} {name}', flush=True))
+            lambda done,total,name: print(f'{done}/{total} {name}', flush=True),
+            follow_dependencies=args.follow_dependencies)
         operations = result.get('controller_operations', {})
         print(json.dumps(dict(converted=len(operations.get('converted', [])),
             unresolved=len(operations.get('unresolved', [])),

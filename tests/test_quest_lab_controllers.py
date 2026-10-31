@@ -11,6 +11,28 @@ from quest_lab.controllers import audit
 
 
 class ControllerAuditTests(unittest.TestCase):
+    def test_recursive_dependencies_are_deduplicated_and_cycles_terminate(self):
+        first = source('<Root><Behavior><SetQuest quest="later" function="StartQuest"/></Behavior></Root>')
+        later = source('<Root><Behavior><Sequence><SetQuest quest="q_test" function="StartQuest"/>'
+            '<SetQuest quest="absent" function="StartQuest"/>'
+            '<SetQuest quest="$dynamic" function="StartQuest"/></Sequence></Behavior></Root>', name='later')
+        with tempfile.TemporaryDirectory() as folder, \
+                patch('quest_lab.controllers.RetailSourceReader'), \
+                patch('quest_lab.controllers.SourceTables') as tables, \
+                patch('quest_lab.controllers.controller_definition', return_value=None), \
+                patch('quest_lab.controllers.import_quest', side_effect=[(first, {}), (later, {})]) as imports:
+            def lookup(table, field, name):
+                if name=='absent': raise KeyError(name)
+                return {'quest_name':name}
+            tables.return_value.row.side_effect=lookup
+            report=audit('game',['q_test'],Path(folder)/'audit',follow_dependencies=True)
+            self.assertEqual([r['quest'] for r in report['quests']], ['q_test','later','absent'])
+            self.assertEqual(imports.call_count, 2)
+            self.assertEqual(report['missing_quest_dependencies'], ['absent'])
+            self.assertEqual(report['quests'][-1]['status'],'CONVERSION_BLOCKED')
+            self.assertTrue(report['follow_dependencies'])
+            self.assertTrue(any(d['dynamic'] for d in report['quests'][1]['dependencies']))
+
     def test_reports_missing_dependency_and_keeps_failed_quest_out_of_compiled_set(self):
         model = source('''<Root><Behavior><SetQuest quest="later" function="StartQuest"/>
                        </Behavior></Root>''')

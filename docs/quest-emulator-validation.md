@@ -389,6 +389,18 @@ claim completion. Evidence: `outputs/quest-controller-linked-20261101/report.jso
 Tests cover failed-import exclusion, final graph hashes, interrupted checkpoints,
 and protection against overwriting an earlier run (114 Quest Lab tests pass).
 
+With `controllers --quest q_skalitz --follow-dependencies`, recursive static
+reference discovery reaches 168 records: 159 accepted and nine blocked. The
+joint bridge converts 11,138 quest-state operation sites and retains 862
+unresolved sites. Failed dependencies stay listed rather than being retried or
+silently dropped. This includes source include/authoring errors and unknown
+literal quest references; dynamic expressions are retained without guessing.
+Evidence: `outputs/quest-controller-closure-20261101/report.json`. The audit
+finishes with a nonzero diagnostic exit status because gameplay remains
+unverified. Cycle/missing-reference regression coverage brings Quest Lab to
+115 passing tests. Discovery order does not establish story chronology, and
+the emitted state bridges do not execute complete actor/controller programs.
+
 ### Inventory acquisition checkpoint — 1 November 2026
 
 The emulator now supports explicit class-and-count acquisition stimuli for the

@@ -11,7 +11,7 @@ from quest_import import import_quest
 from .campaign import write
 
 
-def audit(game, names, output, progress=None):
+def audit(game, names, output, progress=None, follow_dependencies=False):
     names = list(names)
     if not names or len(names) != len(set(names)):
         raise ValueError('Select unique source quest names')
@@ -22,11 +22,14 @@ def audit(game, names, output, progress=None):
     with RetailSourceReader(Path(game)) as reader:
         tables = SourceTables(Path(game), reader)
         # Resolve all requested identities before creating output or importing.
-        rows = [tables.row('quest/quest', 'quest_name', name) for name in names]
-        for index, (name, row) in enumerate(zip(names, rows), 1):
-            if progress: progress(index, len(names), name)
+        roots = {name: tables.row('quest/quest', 'quest_name', name) for name in names}
+        pending, discovered = list(names), set(names)
+        while pending:
+            name = pending.pop(0)
+            if progress: progress(len(records) + 1, len(discovered), name)
             record = dict(quest=name, status='CONVERSION_BLOCKED')
             try:
+                row = roots[name] if name in roots else tables.row('quest/quest', 'quest_name', name)
                 definition = controller_definition(tables, row)
                 bootstrap = sorted({entry['file'] for entry in (definition or {}).get('entry_points', [])})
                 model, _ = import_quest(Path(game), name, bootstrap=bootstrap,
@@ -37,12 +40,20 @@ def audit(game, names, output, progress=None):
                 write(output / 'source-ir' / (name + '.json'), model)
                 models.append(model)
                 record.update(status='STATE_MODEL_ACCEPTED', dependencies=dependencies)
+                if follow_dependencies:
+                    for dependency in dependencies:
+                        target = dependency['quest']
+                        if not dependency['dynamic'] and target not in discovered:
+                            discovered.add(target)
+                            pending.append(target)
             except (ValueError, KeyError, FileNotFoundError) as exc:
                 record['error'] = type(exc).__name__ + ': ' + str(exc)
             records.append(record)
             write(output / 'checkpoint.json', dict(status='IN_PROGRESS', quests=records,
+                                                   pending_quests=pending,
                                                    native_runtime_verified=False))
     report = dict(quests=records, native_runtime_verified=False, campaign_completed=False,
+                  root_quests=names, follow_dependencies=follow_dependencies,
                   scope='Registered source controller quest-state operations; not whole behavior execution')
     if models:
         files, states = emit_project(models, 'QuestLabControllers')
