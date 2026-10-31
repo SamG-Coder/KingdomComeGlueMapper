@@ -13,6 +13,31 @@ from quest_lab.source import Source
 
 
 class SignalTests(unittest.TestCase):
+    def test_compiled_parallel_controller_observes_other_branch_objective_change(self):
+        model = source('''<Root><Behavior><Parallel successMode="All" failureMode="Any">
+          <Sequence><Wait duration="1s" timeType="GameTime" variation="" doFail="false"/>
+          <SetQuestObjective objective="first" function="CompleteObjective"/></Sequence>
+          <Sequence><Wait duration="2s" timeType="GameTime" variation="" doFail="false"/>
+          <QuestObjectiveCondition objective="first" function="IsObjectiveCompleted" failSubtMissing="true">
+          <Then><SetQuestObjective objective="second" function="StartObjective"/></Then><Else><Fail/></Else>
+          </QuestObjectiveCondition></Sequence></Parallel></Behavior></Root>''')
+        behaviors, bridges, report = convert_behaviors([model], 'Parallel', catalog())
+        self.assertEqual(report['whole_trees_emitted'], 1)
+        files, _ = emit_project([model], 'Campaign')
+        wire_bridge(files, 'Campaign', bridges, report)
+        files.update({p.removeprefix('Quests/'):b for p,b in bridges.items() if p.startswith('Quests/')})
+        graph = Graph(Source.blobs(files), 'Campaign')
+        behavior = Behavior('controller', next(iter(behaviors.values())), graph)
+        self.assertEqual(behavior.unsupported, [])
+        task = behavior.start('onUpdate')
+        graph.advance_to(behavior.next_deadline()); behavior.pump()
+        self.assertTrue(graph.value('q_test.first_Completed'))
+        self.assertFalse(graph.value('q_test.second_Started'))
+        self.assertEqual(behavior.tasks[task]['status'], 'parallel')
+        graph.advance_to(behavior.next_deadline()); behavior.pump()
+        self.assertTrue(graph.value('q_test.second_Started'))
+        self.assertEqual(behavior.tasks[task]['status'], 'success')
+
     def test_complete_fail_if_missing_condition_executes_both_authored_paths(self):
         model = source('''<Root><Behavior><QuestObjectiveCondition quest="" objective="first"
           function="IsObjectiveCompleted" failSubtMissing="true">

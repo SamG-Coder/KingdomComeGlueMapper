@@ -494,6 +494,28 @@ Included trees declaring local variables remain unsupported until call-local
 initialization and persistence are implemented; they never silently share the
 controller's global variables. Native include lifecycle parity is unverified.
 
+### Concurrent controller branches — 1 November 2026
+
+`Parallel` is now interpreted with explicit `All`/`Any` success and failure
+policies. Each child keeps its own execution stack while sharing the controller's
+existing variable environment. Waits overlap in simulated time. Child outcomes
+wake the parent; a satisfied outcome cancels outstanding sibling stacks,
+including nested parallel work and pending explicit engine requests. Late
+outcomes for canceled requests are rejected. Saved snapshots retain all branch
+stacks and deadlines. Mixed terminal results satisfying neither configured
+policy are reported unsupported rather than assigned an invented result.
+
+The emulator uses deterministic task creation order, not native scheduler
+arbitration. It processes a returned branch before allowing a later sibling to
+perform more effects. Cancellation does not claim native engine cleanup or run
+unimplemented exit handlers. A production-compiled regression completes an
+objective on one branch and verifies that a later conditional on another branch
+sees it and starts the next objective. Other tests exercise overlapping waits,
+save/reload, recursive cancellation, and explicit external outcomes. The actual
+sword-tutorial `onUpdate` contains parallel branches, but its remaining actor,
+profile, messaging, gate, and lifecycle dependencies still prevent claiming a
+complete tutorial run.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

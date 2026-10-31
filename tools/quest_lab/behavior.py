@@ -16,7 +16,7 @@ from .expressions import assignments, boolean, duration, evaluate, literal
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
-    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree'}
+    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel'}
 
 
 class Behavior:
@@ -100,6 +100,8 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Engine contract cannot replace a subtree'))
         if node.tag == 'Wait' and node.get('skipInLOD', 'false') != 'false':
             self.unsupported.append(dict(node=path, reason='Native LOD-dependent wait skipping is not emulated'))
+        if node.tag == 'Parallel' and not self._parallel_schema(node):
+            self.unsupported.append(dict(node=path, reason='Parallel requires nonempty branches and explicit All/Any policies'))
         if node.tag == 'GameContextCheck' and (
                 set(node.attrib) != {'context', 'saveVersion'} or node.get('saveVersion') != '2'
                 or sorted(c.tag for c in node) != ['Else', 'Then']):
@@ -108,6 +110,11 @@ class Behavior:
 
     def record(self, kind, **values):
         self.graph.record(kind, controller=self.name, **values)
+
+    @staticmethod
+    def _parallel_schema(node):
+        return (len(node) > 0 and set(node.attrib) == {'successMode', 'failureMode'}
+                and all(node.get(k) in ('All','Any') for k in ('successMode','failureMode')))
 
     def start(self, tree, task=None):
         if tree not in self.trees: raise ValueError('Unknown behavior tree: ' + tree)
@@ -144,7 +151,20 @@ class Behavior:
         frame = task['frames'].pop()
         self.record('behavior_return', task=name, node=frame['path'], result=result)
         if task['frames']: task['frames'][-1]['child_result'] = result
-        else: task['status'] = 'success' if result else 'fail'
+        else:
+            task['status'] = 'success' if result else 'fail'
+            parent = task.get('parallel_parent')
+            if parent is not None and self.tasks[parent]['status'] == 'parallel':
+                self.tasks[parent]['status'] = 'running'
+
+    def _cancel(self, name):
+        task = self.tasks[name]
+        if task['status'] in ('success','fail','canceled'): return
+        for frame in task['frames']:
+            for child in frame.get('parallel_children', []): self._cancel(child)
+        self.record('behavior_cancel', task=name, previous_status=task['status'])
+        task['frames'] = []
+        task['status'] = 'canceled'
 
     def _push(self, task, frame, index):
         task['frames'].append(dict(path=frame['path'] + '/' + str(index), index=0))
@@ -171,6 +191,28 @@ class Behavior:
             if len(node): raise Unsupported('Engine contract cannot replace a subtree: ' + path)
             task['status'] = 'external'
             self.record('behavior_request', task=name, node=path, operation=tag, attributes=dict(node.attrib))
+        elif tag == 'Parallel':
+            if not self._parallel_schema(node): raise Unsupported('Unsupported parallel schema: '+path)
+            if 'parallel_children' not in frame:
+                frame['parallel_children'] = []
+                for index in range(len(node)):
+                    self.serial += 1
+                    child = name + ':parallel:' + str(self.serial)
+                    if child in self.tasks: raise ValueError('Duplicate parallel task: '+child)
+                    self.tasks[child] = dict(frames=[dict(path=path+'/'+str(index), index=0)],
+                                            status='running', parallel_parent=name)
+                    frame['parallel_children'].append(child)
+                self.record('behavior_parallel', task=name, node=path, children=frame['parallel_children'][:])
+            children = frame['parallel_children']
+            statuses = [self.tasks[c]['status'] for c in children]
+            for result, attr in (('fail','failureMode'), ('success','successMode')):
+                count = statuses.count(result)
+                if count and (node.get(attr) == 'Any' or count == len(children)):
+                    for child in children: self._cancel(child)
+                    finish(result == 'success'); return
+            if all(s in ('success','fail') for s in statuses):
+                raise Unsupported('Parallel ended with mixed results satisfying neither policy: '+path)
+            task['status'] = 'parallel'
         elif tag in WRAPPERS or tag == 'Root':
             if tag == 'Root' and any(c.tag not in ('OnInit', 'Behavior') for c in node):
                 raise Unsupported('Root exit handlers need an unwind adapter: ' + path)
@@ -273,9 +315,14 @@ class Behavior:
     def pump(self):
         # Stable task creation order is the emulator policy. Native arbitration
         # and concurrent mailbox locking have not been replicated.
-        for name, task in self.tasks.items():
+        for task in self.tasks.values():
             if task['status'] in ('waiting', 'message'): task['status'] = 'running'
-            while task['status'] == 'running': self._step(name)
+        while True:
+            name = next((n for n,t in self.tasks.items() if t['status'] == 'running'), None)
+            if name is None: break
+            # Re-select after each step so a returned branch wakes its parent
+            # before another branch can execute effects after cancellation.
+            self._step(name)
 
     def next_deadline(self):
         return min((t['frames'][-1]['deadline'] for t in self.tasks.values()
@@ -294,4 +341,5 @@ class Behavior:
         return dict(fingerprint=self.fingerprint, variables=self.variables, availability=self.availability,
             tasks={k: v['status'] for k,v in self.tasks.items()}, visited=sorted(self.visited),
             unvisited=sorted(set(self.nodes)-self.visited), unsupported=self.unsupported,
+            scheduling_policy='Deterministic creation order with parent outcome propagation; native arbitration unverified',
             external_contracts=self.contracts)
