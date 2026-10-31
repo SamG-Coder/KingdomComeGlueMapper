@@ -631,8 +631,8 @@ intermediate records/members, invalid indices, arbitrary object writes, and
 numeric/custom map keys remain unsupported (the latter require typed snapshot
 serialization). Tests cover production conversion, sequential assignment
 dependencies, literal delimiters, rejected targets without mutation, and
-JSON snapshot/replay of nested updates. Declaration initialization and full
-controller execution are still separate requirements.
+JSON snapshot/replay of nested updates. Full controller execution remains a
+separate requirement.
 
 Assignment blocks accept authored newline separators and a final comma, while
 preserving quoted text and parenthesized multiline right-hand expressions.
@@ -641,6 +641,23 @@ emitted three-line clothing-parameter block was executed with explicit input
 records and all three resulting fields checked; the surrounding controller was
 not executed. Evidence (including source-file hash and fixture boundary):
 `outputs/quest-authored-assignment-block-20261101.json`.
+
+Behavior declarations now establish task-local variable scopes. Explicit
+boolean, integer, float, string and enum initializers are evaluated, and empty
+arrays/string-keyed maps are initialized. Explicit scenario fixtures may supply
+engine-owned records; absent scalar/record initializers remain unbound until
+an operation assigns them, rather than receiving guessed defaults. Separate
+invocations have separate locals; parallel branches share their invocation's
+scope. Static helpers without declarations retain their caller scope, while
+helpers with local declarations remain unsupported. Automatic structured-record
+construction and custom-keyed maps still need adapters.
+
+`assert_behavior.task_variables` checks these locals by task name, separately
+from explicit controller bindings. The converted schedule demo now checks its
+declared answer in the mailbox task. Tests cover compiler-emitted defaults,
+parallel sharing, invocation isolation, copied input records, unbound reads,
+invalid declarations and JSON save/reload. Snapshot fingerprints were changed
+to reject snapshots made with the former global-only variable model.
 
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly

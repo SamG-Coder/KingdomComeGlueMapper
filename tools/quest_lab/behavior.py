@@ -5,6 +5,7 @@ KCD2's scheduler arbitration, navmesh, animation or perception. Those boundaries
 must be supplied as explicit scenario outcomes.
 """
 import copy
+from collections import ChainMap
 import hashlib
 import json
 import re
@@ -12,6 +13,7 @@ import xml.etree.ElementTree as E
 
 from . import Unsupported
 from .expressions import assignments, boolean, duration, evaluate, literal, parts
+from .variables import initialize
 
 
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
@@ -25,9 +27,10 @@ class Behavior:
     def __init__(self, name, blob, graph, variables=None, contracts=None, callbacks=None):
         self.name, self.graph = name, graph
         self.contracts, self.callbacks = copy.deepcopy(contracts or {}), dict(callbacks or {})
-        self.fingerprint = hashlib.sha256(blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
+        self.fingerprint = hashlib.sha256(b'task-local-v1\0' + blob + json.dumps([self.contracts, self.callbacks], sort_keys=True).encode()).hexdigest()
         self.root = E.fromstring(blob)
         self.nodes, self.trees = {}, {}
+        self.declarations = {}
         self.variables = copy.deepcopy(variables or {})
         self.availability, self.tasks, self.inboxes = {}, {}, {}
         self.unsupported, self.visited = [], set()
@@ -40,6 +43,8 @@ class Behavior:
             root = tree.find('Root')
             if root is None: raise ValueError('Behavior tree has no Root: ' + key)
             self.trees[key] = key
+            if len(tree.findall('Variables')) > 1: raise ValueError('Duplicate variable declarations: '+key)
+            self.declarations[key] = list(tree.findall('./Variables/*'))
             self._index(root, key)
         self._resolve_includes()
         enum_files = {p:self.graph.source.hashes[p] for declarations in self.graph.source.enums.values()
@@ -132,9 +137,10 @@ class Behavior:
         self.serial += 1
         task = task or tree + ':' + str(self.serial)
         if task in self.tasks: raise ValueError('Duplicate task: ' + task)
-        # Local variables cannot silently share controller globals across tasks.
-        # Native declaration defaults are not invented: inputs/OnInit must bind them.
-        self.tasks[task] = dict(frames=[dict(path=self.trees[tree], index=0)], status='running')
+        local = initialize(self.declarations[tree], self.variables, self.graph.source.enum_value)
+        self.tasks[task] = dict(frames=[dict(path=self.trees[tree], index=0)], status='running',
+                               scope=task, locals=local,
+                               declared=[n.get('name') for n in self.declarations[tree]])
         self.record('behavior_start', task=task, tree=tree)
         self.pump()
         return task
@@ -184,9 +190,21 @@ class Behavior:
         task = self.tasks[name]
         frame = task['frames'][-1]
         path = frame['path']; node = self.nodes[path]; tag = node.tag
+        owner = self.tasks[task.get('scope',name)]
+        local = owner.get('locals',{})
+        declared = owner.get('declared',[])
+        # Undeclared names remain explicit controller/scenario bindings. Only
+        # declared locals are task-owned; parallel branches share that scope.
+        class Environment(ChainMap):
+            def __setitem__(env, key, value):
+                if key in declared: local[key] = value
+                else:
+                    self.variables[key] = value
+                    env.maps[1][key] = value
+        variables = Environment(local, {k:v for k,v in self.variables.items() if k not in declared})
         self.visited.add(path)
         self.graph.tick()
-        def expr(text): return evaluate(text, self.variables, self.graph.source.enum_value)
+        def expr(text): return evaluate(text, variables, self.graph.source.enum_value)
         def finish(result=True): self._finish(name, result)
         if tag.startswith('SendAIConceptSignal_'):
             if len(node) or node.attrib:
@@ -229,7 +247,7 @@ class Behavior:
                     child = name + ':parallel:' + str(self.serial)
                     if child in self.tasks: raise ValueError('Duplicate parallel task: '+child)
                     self.tasks[child] = dict(frames=[dict(path=path+'/'+str(index), index=0)],
-                                            status='running', parallel_parent=name)
+                                            status='running', parallel_parent=name, scope=task.get('scope',name))
                     frame['parallel_children'].append(child)
                 self.record('behavior_parallel', task=name, node=path, children=frame['parallel_children'][:])
             children = frame['parallel_children']
@@ -264,7 +282,7 @@ class Behavior:
             finish(True if tag == 'SuppressFailure' else not result)
         elif tag in ('Success', 'Fail'): finish(tag == 'Success')
         elif tag == 'Expression':
-            changes = assignments(node.get('expressions', ''), self.variables, self.graph.source.enum_value)
+            changes = assignments(node.get('expressions', ''), variables, self.graph.source.enum_value)
             self.record('assignment', task=name, node=path, changes=changes); finish()
         elif tag == 'SmartObjSetBehaviorState':
             behavior = expr(node.get('behaviors', ''))
@@ -356,18 +374,18 @@ class Behavior:
                 for index, message in enumerate(messages):
                     # Candidate content is temporary filter context, never a
                     # published output or a mutation of controller variables.
-                    context = dict(self.variables, __content=message['value'])
+                    context = dict(variables, __content=message['value'])
                     if not condition or boolean(evaluate(condition, context, self.graph.source.enum_value)):
                         selected = index; break
                 if selected is None: task['status'] = 'message'; return
                 frame['message'] = messages.pop(selected)
                 for variable, key in bindings:
-                    self.variables[variable] = frame['message'][key]
+                    variables[variable] = frame['message'][key]
             if frame.pop('child_result', True) is False: finish(False); return
             index = frame['index']
             if index == len(node):
                 answer = node.get('answerVar','').removeprefix('$')
-                self.record('message_processed', task=name, answer=self.variables.get(answer)); finish(); return
+                self.record('message_processed', task=name, answer=variables.get(answer)); finish(); return
             frame['index'] += 1; self._push(task, frame, index)
         elif tag == 'Callback_empty':
             event = literal(node.get('EventName',''))

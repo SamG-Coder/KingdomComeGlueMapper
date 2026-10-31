@@ -119,7 +119,7 @@ class Runner:
             'save': {'name'}, 'load': {'name'}, 'behavior_start': {'controller','tree','task'},
             'behavior_set': {'controller','values'}, 'message': {'controller','inbox','value','sender'},
             'outcome': {'controller','task','result'},
-            'assert_behavior': {'controller','variables','availability','tasks','label'},
+            'assert_behavior': {'controller','variables','availability','tasks','task_variables','label'},
             'assert_messages': {'pending','count','label'},
             'dialogue_start': {'dialogue','request'}, 'dialogue_choose': {'dialogue','sequence'},
             'dialogue_end': {'dialogue'}, 'assert_dialogue': {'dialogue','choices','state','label'},
@@ -199,6 +199,12 @@ class Runner:
                 for key, expected in step.get(field, {}).items():
                     count += 1
                     self.check(step.get('label', step['controller']+':'+field+':'+key), mapping[field][key], expected)
+            for task, expected in step.get('task_variables',{}).items():
+                scope = b.tasks[task].get('scope',task)
+                for key, value in expected.items():
+                    count += 1
+                    self.check(step.get('label',step['controller']+':'+task+':'+key),
+                               b.tasks[scope]['locals'][key], value)
             if not count: raise ValueError('Empty behavior assertion')
         self.settle()
 
