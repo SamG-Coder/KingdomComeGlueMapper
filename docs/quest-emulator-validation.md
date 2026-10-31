@@ -516,6 +516,22 @@ sword-tutorial `onUpdate` contains parallel branches, but its remaining actor,
 profile, messaging, gate, and lifecycle dependencies still prevent claiming a
 complete tutorial run.
 
+### Repeating message handlers — 1 November 2026
+
+The source sword tutorial uses `Loop count=-1` around its `ProcessMessage`
+listeners. The simulator now supports successful-body repetition with positive
+integer counts and the infinite `-1` form. Loop counters and suspended child
+frames survive save/reload. Waiting handlers yield to other parallel branches,
+and parent cancellation stops further message consumption. An instantaneous
+infinite loop still exhausts the execution budget instead of hanging the tool.
+Zero counts, invalid schemas, and failed loop-body policy remain unsupported
+pending native semantic verification.
+
+Regression scenarios cover finite successive message processing, infinite
+listeners canceled by parallel completion, and actual graph-message routing
+through `Runner` across save/reload. State rewinds on reload; diagnostic event
+counts retain replay history, consistent with the existing graph trace policy.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

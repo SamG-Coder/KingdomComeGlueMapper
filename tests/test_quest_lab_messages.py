@@ -41,6 +41,23 @@ def scenario(steps):
 
 
 class MessageTests(unittest.TestCase):
+    def test_repeating_handler_consumes_routed_graph_messages_after_reload(self):
+        repeated = BEHAVIOR.replace(b'<ProcessMessage ', b'<Loop count="-1"><ProcessMessage ').replace(
+            b'</ProcessMessage>', b'</ProcessMessage></Loop>')
+        steps = [dict(action='behavior_start', controller='actor', tree='receive', task='listen'),
+                 dict(action='fire', port='first'), dict(action='save', name='one'),
+                 dict(action='fire', port='second'),
+                 dict(action='assert_behavior', controller='actor', variables={'total':6}),
+                 dict(action='load', name='one'),
+                 dict(action='assert_behavior', controller='actor', variables={'total':3}),
+                 dict(action='fire', port='second'),
+                 dict(action='assert_behavior', controller='actor', variables={'total':6}, tasks={'listen':'message'})]
+        runner = Runner(scenario(steps), source=Source.blobs({'graph.xml':GRAPH, 'behavior.xml':repeated}))
+        result = runner.run()
+        self.assertEqual(result['status'], 'PASS', result.get('error'))
+        # Trace/event counters include the replay; persisted variables rewind.
+        self.assertEqual(runner.graph.events['output.handled'], 3)
+
     def test_native_exec_fanin_queues_two_messages_and_does_not_acknowledge_handling(self):
         g=Graph(source(),'Messages'); self.assertEqual(g.unsupported,[])
         g.set_inputs(dict(receiver='actor-17',delta=2)); g.fire('first')

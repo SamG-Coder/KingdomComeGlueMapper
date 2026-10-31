@@ -16,7 +16,7 @@ from .expressions import assignments, boolean, duration, evaluate, literal
 WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultBranch'}
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
-    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel'}
+    'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel', 'Loop'}
 
 
 class Behavior:
@@ -102,6 +102,8 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Native LOD-dependent wait skipping is not emulated'))
         if node.tag == 'Parallel' and not self._parallel_schema(node):
             self.unsupported.append(dict(node=path, reason='Parallel requires nonempty branches and explicit All/Any policies'))
+        if node.tag == 'Loop' and (set(node.attrib) != {'count'} or len(node) != 1):
+            self.unsupported.append(dict(node=path, reason='Loop requires an explicit count and exactly one body'))
         if node.tag == 'GameContextCheck' and (
                 set(node.attrib) != {'context', 'saveVersion'} or node.get('saveVersion') != '2'
                 or sorted(c.tag for c in node) != ['Else', 'Then']):
@@ -269,6 +271,21 @@ class Behavior:
                     self._push(task, frame, index); return
                 if child.tag != 'IfCondition': raise Unsupported('Unsupported Switch branch: ' + child.tag)
             finish()
+        elif tag == 'Loop':
+            if set(node.attrib) != {'count'} or len(node) != 1:
+                raise Unsupported('Loop requires an explicit count and exactly one body: '+path)
+            if 'loop_count' not in frame:
+                count = expr(node.get('count', ''))
+                if type(count) is not int or count == 0 or count < -1:
+                    raise Unsupported('Loop count must be a positive integer or -1: '+path)
+                frame['loop_count'], frame['iterations'] = count, 0
+            if 'child_result' in frame:
+                if not frame.pop('child_result'):
+                    raise Unsupported('Loop body failure policy needs native verification: '+path)
+                frame['iterations'] += 1
+            if frame['iterations'] == frame['loop_count']:
+                finish(); return
+            self._push(task, frame, 0)
         elif tag == 'While':
             result = frame.pop('child_result', True)
             if not result and node.get('propagateChildFail') != 'false': finish(False); return
