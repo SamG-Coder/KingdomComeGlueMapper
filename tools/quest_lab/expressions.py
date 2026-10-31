@@ -110,9 +110,31 @@ def boolean(value):
     return value
 
 
+def assignment_statements(text):
+    """Split authored comma/newline blocks without splitting RHS expressions."""
+    chunks = parts(text)
+    # Retail authoring includes a final separator. Empty interior statements
+    # are still malformed, not silently discarded.
+    if len(chunks) > 1 and not chunks[-1]: chunks.pop()
+    result = []
+    for chunk in chunks:
+        if not chunk: raise Unsupported('Empty assignment statement')
+        current = ''
+        for line in parts(chunk, '\n'):
+            if not line: continue
+            fields = parts(line, '=')
+            starts_assignment = (len(fields) > 1 and bool(fields[1]) and
+                re.fullmatch(r'\$?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[.*\])*', fields[0]) is not None)
+            if current and starts_assignment:
+                result.append(current); current = ''
+            current += ('\n' if current else '') + line
+        result.append(current)
+    return result
+
+
 def assignments(text, values, enum_resolver=None):
     changes = {}
-    for statement in parts(text):
+    for statement in assignment_statements(text):
         # Parse the target using the same allowlisted expression syntax, but
         # never execute Python assignments or allow arbitrary object mutation.
         fields = parts(statement, '=')

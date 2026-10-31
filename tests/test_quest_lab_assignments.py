@@ -11,6 +11,27 @@ from quest_lab.expressions import assignments
 
 
 class AssignmentTests(unittest.TestCase):
+    def test_compiled_newline_block_and_trailing_comma(self):
+        model=source('''<Root><Behavior><Expression expressions="$request.ready = true&#10;
+            $request.target.id = $actor.id&#10;
+            $actors['teacher'] = $request.target.id,&#10;"/></Behavior></Root>''')
+        files, _, report=convert_behaviors([model],'AssignmentBlock',catalog())
+        self.assertEqual(report['whole_trees_emitted'],1)
+        b=Behavior('worker',next(iter(files.values())),graph(),variables={
+            'request':{'ready':False,'target':{'id':0}},'actor':{'id':17},'actors':{}})
+        task=b.start('onUpdate')
+        self.assertEqual(b.tasks[task]['status'],'success')
+        self.assertEqual(b.variables['request'],{'ready':True,'target':{'id':17}})
+        self.assertEqual(b.variables['actors'],{'teacher':17})
+
+    def test_multiline_rhs_and_literal_separators_remain_intact(self):
+        values={}
+        assignments("$value = (1 +\n 2)\n$ready = (\n $value == 3\n)\n"
+                    "$text = 'a=b,c\\n$other=5',",values)
+        self.assertEqual(values,{'value':3,'ready':True,'text':'a=b,c\n$other=5'})
+        for text in ('',',','$a=1,,','$a=1,, $b=2','$a=1\nunknown()'):
+            with self.subTest(text=text), self.assertRaises(Unsupported): assignments(text,{})
+
     def test_compiled_nested_record_and_map_assignments(self):
         model=source('''<Root><Behavior><Expression expressions="$request.ready = true,
             $request.target.id = $actor.id, $actors['teacher'] = $actor.id,

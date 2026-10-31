@@ -634,6 +634,14 @@ dependencies, literal delimiters, rejected targets without mutation, and
 JSON snapshot/replay of nested updates. Declaration initialization and full
 controller execution are still separate requirements.
 
+Assignment blocks accept authored newline separators and a final comma, while
+preserving quoted text and parenthesized multiline right-hand expressions.
+Empty interior statements and unsupported expressions remain errors. An actual
+emitted three-line clothing-parameter block was executed with explicit input
+records and all three resulting fields checked; the surrounding controller was
+not executed. Evidence (including source-file hash and fixture boundary):
+`outputs/quest-authored-assignment-block-20261101.json`.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
