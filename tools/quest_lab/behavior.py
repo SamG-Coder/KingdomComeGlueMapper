@@ -20,7 +20,7 @@ WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultB
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
     'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel', 'Loop',
-    'InstantSendMessageToNPC', 'SuppressFailure', 'Invertor'}
+    'InstantSendMessageToNPC', 'SuppressFailure', 'Invertor', 'VarOperation'}
 
 
 class Behavior:
@@ -118,6 +118,10 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Loop requires an explicit count and exactly one body'))
         if node.tag in ('SuppressFailure','Invertor') and (node.attrib or len(node) != 1):
             self.unsupported.append(dict(node=path, reason='Result decorator requires exactly one child and no attributes'))
+        if node.tag == 'VarOperation' and (len(node) or
+                set(node.attrib)-{'varName','targetVarName','operation','argument'} or
+                node.get('operation') not in ('Size','PushBack')):
+            self.unsupported.append(dict(node=path,reason='Unsupported collection operation: '+node.get('operation','')))
         if node.tag == 'InstantSendMessageToNPC' and (len(node) or set(node.attrib) - {'target','type','variable','values'}):
             self.unsupported.append(dict(node=path, reason='Immediate NPC message requires a leaf and known payload fields'))
         if node.tag == 'GameContextCheck' and (
@@ -286,6 +290,24 @@ class Behavior:
         elif tag == 'Expression':
             changes = assignments(node.get('expressions', ''), variables, self.graph.source.enum_value)
             self.record('assignment', task=name, node=path, changes=changes); finish()
+        elif tag == 'VarOperation':
+            if len(node) or set(node.attrib)-{'varName','targetVarName','operation','argument'}:
+                raise Unsupported('Unsupported collection operation schema: '+path)
+            operation=node.get('operation','')
+            if operation not in ('Size','PushBack'):
+                raise Unsupported('Unsupported collection operation: '+operation)
+            collection=expr(node.get('varName',''))
+            target=node.get('targetVarName','')
+            if operation=='Size':
+                if not isinstance(collection,(list,dict)) or not target or node.get('argument',''):
+                    raise Unsupported('Size requires a collection, output and no argument')
+                assignments(target+' = '+str(len(collection)),variables,self.graph.source.enum_value)
+            else:
+                if not isinstance(collection,list) or target or not node.get('argument',''):
+                    raise Unsupported('PushBack requires an array, argument and no output')
+                collection.append(copy.deepcopy(expr(node.get('argument'))))
+            self.record('behavior_collection',task=name,operation=operation,
+                        variable=node.get('varName'),size=len(collection)); finish()
         elif tag == 'SmartObjSetBehaviorState':
             behavior = expr(node.get('behaviors', ''))
             state = node.get('state')

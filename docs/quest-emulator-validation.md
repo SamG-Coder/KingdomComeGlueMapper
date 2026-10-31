@@ -674,6 +674,16 @@ gaps are engine-owned WUID values and absent scalar defaults; none were guessed.
 This constructs data, not running quest controllers. Evidence:
 `outputs/quest-record-defaults-20261101.json`.
 
+The behavior interpreter executes `VarOperation.Size` on arrays/maps and
+`VarOperation.PushBack` on arrays. Appended values are copied, declared output
+variables stay in task scope, and schema/argument errors are rejected before
+collection mutation. Tests run converted operations and save/reload across a
+waiting append/size sequence. Reset/removal operations remain unsupported;
+their policies are not inferred from names. Re-indexing the emitted opening
+controllers removes 27 unsupported-operation findings, leaving 2,771. This is
+structural coverage rather than whole-controller execution. Evidence:
+`outputs/quest-collection-coverage-20261101.json`.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
