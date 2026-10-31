@@ -11,7 +11,7 @@ from quest_import import import_quest
 from .campaign import write
 
 
-def audit(game, names, output, progress=None, follow_dependencies=False):
+def audit(game, names, output, progress=None, follow_dependencies=False, target_game=None):
     names = list(names)
     if not names or len(names) != len(set(names)):
         raise ValueError('Select unique source quest names')
@@ -72,6 +72,10 @@ def audit(game, names, output, progress=None, follow_dependencies=False):
         accepted = {model['quest'] for model in models}
         report['missing_quest_dependencies'] = sorted({d['quest'] for record in records
             for d in record.get('dependencies', []) if not d['dynamic'] and d['quest'] not in accepted})
+        if target_game is not None:
+            from .controller_coverage import audit as behavior_audit
+            if progress: progress(len(records),len(records),'Whole controller conversion and structural coverage')
+            report['behavior_coverage'] = behavior_audit(models,game,target_game,output/'behavior-coverage')
     write(output / 'report.json', report)
     write(output / 'checkpoint.json', dict(status='AUDIT_FINISHED', quests=records,
                                            native_runtime_verified=False))

@@ -498,6 +498,23 @@ are not evaluated during selection.
 
 ## Regression checks
 
+For whole-controller conversion and static interpreter coverage, supply the
+installed target game alongside the source controller selection:
+
+```powershell
+$env:PYTHONPATH='tools'
+python -m quest_lab controllers --kcd1 'D:/SteamLibrary/steamapps/common/KingdomComeDeliverance' --kcd2 'D:/SteamLibrary/steamapps/common/KingdomComeDeliverance2' --quest q_skalitz q_tutorial_swordOne q_escapeToTalmberk --output 'D:/KingdomComeGlueMapper/outputs/controller-audit-new'
+```
+
+Use a fresh output directory. `--follow-dependencies` additionally follows
+statically named quest references. The optional `behavior-coverage/report.json`
+separates whole-tree importer blockers from structural simulator findings and
+includes file hashes. This pass enables script type/enum adapters only; missing
+world, actor, inventory and native-consumer adapters are explicit dependencies,
+not necessarily defects in the full package builder. No behavior is executed,
+and the command keeps its diagnostic exit code of 1. An emitted tree or an empty
+static finding list is not a successful quest playthrough.
+
 ```powershell
 python -m unittest discover -s tests -p 'test_quest_lab*.py' -v
 ```

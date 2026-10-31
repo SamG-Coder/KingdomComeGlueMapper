@@ -565,6 +565,25 @@ verifies a namespaced enum condition, an enum-valued assignment, and the changed
 branch result on the next invocation. This tests expression values, not native
 quest lifecycle equivalence or event timing.
 
+### Whole-controller conversion coverage — 1 November 2026
+
+`quest_lab controllers --kcd2 ...` now runs the production whole-tree compiler
+with source script type/enum adapters and the installed target catalog, then
+indexes emitted trees through the simulator. Importer failures, blocked include
+dependencies, and interpreter findings are separate. The status is always
+`STRUCTURAL_AUDIT_ONLY`; it neither executes behaviors nor declares them playable.
+Actor/world/native-consumer dependency adapters are outside this diagnostic pass.
+
+A run selecting Skatliz, the sword tutorial, and escape to Talmberk emits 892
+whole trees and blocks 2,471 across their shared source closure. The emitted
+documents have 2,473 structural interpreter findings. All three main `onUpdate`
+controllers remain blocked (176, 22, and 114 direct conversion findings,
+respectively). These counts include shared routines, not 3,363 separate quests.
+Evidence: `outputs/quest-controller-whole-opening-20261101/behavior-coverage/report.json`.
+The report highlights remaining Lua, event, scheduling, graph-search and behavior
+dispatch work rather than presenting the larger state-operation counts as a
+completed campaign.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

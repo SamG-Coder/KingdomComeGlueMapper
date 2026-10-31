@@ -15,6 +15,7 @@ def main():
     controllers.add_argument('--kcd1', type=Path, required=True)
     controllers.add_argument('--quest', nargs='+', required=True)
     controllers.add_argument('--output', type=Path, required=True)
+    controllers.add_argument('--kcd2', type=Path, help='Also audit whole behavior conversion and structural simulator coverage')
     controllers.add_argument('--follow-dependencies', action='store_true',
         help='Recursively import statically named quest dependencies')
     campaign_parser = sub.add_parser('campaign', help='Audit every source quest with per-quest checkpoints')
@@ -44,13 +45,14 @@ def main():
         from .controllers import audit as controller_audit
         result = controller_audit(args.kcd1, args.quest, args.output,
             lambda done,total,name: print(f'{done}/{total} {name}', flush=True),
-            follow_dependencies=args.follow_dependencies)
+            follow_dependencies=args.follow_dependencies, target_game=args.kcd2)
         operations = result.get('controller_operations', {})
         print(json.dumps(dict(converted=len(operations.get('converted', [])),
             unresolved=len(operations.get('unresolved', [])),
             missing_quest_dependencies=result.get('missing_quest_dependencies', []),
+            behavior_coverage=result.get('behavior_coverage'),
             native_runtime_verified=False), indent=2))
-        # State-only conversion cannot establish a completed quest run.
+        # Conversion and structural coverage cannot establish a completed quest run.
         return 1
     if args.command == 'campaign':
         from .campaign import campaign
