@@ -113,8 +113,18 @@ class QuestBridge:
             if set(attrs) - {'questName', 'objectiveName', 'objectiveState', 'NegateTo', 'RunLogic'}:
                 raise UnsupportedOperation('Unconverted quest objective gate metadata')
             kind, port = 'condition', objective_identifier(objective) + '_' + function
-        if kind == 'condition' and attrs.get('failSubtMissing', 'false') not in ('false', '0'):
-            raise UnsupportedOperation('Missing-branch failure semantics need an adapter')
+        if op in ('QuestCondition', 'QuestObjectiveCondition'):
+            missing_policy = attrs.get('failSubtMissing', 'false')
+            if missing_policy not in ('false', '0', 'true', '1'):
+                raise UnsupportedOperation('Dynamic missing-branch failure policy needs an adapter')
+            # When both authored branches exist, the missing-branch policy
+            # cannot apply. Do not reject a complete conditional just because
+            # that policy is enabled, or invent behavior for an absent branch.
+            branches = [child['op'] for child in node['children']]
+            if any(branch not in ('Then', 'Else') for branch in branches) or len(set(branches)) != len(branches):
+                raise UnsupportedOperation('Invalid quest condition branch structure')
+            if missing_policy in ('true', '1') and set(branches) != {'Then', 'Else'}:
+                raise UnsupportedOperation('Missing-branch failure semantics need an adapter')
         name = self._name(kind, quest, port)
         result = dict(kind=kind, name=name, quest=quest, port=port, source_operation=op)
         (self.actions if kind == 'action' else self.conditions)[name] = result

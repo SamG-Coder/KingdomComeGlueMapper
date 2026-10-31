@@ -13,6 +13,24 @@ from quest_lab.source import Source
 
 
 class SignalTests(unittest.TestCase):
+    def test_complete_fail_if_missing_condition_executes_both_authored_paths(self):
+        model = source('''<Root><Behavior><QuestObjectiveCondition quest="" objective="first"
+          function="IsObjectiveCompleted" failSubtMissing="true">
+          <Else><Fail/></Else><Then><SetQuestObjective quest="" objective="second"
+          function="StartObjective"/></Then></QuestObjectiveCondition></Behavior></Root>''')
+        behaviors, bridges, report = convert_behaviors([model], 'Branches', catalog())
+        files, _ = emit_project([model], 'Campaign')
+        wire_bridge(files, 'Campaign', bridges, report)
+        files.update({p.removeprefix('Quests/'):b for p,b in bridges.items() if p.startswith('Quests/')})
+        graph = Graph(Source.blobs(files), 'Campaign')
+        behavior = Behavior('controller', next(iter(behaviors.values())), graph)
+        self.assertEqual(behavior.unsupported, [])
+        self.assertEqual(behavior.tasks[behavior.start('onUpdate')]['status'], 'fail')
+        self.assertFalse(graph.value('q_test.second_Started'))
+        graph.fire('q_test.complete_first')
+        self.assertEqual(behavior.tasks[behavior.start('onUpdate')]['status'], 'success')
+        self.assertTrue(graph.value('q_test.second_Started'))
+
     def test_controller_conditions_read_live_quest_state_after_restore(self):
         model = source('''<Root><Behavior><QuestObjectiveCondition quest="" objective="first"
           function="IsObjectiveCompleted" failSubtMissing="false">

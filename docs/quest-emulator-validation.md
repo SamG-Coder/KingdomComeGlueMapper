@@ -462,6 +462,20 @@ duplicate behavior names, and unresolved graph edges. None are silently omitted
 or treated as completed quests. Evidence:
 `outputs/quest-controller-work-closure-20261101/report.json`.
 
+Quest conditions with both authored `Then` and `Else` branches now convert even
+when `failSubtMissing` is enabled: neither branch is absent, so the missing-branch
+policy is inapplicable. Absent branches with that policy, dynamic policy values,
+duplicate branches, and unexpected branch types remain rejected. A production
+compiler-to-simulator regression executes both sides with the branches in reverse
+XML order, checking failure propagation and a subsequent objective action.
+
+Reprocessing the same 165 source models converts six additional sites, including
+`q_tutorial_swordOne`, `q_theresa_brother`, `q_visitInBaths`, and three execution
+cutscene conditions in `q_execExec`. Totals are 12,291 converted sites and 872
+unresolved; this does not certify whole quest execution. Evidence:
+`outputs/quest-controller-complete-branches-20261101/report.json` and
+`newly-converted.json`. All 2,349 tests pass, with 17 skips.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

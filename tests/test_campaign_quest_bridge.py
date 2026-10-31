@@ -18,6 +18,30 @@ def behavior(m, body):
 
 
 class QuestBridgeTests(unittest.TestCase):
+    def test_complete_condition_does_not_need_missing_branch_policy(self):
+        m = model()
+        for tag, attrs in [('QuestCondition', 'function="IsQuestStarted"'),
+                           ('QuestObjectiveCondition', 'objective="first" function="IsObjectiveCompleted"')]:
+            for flag in ('true', '1'):
+                bridge = QuestBridge([m], 'Branches')
+                node = ast(E.fromstring('<'+tag+' '+attrs+' failSubtMissing="'+flag+'">'
+                    '<Else><Fail/></Else><Then><Success/></Then></'+tag+'>'))
+                lowered = bridge.lower(node, m['quest'])
+                self.assertEqual(lowered['children'], node['children'])
+                self.assertEqual(lowered['op'], 'GameContextCheck')
+                self.assertEqual(len(bridge.conditions), 1)
+
+    def test_missing_dynamic_or_ambiguous_branches_stay_blocked(self):
+        m = model()
+        for flag, body in [('true', '<Then><Success/></Then>'), ('true', '<Else><Fail/></Else>'),
+                           ('$policy', '<Then/><Else/>'), ('false', '<Then/><Then/>'),
+                           ('true', '<Then/><Else/><Unexpected/>')]:
+            bridge = QuestBridge([m], 'Branches')
+            node = ast(E.fromstring('<QuestCondition function="IsQuestStarted" failSubtMissing="'+flag+'">'
+                +body+'</QuestCondition>'))
+            with self.assertRaises(UnsupportedOperation): bridge.lower(node, m['quest'])
+            self.assertFalse(bridge.conditions)
+
     def test_registered_external_entry_is_scanned_without_unrelated_helpers(self):
         m = model()
         def tree(objective):
