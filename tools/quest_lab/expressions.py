@@ -1,5 +1,6 @@
 """Small, allowlisted expression evaluator; never eval game/scenario text."""
 import ast
+import copy
 import operator
 import re
 
@@ -45,7 +46,7 @@ CMP = {ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
        ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge}
 
 
-def evaluate(text, values, enum_resolver=None):
+def enum_text(text, enum_resolver=None):
     if '$enum:' in text:
         def resolve(match):
             if enum_resolver is None: raise Unsupported('Behavior enum registry is required: '+match[1])
@@ -56,6 +57,11 @@ def evaluate(text, values, enum_resolver=None):
         chunks = re.split(r'''('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")''', text)
         text = ''.join(chunk if i % 2 else re.sub(r'\$enum:([A-Za-z_]\w*)\.([A-Za-z_]\w*)', resolve, chunk)
                        for i,chunk in enumerate(chunks))
+    return text
+
+
+def evaluate(text, values, enum_resolver=None):
+    text = enum_text(text, enum_resolver)
     def visit(n):
         if isinstance(n, ast.Constant) and type(n.value) in (int, float, bool, str, type(None)):
             return n.value
@@ -107,11 +113,39 @@ def boolean(value):
 def assignments(text, values, enum_resolver=None):
     changes = {}
     for statement in parts(text):
-        match = re.fullmatch(r'\s*\$?([A-Za-z_]\w*)\s*=(?!=)(.*)', statement, re.S)
-        if not match: raise Unsupported('Unsupported assignment: ' + statement)
-        name, expr = match.groups()
-        value = evaluate(expr, values, enum_resolver)
-        values[name] = changes[name] = value
+        # Parse the target using the same allowlisted expression syntax, but
+        # never execute Python assignments or allow arbitrary object mutation.
+        fields = parts(statement, '=')
+        if len(fields) < 2 or not fields[0]:
+            raise Unsupported('Unsupported assignment: ' + statement)
+        target, expr = fields[0], '='.join(fields[1:])
+        node = syntax(enum_text(target, enum_resolver))
+        def location(n):
+            if isinstance(n, ast.Name): return values, n.id
+            if not isinstance(n, (ast.Attribute, ast.Subscript)):
+                raise Unsupported('Unsupported assignment target: ' + target)
+            parent, key = location(n.value)
+            try: obj = parent[key]
+            except (KeyError, IndexError, TypeError) as error:
+                raise Unsupported('Unbound assignment container: ' + target) from error
+            if isinstance(n, ast.Attribute):
+                if not isinstance(obj, dict) or n.attr not in obj:
+                    raise Unsupported('Unbound assignment member: ' + n.attr)
+                return obj, n.attr
+            key = evaluate(ast.unparse(n.slice), values)
+            if isinstance(obj, list):
+                if type(key) is not int or not 0 <= key < len(obj):
+                    raise Unsupported('Invalid assignment array index')
+            elif isinstance(obj, dict):
+                # JSON snapshots preserve string map keys. Numeric/custom-key
+                # maps need a typed persistence adapter, not coercion to text.
+                if type(key) is not str: raise Unsupported('Unsupported assignment map key')
+            else: raise Unsupported('Unsupported assignment container')
+            return obj, key
+        container, key = location(node)
+        value = copy.deepcopy(evaluate(expr, values, enum_resolver))
+        container[key] = value
+        changes[target.removeprefix('$')] = copy.deepcopy(value)
     return changes
 
 

@@ -622,6 +622,18 @@ tests cover filtered waits with optional outputs and save/reload. Finite timed
 waits and native mailbox arbitration remain unimplemented; this is not a full
 tutorial run or proof of native competing-reader ordering.
 
+The expression interpreter now assigns existing nested record fields,
+string-keyed map entries, and in-range array elements, including dynamic or
+declared-enum array indices. This covers authored parameter updates such as
+`$t_fightParams.opponent = $t_customBehaviorParams.entity` without flattening
+records into unrelated variables. Values are copied on assignment. Missing
+intermediate records/members, invalid indices, arbitrary object writes, and
+numeric/custom map keys remain unsupported (the latter require typed snapshot
+serialization). Tests cover production conversion, sequential assignment
+dependencies, literal delimiters, rejected targets without mutation, and
+JSON snapshot/replay of nested updates. Declaration initialization and full
+controller execution are still separate requirements.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
