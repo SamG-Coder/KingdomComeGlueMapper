@@ -44,6 +44,22 @@ combat exercise or animation itself.
 
 ## Test converted package data
 
+Audit every retail source quest independently of an installed mod, prioritizing
+the opening and return quests while retaining every later source record:
+
+```powershell
+python tools/quest_lab_test.py campaign --kcd1 "D:/SteamLibrary/steamapps/common/KingdomComeDeliverance" --first q_skalitz q_returnToSkalitz --output outputs/campaign-review
+```
+
+This runs the production quest-state emitter and local probes, prints progress
+for every quest, and atomically saves `checkpoint.json` after each record.
+`campaign.json` is written when the audit finishes. Use a new output directory
+for each run so interrupted work cannot be confused with an earlier result.
+Checkpoints retain evidence; they do not yet resume execution. `--first` controls
+review order, not story chronology. Actor behavior and cross-quest progression
+remain separate verification requirements. Partial or blocked quests return a
+nonzero exit code even when the audit itself finishes.
+
 Run the package-wide audit, optionally comparing and dry-running **every** source
 quest record through the production quest-state emitter:
 

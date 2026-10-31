@@ -26,7 +26,20 @@ def source_differences(graph, tables):
     return evidence
 
 
-def run(game, progress=None):
+def ordered_records(records, first=()):
+    """Prioritize explicit source identities without dropping later quests."""
+    first = list(first)
+    if len(first) != len(set(first)):
+        raise ValueError('Duplicate priority quest')
+    missing = set(first) - {r['quest_name'] for r in records}
+    if missing:
+        raise ValueError('Unknown priority quests: ' + ', '.join(sorted(missing)))
+    rank = {name: index for index, name in enumerate(first)}
+    return sorted(records, key=lambda r: (rank.get(r['quest_name'], len(rank)),
+                                         r.get('group', ''), r['quest_name']))
+
+
+def run(game, progress=None, *, first=(), checkpoint=None):
     game = Path(game)
     results = []
     with RetailSourceReader(game) as reader:
@@ -44,7 +57,7 @@ def run(game, progress=None):
                                 provenance=record['candidates'])
             by_id[name] = defaultdict(list)
             for row in rows: by_id[name][row.get('quest_id')].append(row)
-        records = sorted(tables['quest']['rows'], key=lambda r: (r.get('group', ''), r['quest_name']))
+        records = ordered_records(tables['quest']['rows'], first)
         for index, row in enumerate(records):
             name, identity = row['quest_name'], row['quest_id']
             result = dict(name=name, group=row.get('group', ''), quest_id=identity,
@@ -79,7 +92,9 @@ def run(game, progress=None):
             except (ValueError, KeyError, TypeError, AssertionError) as exc:
                 result.update(status='CONVERSION_BLOCKED', error=type(exc).__name__ + ': ' + str(exc))
             results.append(result)
-            if progress and (index % 25 == 0 or index + 1 == len(records)):
+            if checkpoint:
+                checkpoint(results, len(records))
+            if progress:
                 progress(index + 1, len(records), name, result['status'])
     return dict(scope='Original source quest-state graphs passed through the current production emitter in memory',
                 limits=['These generated graphs are not installed.',

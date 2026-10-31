@@ -11,6 +11,10 @@ from .source import Source
 def main():
     parser = argparse.ArgumentParser(description='Emulate converted quest/NPC logic without launching KCD2.')
     sub = parser.add_subparsers(dest='command', required=True)
+    campaign_parser = sub.add_parser('campaign', help='Audit every source quest with per-quest checkpoints')
+    campaign_parser.add_argument('--kcd1', type=Path, required=True)
+    campaign_parser.add_argument('--first', nargs='+', default=[], help='Source quest names to audit first; all remaining records follow')
+    campaign_parser.add_argument('--output', type=Path, required=True)
     run = sub.add_parser('run', help='Run JSON scenarios and write JSON/HTML/JUnit reports')
     run.add_argument('scenarios', type=Path, nargs='+')
     run.add_argument('--output', type=Path, required=True)
@@ -25,6 +29,12 @@ def main():
     demo = sub.add_parser('demo', help='Generate runnable fixtures using the production converters')
     demo.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.command == 'campaign':
+        from .campaign import campaign
+        result = campaign(args.kcd1, args.output, args.first,
+                          lambda done, total, name, status: print(f'{done}/{total} {name}: {status}', flush=True))
+        print(json.dumps(dict(statuses=result['statuses'], probes=result['probes']), indent=2))
+        return int(any(q['status'] != 'LOCAL_STATE_PROBES_EXECUTED' for q in result['quests']))
     if args.command == 'audit':
         if args.source_graphs and not args.kcd1: parser.error('--source-graphs requires --kcd1')
         from .audit import run as run_audit
