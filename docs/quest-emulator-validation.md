@@ -584,6 +584,16 @@ The report highlights remaining Lua, event, scheduling, graph-search and behavio
 dispatch work rather than presenting the larger state-operation counts as a
 completed campaign.
 
+The simulator now executes single-child `SuppressFailure` and `Invertor`
+decorators. They wait for the child's actual result, preserve suspended stacks
+across reloads, and transform only a returned success/failure. Unsupported
+operations and malformed schemas still stop execution; suppression cannot turn
+an interpreter coverage gap into success. Production compiler-to-simulator tests
+cover both child results and both decorators. Re-indexing the emitted opening
+controllers removes 62 structural findings, leaving 2,411. Evidence:
+`outputs/quest-controller-whole-opening-20261101/decorator-coverage.json`.
+This re-indexing is not a native or simulated full-controller playthrough.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

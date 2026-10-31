@@ -18,7 +18,7 @@ WRAPPERS = {'Sequence', 'Then', 'Else', 'Behavior', 'OnInit', 'Child', 'DefaultB
 SUPPORTED = WRAPPERS | {'Root', 'Success', 'Fail', 'Expression', 'IfCondition',
     'IfElseCondition', 'Switch', 'Selector', 'While', 'Wait', 'ProcessMessage',
     'SmartObjSetBehaviorState', 'Callback_empty', 'GameContextCheck', 'IncludeTree', 'Parallel', 'Loop',
-    'InstantSendMessageToNPC'}
+    'InstantSendMessageToNPC', 'SuppressFailure', 'Invertor'}
 
 
 class Behavior:
@@ -109,6 +109,8 @@ class Behavior:
             self.unsupported.append(dict(node=path, reason='Parallel requires nonempty branches and explicit All/Any policies'))
         if node.tag == 'Loop' and (set(node.attrib) != {'count'} or len(node) != 1):
             self.unsupported.append(dict(node=path, reason='Loop requires an explicit count and exactly one body'))
+        if node.tag in ('SuppressFailure','Invertor') and (node.attrib or len(node) != 1):
+            self.unsupported.append(dict(node=path, reason='Result decorator requires exactly one child and no attributes'))
         if node.tag == 'InstantSendMessageToNPC' and (len(node) or set(node.attrib) - {'target','type','variable','values'}):
             self.unsupported.append(dict(node=path, reason='Immediate NPC message requires a leaf and known payload fields'))
         if node.tag == 'GameContextCheck' and (
@@ -253,6 +255,13 @@ class Behavior:
                 order.extend(i for i,c in enumerate(node) if c.tag == 'Behavior')
                 index = order[index]
             self._push(task, frame, index)
+        elif tag in ('SuppressFailure','Invertor'):
+            if node.attrib or len(node) != 1:
+                raise Unsupported('Unsupported result decorator schema: '+path)
+            if 'child_result' not in frame:
+                self._push(task,frame,0); return
+            result = frame.pop('child_result')
+            finish(True if tag == 'SuppressFailure' else not result)
         elif tag in ('Success', 'Fail'): finish(tag == 'Success')
         elif tag == 'Expression':
             changes = assignments(node.get('expressions', ''), self.variables, self.graph.source.enum_value)
