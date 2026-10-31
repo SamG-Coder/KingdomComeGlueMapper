@@ -45,7 +45,17 @@ CMP = {ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
        ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge}
 
 
-def evaluate(text, values):
+def evaluate(text, values, enum_resolver=None):
+    if '$enum:' in text:
+        def resolve(match):
+            if enum_resolver is None: raise Unsupported('Behavior enum registry is required: '+match[1])
+            value = enum_resolver(match[1], match[2])
+            if type(value) is not int: raise Unsupported('Behavior enum ordinal must be an integer')
+            return '('+str(value)+')'
+        # Enum-looking text inside strings is data, not a registry lookup.
+        chunks = re.split(r'''('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")''', text)
+        text = ''.join(chunk if i % 2 else re.sub(r'\$enum:([A-Za-z_]\w*)\.([A-Za-z_]\w*)', resolve, chunk)
+                       for i,chunk in enumerate(chunks))
     def visit(n):
         if isinstance(n, ast.Constant) and type(n.value) in (int, float, bool, str, type(None)):
             return n.value
@@ -94,13 +104,13 @@ def boolean(value):
     return value
 
 
-def assignments(text, values):
+def assignments(text, values, enum_resolver=None):
     changes = {}
     for statement in parts(text):
         match = re.fullmatch(r'\s*\$?([A-Za-z_]\w*)\s*=(?!=)(.*)', statement, re.S)
         if not match: raise Unsupported('Unsupported assignment: ' + statement)
         name, expr = match.groups()
-        value = evaluate(expr, values)
+        value = evaluate(expr, values, enum_resolver)
         values[name] = changes[name] = value
     return changes
 

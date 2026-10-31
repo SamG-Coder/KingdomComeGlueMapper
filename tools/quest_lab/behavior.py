@@ -42,6 +42,9 @@ class Behavior:
             self.trees[key] = key
             self._index(root, key)
         self._resolve_includes()
+        enum_files = {p:self.graph.source.hashes[p] for declarations in self.graph.source.enums.values()
+                      for p,_,_ in declarations}
+        self.fingerprint = hashlib.sha256((self.fingerprint+json.dumps(enum_files,sort_keys=True)).encode()).hexdigest()
         for tag, contract in self.contracts.items():
             if tag in SUPPORTED or tag.startswith('SendAIConceptSignal_'):
                 raise ValueError('Cannot stub interpreted behavior: ' + tag)
@@ -181,7 +184,7 @@ class Behavior:
         path = frame['path']; node = self.nodes[path]; tag = node.tag
         self.visited.add(path)
         self.graph.tick()
-        def expr(text): return evaluate(text, self.variables)
+        def expr(text): return evaluate(text, self.variables, self.graph.source.enum_value)
         def finish(result=True): self._finish(name, result)
         if tag.startswith('SendAIConceptSignal_'):
             if len(node) or node.attrib:
@@ -252,7 +255,7 @@ class Behavior:
             self._push(task, frame, index)
         elif tag in ('Success', 'Fail'): finish(tag == 'Success')
         elif tag == 'Expression':
-            changes = assignments(node.get('expressions', ''), self.variables)
+            changes = assignments(node.get('expressions', ''), self.variables, self.graph.source.enum_value)
             self.record('assignment', task=name, node=path, changes=changes); finish()
         elif tag == 'SmartObjSetBehaviorState':
             behavior = expr(node.get('behaviors', ''))

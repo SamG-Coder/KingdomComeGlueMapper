@@ -548,6 +548,23 @@ and combined variable/initializer policies remain rejected. This adds simulator
 delivery, not native message type registration, native NPC scheduling, or
 synchronous `SendMessageToNPC` request/reply semantics.
 
+### Converted enum expressions — 1 November 2026
+
+Behavior conditions, assignments, and payload expressions now resolve
+`$enum:Type.Member` through the package's converted `Enums` registry. Values
+must be explicitly declared integers; missing types/members, duplicate
+declarations, duplicate member names, and malformed metadata remain errors.
+Quoted enum-looking strings remain literal text. Enum file hashes contribute
+to the behavior snapshot fingerprint, so changed ordinals invalidate reloads.
+
+The installed source already declares `ObjectiveState` and `QuestState` in its
+AI type metadata; the importer can convert them without inferring binary values.
+All ten members passed an actual source-adapter-to-simulator round trip in
+`outputs/quest-enum-execution-20261101/report.json`. A compiled regression also
+verifies a namespaced enum condition, an enum-valued assignment, and the changed
+branch result on the next invocation. This tests expression values, not native
+quest lifecycle equivalence or event timing.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

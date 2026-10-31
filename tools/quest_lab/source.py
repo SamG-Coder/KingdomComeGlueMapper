@@ -24,6 +24,7 @@ class Source:
         self.files = {}
         self.definitions = {}
         self.hashes = {}
+        self.enums = {}
         if self.path.is_dir():
             for p in sorted(self.path.rglob('*.xml')):
                 self.add(p.relative_to(self.path).as_posix(), p.read_bytes())
@@ -40,7 +41,7 @@ class Source:
     def blobs(cls, blobs):
         obj = cls.__new__(cls)
         obj.path = Path('<generated>')
-        obj.files, obj.definitions, obj.hashes = {}, {}, {}
+        obj.files, obj.definitions, obj.hashes, obj.enums = {}, {}, {}, {}
         for path, blob in sorted(blobs.items()): obj.add(path, blob)
         return obj
 
@@ -55,11 +56,31 @@ class Source:
         self.files[key] = root
         self.hashes[key] = hashlib.sha256(data).hexdigest()
         if root is None: return
+        for group in root.findall('./Enums'):
+            for enum in group.findall('Enum'):
+                self.enums.setdefault(enum.get('Name'), []).append((key, group.get('version'), enum))
         for definition in root.findall('./Skald/*'):
             if definition.tag not in {'Project', 'Quest', 'Module', 'Level'} | DIALOGUES: continue
             name = definition.get('Name')
             if not name: raise ValueError('Unnamed Skald definition: ' + path)
             self.definitions.setdefault(name, []).append((key, definition))
+
+    def enum_value(self, name, member):
+        declarations = self.enums.get(name, [])
+        if len(declarations) != 1:
+            raise Unsupported('Missing/ambiguous behavior enum: '+name)
+        _, version, node = declarations[0]
+        if version != '1' or set(node.attrib) != {'Name'}:
+            raise Unsupported('Unsupported behavior enum schema: '+name)
+        values = {}
+        for value in node:
+            key = value.get('Name')
+            if value.tag != 'Value' or set(value.attrib) != {'Name','Value'} or not key or key in values or len(value):
+                raise Unsupported('Malformed behavior enum member: '+name)
+            try: values[key] = int(value.get('Value'), 10)
+            except ValueError as error: raise Unsupported('Noninteger behavior enum member: '+name+'.'+key) from error
+        if member not in values: raise Unsupported('Missing behavior enum member: '+name+'.'+member)
+        return values[member]
 
     def reference(self, reference, origin):
         reference = reference.replace('\\','/').lower()
