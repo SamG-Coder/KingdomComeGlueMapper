@@ -453,6 +453,15 @@ and 64 unresolved sites. All three retain their work dependency blockers and
 The full suite passed 2,346 tests with 17 skips. These results do not establish
 whole-controller execution or native campaign playability.
 
+The recursive registered-controller audit from `q_skalitz` subsequently discovers
+172 records: 165 accepted state models and seven blocked records (previously
+159 accepted out of 168 discovered). It converts 12,285 controller state-operation
+sites and retains 878 unresolved sites. The seven blocked records include missing
+source registrations, a missing test behavior file, invalid source objectives,
+duplicate behavior names, and unresolved graph edges. None are silently omitted
+or treated as completed quests. Evidence:
+`outputs/quest-controller-work-closure-20261101/report.json`.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz
