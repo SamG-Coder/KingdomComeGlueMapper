@@ -332,6 +332,31 @@ gameplay defects. Full campaign execution remains incomplete.
 
 ## Remaining verification boundaries
 
+### Joint campaign execution checkpoint — 1 November 2026
+
+The source campaign compiler now assembles 265 accepted quest records together,
+resolving 336 cross-quest predicates. The other 22 records remain explicitly
+excluded with their conversion errors. This includes the original Skatliz
+`practiceFencing` dependency on `q_tutorial_swordOne` completion.
+
+Three scenarios against that complete compiled project pass all 18 assertions:
+waiting for tutorial completion (including failure and save/reload replay),
+tutorial completion before objective activation, and cancellation followed by
+restart. Inputs use declared public quest ports. Tutorial completion is an
+explicit diagnostic stimulus; the combat exercise and its controller are not
+executed by these scenarios. The complete campaign is not marked finished.
+
+The tests exposed a generic interpreter coverage bug: forwarded child trigger
+outputs executed correctly but were reported unresolved. The checker now
+recognizes wired trigger outputs while still auditing their original sources;
+forwarding an unknown source does not make it supported.
+
+Local scenarios and HTML/JSON evidence:
+`outputs/quest-campaign-linked-20261101/fencing-checks/`.
+The scenario generator is `quest_lab.linked_checks.scenarios`; it accepts only
+a single literal quest-completion predicate and rejects compound conditions
+rather than simplifying them.
+
 - [ ] Differential validation of emulator event ordering against the native runtime.
 - [ ] Native Wait-menu, AI LOD and scheduler priority/preemption behaviour.
 - [ ] Native movement, scene release, animations, bed use and combat exercises.

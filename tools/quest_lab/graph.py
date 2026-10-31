@@ -43,6 +43,7 @@ class Graph:
         self.states, self.enum_values, self.external_values = {}, {}, {}
         self.timers, self.generations, self.external_last = [], {}, {}
         self.input_types, self.event_ports, self.output_ports = {}, set(), set()
+        self.relay_outputs = set()
         self.unsupported, self.used_files = [], set()
         self.visited, self.events, self.trace = Counter(), Counter(), []
         self.now, self.serial, self.steps = 0, 0, 0
@@ -134,6 +135,7 @@ class Graph:
                     typ = ports.get(port, ('Out', None))[1]
                     if typ == 'trigger' or port == 'source_state_changed':
                         self.routes[ref].append(('relay', out))
+                        self.relay_outputs.add(out)
                     else:
                         if out in self.aliases: raise ValueError('Multiple data drivers: ' + out)
                         self.aliases[out] = ref
@@ -279,6 +281,7 @@ class Graph:
 
     def _known_ref(self, ref):
         if ref in self.input_types or ref in self.event_ports or ref in self.aliases: return True
+        if ref in self.relay_outputs: return True
         if ref in self.dialogue_outputs: return True
         name, _, port = ref.rpartition('.')
         if name not in self.nodes: return False
