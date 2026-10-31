@@ -438,6 +438,21 @@ replacement identities, and invalid installation paths (108 Quest Lab tests).
 
 ### Joint campaign execution checkpoint — 1 November 2026
 
+Registered controller discovery now retains malformed work-program registrations
+as unresolved dependencies instead of abandoning the entire quest import. Valid
+sibling programs survive, while the original invalid row and error remain in
+the source model. Strict profile conversion still rejects invalid registrations.
+This is a generic registry rule, with no quest-name exceptions.
+
+A source-data rerun accepts the state models for `q_escapeToTalmberk`,
+`q_counterfeiters`, and `q_konradKyeser`, previously blocked by a malformed sibling
+work registration. Together they expose 1,008 converted state-operation sites
+and 64 unresolved sites. All three retain their work dependency blockers and
+`executable=false`. Evidence:
+`outputs/quest-controller-work-registration-three-20261101/report.json`.
+The full suite passed 2,346 tests with 17 skips. These results do not establish
+whole-controller execution or native campaign playability.
+
 The source campaign compiler now assembles 265 accepted quest records together,
 resolving 336 cross-quest predicates. The other 22 records remain explicitly
 excluded with their conversion errors. This includes the original Skatliz

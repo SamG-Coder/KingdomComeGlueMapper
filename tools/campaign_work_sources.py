@@ -33,26 +33,44 @@ def discover(trees, table_rows, *, include_area_context=False):
                         if not row.get('tree_file') or not row.get('tree_name'):
                             call['unresolved'].append('Source work behavior has no program: ' + name)
                         else:
-                            call['candidates'].append(dict(tag=name, table=registry, row=dict(row),
-                                file=behavior_path(row['tree_file']), tree=row['tree_name']))
+                            try:
+                                file = behavior_path(row['tree_file'])
+                            except ValueError as error:
+                                call['unresolved'].append(str(error))
+                                call.setdefault('invalid_programs', []).append(dict(table=registry, row=dict(row), error=str(error)))
+                            else:
+                                call['candidates'].append(dict(tag=name, table=registry, row=dict(row),
+                                    file=file, tree=row['tree_name']))
             if not direct and literal(attrs.get('preferredBehaviorsOnly', 'false')) != 'true':
                 call['unresolved'].append('Unrestricted area fallback needs the placed area behavior registry')
             if include_area_context:
-                call['area_context'] = area_context(call['candidates'], table_rows)
+                call['area_context'] = area_context(call['candidates'], table_rows, retain_invalid=True)
                 call['candidates'].extend(call['area_context']['programs'])
+                call['unresolved'].extend(e['error'] for e in call['area_context']['invalid_programs'])
             calls.append(call)
     return calls
 
 
-def area_context(candidates, table_rows):
+def area_context(candidates, table_rows, *, retain_invalid=False):
     """A requested job also depends on its area's callbacks and sibling jobs.
 
     Work loops dispatch other behaviors dynamically. Discovering only their
     first named entry loses both the area lifecycle and those subsequent jobs.
     Retain all possible source areas; placement narrows which one is used.
+    Import audits can retain malformed registrations as explicit failures;
+    callers that cannot propagate those failures remain strict by default.
     """
     from quest_import import behavior_path
-    areas, programs = [], []
+    areas, programs, invalid = [], [], []
+    def program(file, tree, **metadata):
+        try:
+            path = behavior_path(file)
+        except ValueError as error:
+            if not retain_invalid:
+                raise
+            invalid.append(dict(metadata, file=file, tree=tree, error=str(error)))
+        else:
+            programs.append(dict(metadata, file=path, tree=tree))
     # Tools dispatch through SmartObject registrations, including useItem's
     # continuation and release callbacks. Following SmartAreas alone loses
     # those jobs even when the area program itself was found successfully.
@@ -69,11 +87,11 @@ def area_context(candidates, table_rows):
         sibling_ids = {r[tag_id] for r in links if r[entity_id] in ids}
         for row in table_rows(tag_table):
             if row[tag_id] in sibling_ids and row.get('tree_file') and row.get('tree_name'):
-                programs.append(dict(kind='area_behavior' if prefix == 'sa' else 'object_behavior',
+                program(row['tree_file'], row['tree_name'], kind='area_behavior' if prefix == 'sa' else 'object_behavior',
                     table=tag_table, row=dict(row), tag=row[tag_table + '_name'],
-                    file=behavior_path(row['tree_file']), tree=row['tree_name']))
+                )
     if not areas:
-        return dict(templates=[], programs=programs)
+        return dict(templates=[], programs=programs, invalid_programs=invalid)
     brains={r['brain_id'] for r in areas if r.get('brain_id')}
     if brains:
         sub_ids={r['subbrain_id'] for r in table_rows('brain2subbrain') if r['brain_id'] in brains}
@@ -90,7 +108,7 @@ def area_context(candidates, table_rows):
                 if row['subbrain_id']!=sub['subbrain_id']:continue
                 for field in fields:
                     if row.get(field):
-                        programs.append(dict(kind='area_brain_callback',table=table,row=dict(row),
-                            callback=field,file=behavior_path(row['file_name']),tree=row[field]))
+                        program(row['file_name'], row[field], kind='area_brain_callback',table=table,row=dict(row),
+                            callback=field)
     unique={(p['file'],p['tree']):p for p in programs}
-    return dict(templates=areas,programs=list(unique.values()))
+    return dict(templates=areas,programs=list(unique.values()),invalid_programs=invalid)

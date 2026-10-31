@@ -5,6 +5,33 @@ from campaign_work_sources import discover, area_context
 
 
 class WorkSourcesTests(unittest.TestCase):
+    def test_invalid_sibling_is_retained_without_losing_valid_programs(self):
+        rows = {
+            'sa_behaviour_tag': [dict(sa_behaviour_tag_id=i, sa_behaviour_tag_name=n,
+                tree_file=f, tree_name=n) for i, n, f in (
+                    ('main', 'work', 'work.xml'), ('bad', 'broken', 'invalidProgram'),
+                    ('other', 'cleanup', 'cleanup.xml'))],
+            'sa_smart_area2sa_behaviour_tag': [dict(sa_smart_area_id='area', sa_behaviour_tag_id=i)
+                for i in ('main', 'bad', 'other')],
+            'sa_smart_area': [dict(sa_smart_area_id='area')],
+        }
+        report = discover(self.trees('work'), lambda name: rows.get(name, []), include_area_context=True)[0]
+        self.assertEqual({c['tree'] for c in report['candidates']}, {'work', 'cleanup'})
+        invalid = report['area_context']['invalid_programs'][0]
+        self.assertEqual(invalid['row'], rows['sa_behaviour_tag'][1])
+        self.assertIn(invalid['error'], report['unresolved'])
+        with self.assertRaisesRegex(ValueError, 'Invalid behavior include'):
+            area_context([dict(table='sa_behaviour_tag', row=rows['sa_behaviour_tag'][0])],
+                         lambda name: rows.get(name, []))
+
+    def test_invalid_direct_registration_does_not_hide_valid_variant(self):
+        rows = [dict(sa_behaviour_tag_name='work', tree_file=f, tree_name='Work')
+                for f in ('invalidProgram', 'valid.xml')]
+        report = discover(self.trees('work'), lambda name: rows)[0]
+        self.assertEqual([c['file'] for c in report['candidates']], ['Libs/AI/valid.xml'])
+        self.assertEqual(report['invalid_programs'][0]['row'], rows[0])
+        self.assertTrue(report['unresolved'])
+
     def test_tool_object_dispatch_retains_use_return_and_brain_callbacks(self):
         rows = {
             'so_behaviour_tag': [dict(so_behaviour_tag_id=i, so_behaviour_tag_name=n,
