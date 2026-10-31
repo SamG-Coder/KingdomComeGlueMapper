@@ -97,6 +97,22 @@ Numeric conversions reject nonfinite values and overflow outside the modeled
 32-bit range. Native item-acquisition events and inventory access still require
 explicit scenario contracts; matching item counts never synthesizes those events.
 
+Class/count `ItemDescriptorTrigger` nodes also accept an explicit modeled
+acquisition stimulus:
+
+```json
+{"action":"item_acquired","inventory":"player-bag","item":"item-class-guid","amount":1}
+```
+
+The inventory must have a declared `Items` query snapshot. This action adds the
+quantity and emits `OnAcquire` for active, matching inventory/class watchers;
+`OnTargetAmountAcquire` additionally fires when the count crosses the requested
+threshold from below. These are declared simulator semantics, pending native
+differential validation. Ownership, health, stolen status, transfers and physical
+loot creation are not inferred. Ordinary `object_snapshot` updates emit no
+acquisition events. The production completion gate still checks all quantities
+and the objective's active state before completing it.
+
 Inventory a source directory or a single package:
 
 ```powershell

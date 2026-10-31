@@ -332,6 +332,21 @@ gameplay defects. Full campaign execution remains incomplete.
 
 ## Remaining verification boundaries
 
+### Inventory acquisition checkpoint — 1 November 2026
+
+The emulator now supports explicit class-and-count acquisition stimuli for the
+production converter's `ItemDescriptorTrigger` nodes. Tests cover the wrong
+inventory, wrong item class, partial quantities, cancellation, and save/reload.
+Replacing an inventory observation does not invent an acquisition event.
+
+Checks using the original Skatliz `buyCharcoal`, `getCrossguard`, and
+`collectBeer` objectives passed their quantity and actor assertions. These use
+an explicitly declared source-item identity mapping as a fixture, not verified
+registration of those items in the installed mod. Native acquisition ordering,
+physical item creation, and the shop/dialogue path are still unverified.
+Evidence: `outputs/quest-inventory-20261101/report.json`.
+The full suite passed 2,332 tests with 17 skips.
+
 ### Joint campaign execution checkpoint — 1 November 2026
 
 The source campaign compiler now assembles 265 accepted quest records together,

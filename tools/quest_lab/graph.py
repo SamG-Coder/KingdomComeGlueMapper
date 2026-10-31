@@ -26,7 +26,7 @@ FUNCTIONS = {
     'math::boolean::Xor': lambda v: boolean(v['A']) != boolean(v['B']),
 }
 BUILTINS = {'State', 'Function', 'IfFunction', 'If', 'TriggerSequence', 'Timer',
-            'Trace', 'HasteTrigger', 'GameStart', 'InstantSendMessage'} | collection_nodes.KINDS
+            'Trace', 'HasteTrigger', 'GameStart', 'InstantSendMessage', 'ItemDescriptorTrigger'} | collection_nodes.KINDS
 
 
 def qualified(scope, value):
@@ -295,6 +295,7 @@ class Graph:
             options = [('True' if v else 'False') if type(v) is bool else str(v) for v in self.enum_values.get(name, [])]
             return port in ('State','OnExec','OnChanged', *options, *('On'+v for v in options))
         return (kind == 'Function' and port == 'bool'
+            or kind == 'ItemDescriptorTrigger' and port in ('OnAcquire', 'OnTargetAmountAcquire')
             or kind in ('If','IfFunction') and port in ('True','False')
             or kind == 'Timer' and port == 'OnFinished'
             or kind == 'TriggerSequence' and port in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' and len(port) == 1
@@ -307,6 +308,7 @@ class Graph:
                 v for n in self.nodes.values() for v in n['values'].values()}:
             if not self._known_ref(ref): self.issue(ref, 'Unresolved or unsupported source port')
         allowed = {'State': {'DefaultValue','Value'}, 'If': {'Condition'},
+            'ItemDescriptorTrigger': {'Inventory', 'ItemDescriptor', 'IsActive'},
             'IfFunction': {'ValueA','ValueB','Op','A','B','Value'}, 'Function': {'A','B','Value'},
             'Timer': {'Duration','TimeType'}, 'Trace': {'Value'},
             'TriggerSequence': set(), 'HasteTrigger': set(), 'GameStart': set()}
@@ -325,6 +327,8 @@ class Graph:
             spec = node.get('value_spec') or node.get('object_spec')
             permitted = spec['inputs'] if spec else pure[1] if pure else allowed.get(node['kind'])
             bound = set(node['values']) | set(node['constants']) | {a.get('Name') for a in node['element'].findall('Asset')}
+            if node['kind'] == 'ItemDescriptorTrigger' and bound != allowed['ItemDescriptorTrigger']:
+                self.issue(name, 'Item tracking requires explicit Inventory, ItemDescriptor and IsActive')
             for port in bound:
                 if permitted is not None and port not in permitted:
                     self.issue(name, 'Unsupported input: ' + port)

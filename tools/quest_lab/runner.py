@@ -126,10 +126,14 @@ class Runner:
             'native_result': {'id','node','result','values','events'},
             'assert_native': {'pending','count','label'},
             'object_snapshot': {'identity','facets'},
+            'item_acquired': {'inventory', 'item', 'amount'},
         }
         if action not in fields or set(step) - (fields[action] | {'action'}):
             raise ValueError('Unknown scenario action/fields: ' + action)
         if action == 'fire': self.graph.fire(step['port'])
+        elif action == 'item_acquired':
+            from .inventory import acquire
+            acquire(self.graph, step['inventory'], step['item'], step['amount'])
         elif action == 'set': self.graph.set_inputs(step['values'])
         elif action == 'object_snapshot': self.graph.objects.replace(step['identity'], step['facets'])
         elif action == 'advance': self.advance(step['duration'], step.get('mode','normal'))
