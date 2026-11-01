@@ -57,6 +57,12 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
     paths = runtime_paths(appearance, paths, namespace)
     asset_count = sum(p.relative_to(appearance).as_posix().startswith('objects/') for p in paths)
     work_progress('Pack character assets', 0, asset_count)
+    # Characters pack in parallel into the shared Data folder, where other
+    # workers list and open *.pak. Write each archive under a partial name
+    # and give it its final name only once every shard is complete.
+    def partial(path):
+        if path.exists(): raise FileExistsError(path)
+        return path.with_name(path.name + '.partial')
     def entries():
         completed, written = 0, 0
         for p in paths:
@@ -79,7 +85,7 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
             if pak is None:
                 suffix = '' if not paks else '_%02d' % len(paks)
                 paks.append(data_dir / (namespace + suffix + '.pak'))
-                pak = zipfile.ZipFile(paks[-1], 'x', zipfile.ZIP_STORED, allowZip64=False)
+                pak = zipfile.ZipFile(partial(paks[-1]), 'x', zipfile.ZIP_STORED, allowZip64=False)
                 used, count = 22, 0
             item = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
             item.create_system = 0
@@ -87,9 +93,11 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
             used += size; count += 1
         if not paks:
             paks.append(data_dir / (namespace + '.pak'))
-            pak = zipfile.ZipFile(paks[0], 'x', zipfile.ZIP_STORED, allowZip64=False)
+            pak = zipfile.ZipFile(partial(paks[0]), 'x', zipfile.ZIP_STORED, allowZip64=False)
     finally:
         if pak is not None: pak.close()
+    for path in paks:
+        partial(path).rename(path)
     work_progress('Pack character assets', asset_count, asset_count, 'Assets packed and validated')
     return paks, libs
 

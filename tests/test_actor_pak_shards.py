@@ -44,6 +44,28 @@ class ActorPakShardTests(unittest.TestCase):
                         seen[info.filename] = z.read(info)
             self.assertEqual(seen, files)
 
+    def test_no_pak_is_listed_until_every_shard_is_complete(self):
+        # Parallel character workers list *.pak in the same Data folder.
+        import setup_progress
+        with tempfile.TemporaryDirectory() as directory:
+            files = {'objects/f%d.bin' % i: bytes([i]) * 100 for i in range(5)}
+            appearance, data = self.stage(Path(directory), files)
+            listed = []
+            old, setup_progress.work_sink = setup_progress.work_sink, lambda *a: listed.append(sorted(data.glob('*.pak')))
+            try: paks, _ = write_actor_paks(appearance, data, 'npc', limit=520)
+            finally: setup_progress.work_sink = old
+            self.assertEqual(listed[-1], paks)
+            self.assertTrue(all(not seen for seen in listed[:-1]))
+            self.assertEqual(sorted(p.name for p in data.iterdir()), ['npc.pak', 'npc_01.pak', 'npc_02.pak'])
+
+    def test_existing_pak_is_not_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appearance, data = self.stage(Path(directory), {'objects/o.bin': b'x'})
+            (data/'npc.pak').write_bytes(b'older')
+            with self.assertRaises(FileExistsError):
+                write_actor_paks(appearance, data, 'npc')
+            self.assertEqual((data/'npc.pak').read_bytes(), b'older')
+
     def test_oversized_file_raises(self):
         with tempfile.TemporaryDirectory() as directory:
             appearance, data = self.stage(Path(directory), {'objects/big.bin': b'x' * 600})
