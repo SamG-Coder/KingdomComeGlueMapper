@@ -12,7 +12,8 @@ import zipfile
 from upgrade_map import read, xml
 
 
-def bind_storage(files, merchant, source, namespace, model, *, authored=None, registered_keys=(), suffix='stash', inventory_contract=None):
+def bind_storage(files, merchant, source, namespace, model, *, authored=None, registered_keys=(), suffix='stash', inventory_contract=None, mission=None):
+    """Pass a parsed mission to edit it in place; the caller then serializes it."""
     from merchant_stash import source_stash
     from ordinary_containers import properties
     from campaign_entity_links import append_links
@@ -28,7 +29,8 @@ def bind_storage(files, merchant, source, namespace, model, *, authored=None, re
     props = properties(record,model,inventory_contract or dict(preset='',restock_days=0,read_only=False,registered_keys=registered_keys))
     minimum = original.find('Database').get('iMinimalShopItemPrice')
     if minimum is not None: props.find('Database').set('iMinimalShopItemPrice',minimum)
-    mission = E.fromstring(files['objects_mission0.xml'])
+    owned = mission is None
+    if owned: mission = E.fromstring(files['objects_mission0.xml'])
     shop = next(e for e in mission if e.get('Name')==namespace+'_shop')
     npc = next(e for e in mission if e.get('Name')==merchant['name'])
     name = namespace+'_'+suffix
@@ -56,7 +58,7 @@ def bind_storage(files, merchant, source, namespace, model, *, authored=None, re
         if links is None:links=E.SubElement(a,'EntityLinks')
         E.SubElement(links,'Link',Name=label,TargetId=b.get('EntityId'),TargetGuid=b.get('EntityGuid'))
     result=dict(files)
-    result['objects_mission0.xml']=xml(mission)
+    if owned: result['objects_mission0.xml']=xml(mission)
     result['waitinglinks.xml']=append_links(files['waitinglinks.xml'],[(a.get('EntityGuid'),b.get('EntityGuid'),label) for a,b,label in edges])
     return result,dict(source_entity=authored.get('Name'),source_id=authored.get('EntityId'),model=model)
 
@@ -66,10 +68,10 @@ def build(source,target,baseline,stage,person,namespace,entry,level, *, restock_
     from campaign_sources import RetailSourceReader
     from campaign_dependency_adapters import SourceTables
     from character_schedule import plan
-    from character_schedule_world import resolve_arrivals,bind_arrivals
-    from character_schedule_jobs import bind_jobs
+    from character_schedule_world import resolve_arrivals,bind_arrival_trees
+    from character_schedule_jobs import bind_job_trees
     from character_station_work import resources as station_resources
-    from campaign_merchant_work import register,add_trade_dialogue
+    from campaign_merchant_work import register_trees,add_trade_dialogue
     from dialogue_dubbing import import_source_voices,bind_soul_voice
     from build_actor_dialogues_test import actor_ui_name
     from merchant_stash import source_stashes,inventory_resources
@@ -103,8 +105,12 @@ def build(source,target,baseline,stage,person,namespace,entry,level, *, restock_
         schedules={person:resolve_arrivals(schedule,z,merchant,source,reader)}
         if any(not (e.get('station_work') or e.get('market_work')) for e in schedules[person]):
             raise ValueError('Merchant service builder requires a converted selling activity')
-        files,arrivals=bind_arrivals(files,schedules,target)
-        files,jobs=bind_jobs(files,schedules,z,target,native_item_registry(native_items(target,patches)))
+        # Parse the 30+ MB mission once and serialize it after the last
+        # binder, instead of once per binder and storage.
+        mission=E.fromstring(files['objects_mission0.xml']);scheduler=E.fromstring(files['tables/ai/scheduler.xml'])
+        files=dict(files)
+        arrivals=bind_arrival_trees(files,mission,scheduler,schedules,target)
+        files,jobs=bind_job_trees(files,mission,scheduler,schedules,z,target,native_item_registry(native_items(target,patches)))
         if any(j.get('pending') for j in jobs):raise ValueError('Merchant work is incomplete')
         for e in schedules[person]:
             if e.get('station_work'): resources.update(station_resources(e['station_work'])[1])
@@ -119,7 +125,7 @@ def build(source,target,baseline,stage,person,namespace,entry,level, *, restock_
         roles=[r for n,b in resources.items() if n.startswith('Libs/Tables/rpg/role__') for r in E.fromstring(b).iter('role') if r.get('role_name')==role]
         if len(roles)!=1:raise ValueError('Missing staged merchant role')
         resources,voice_binding=bind_soul_voice(resources,target,namespace,person,native_voice.get('voice_technical_name'),role,actor_ui_name(resources,person))
-    files,resources,service=register(files,resources,entry,merchant,stock,namespace,role='seller')
+    files,resources,service=register_trees(files,resources,mission,scheduler,entry,merchant,stock,namespace,role='seller')
     storage=[]
     keys=native_item_registry(native_items(target,patches))
     for authored in authored_stashes:
@@ -128,8 +134,9 @@ def build(source,target,baseline,stage,person,namespace,entry,level, *, restock_
         if converted not in assets:raise ValueError('Missing converted merchant storage geometry: '+converted)
         files,record=bind_storage(files,merchant,source,namespace,converted,authored=authored,
             registered_keys=keys,suffix='stash' if len(authored_stashes)==1 else 'stash_'+authored.get('EntityId'),
-            inventory_contract=contracts[authored.find('Properties/Database').get('guidInventoryDBId','')])
+            inventory_contract=contracts[authored.find('Properties/Database').get('guidInventoryDBId','')],mission=mission)
         storage.append(record)
+    files['objects_mission0.xml']=xml(mission)
     if len(storage)==1: storage=storage[0]
     resources=add_trade_dialogue(resources,entry,person,role,namespace)
     resources.update(stock_files)
