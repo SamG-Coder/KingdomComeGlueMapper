@@ -48,6 +48,10 @@ def digest(path):
     remember = os.environ.get('GLUEMAPPER_FULL_VERIFY') != '1'
     if remember:
         key = _identity(path.stat())
+        # FAT, exFAT and some network shares report no file ID, so equal
+        # size and time could not tell two files apart.
+        remember = key[1] != 0
+    if remember:
         with _DIGESTS_LOCK:
             known = _DIGESTS.get(key)
         if known is not None:

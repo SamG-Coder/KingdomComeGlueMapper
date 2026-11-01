@@ -63,6 +63,14 @@ class DigestMemoTests(unittest.TestCase):
         with patch.dict(os.environ, {'GLUEMAPPER_FULL_VERIFY': '1'}):
             self.assertEqual(self.reads(path)[1], 1)
 
+    def test_file_systems_without_file_ids_are_never_remembered(self):
+        path = self.settled('a.pak', b'payload')
+        no_id = lambda stat: (stat.st_dev, 0, stat.st_size, stat.st_mtime_ns)
+        with patch.object(upgrade_map, '_identity', side_effect=no_id):
+            digest(path)
+            self.assertEqual(self.reads(path)[1], 1)
+        self.assertEqual(upgrade_map._DIGESTS, {})
+
     def test_memo_stays_bounded(self):
         with patch.object(upgrade_map, '_DIGEST_LIMIT', 2):
             for index in range(5):
