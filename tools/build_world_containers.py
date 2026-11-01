@@ -44,7 +44,7 @@ MODEL_WORKER_BYTES = 512 * 1024**2
 
 def _model_assets(job):
     source,model=job
-    prefix='gluebuild/containers/'+hashlib.sha256(model.encode()).hexdigest()[:16]+'/'
+    prefix=model_prefix(model)
     node=ET.Element('Entity');ET.SubElement(node,'Properties',object_Model=model)
     try:
         return prefix,stash_assets(source,node,prefix)
@@ -52,7 +52,16 @@ def _model_assets(job):
         raise ValueError('Container asset '+model+': '+str(error)) from error
 
 
-def build(source,target,baseline_level,item_output,output):
+def model_prefix(model):
+    return 'gluebuild/containers/'+hashlib.sha256(model.encode()).hexdigest()[:16]+'/'
+
+
+def build(source,target,baseline_level,item_output,output,cached_packages=None):
+    """Stage containers; cached_packages is (payload folder, asset_packages) of an identical earlier build.
+
+    A cached build still compiles every inventory, key string and level
+    registration, and only reuses the asset archives those inputs produced.
+    """
     if output.exists():raise FileExistsError('Choose a fresh staging output')
     report=audit(source,target)
     dependencies=json.loads((item_output/'report.json').read_text(encoding='utf-8'))
@@ -65,6 +74,7 @@ def build(source,target,baseline_level,item_output,output):
     def emit(name,data):
         if name.lower().startswith('localization/english/'):
             strings.extend(ET.fromstring(data.read_bytes() if isinstance(data,Path) else data));return
+        if cached_packages is not None:return
         dest=output/'converted'/name;dest.parent.mkdir(parents=True,exist_ok=True)
         payload=data.read_bytes() if isinstance(data,Path) else data
         if name in paths and paths[name].read_bytes()!=payload:raise ValueError('Resource collision '+name)
@@ -98,11 +108,14 @@ def build(source,target,baseline_level,item_output,output):
     # Each model opens its own asset pack (2 s); they are independent, so convert
     # them in worker processes and emit in the same sorted order as before.
     ordered=sorted(required)
-    workers=worker_count(len(ordered),MODEL_WORKER_BYTES,'GLUEMAPPER_CONTAINER_WORKERS')
-    for i,(model,(prefix,assets)) in enumerate(zip(ordered,ordered_map(_model_assets,((source,m) for m in ordered),workers))):
-        for name,data in assets.items():emit(name,data)
-        models[model]=prefix+Path(model).name
-        if i%20==0:print('Container models',i,'/',len(required),flush=True)
+    if cached_packages is not None:
+        models.update({model:model_prefix(model)+Path(model).name for model in ordered})
+    else:
+        workers=worker_count(len(ordered),MODEL_WORKER_BYTES,'GLUEMAPPER_CONTAINER_WORKERS')
+        for i,(model,(prefix,assets)) in enumerate(zip(ordered,ordered_map(_model_assets,((source,m) for m in ordered),workers))):
+            for name,data in assets.items():emit(name,data)
+            models[model]=prefix+Path(model).name
+            if i%20==0:print('Container models',i,'/',len(required),flush=True)
     contracts={}
     for record in records:
         identifier=record['inventory_id']
@@ -112,7 +125,12 @@ def build(source,target,baseline_level,item_output,output):
     updated,world=register(files,records,models,guid,contracts)
     destination=output/'Data/Levels/kcd1_travel/level.pak'
     rewrite(baseline_level,destination,updated)
-    packaged=package(output,paths)
+    if cached_packages is None:
+        packaged=package(output,paths)
+    else:
+        from setup_build_cache import copy_payload
+        payload,packaged=cached_packages
+        copy_payload(payload/'Data',output/'Data')
     localized=output/'Localization/English_xml.pak';localized.parent.mkdir(parents=True,exist_ok=True)
     # Distinct file avoids replacing existing mod localisation tables.
     with zipfile.ZipFile(localized,'x',zipfile.ZIP_STORED,allowZip64=False) as archive:

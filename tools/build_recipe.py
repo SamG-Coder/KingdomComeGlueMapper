@@ -6,6 +6,7 @@ their verified outputs without mutating an installed mod or a hard-linked base.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -108,6 +109,24 @@ def apply_overlay(package, overlay, *, consume=False):
     return changed
 
 
+def container_cache(source, target, package, identifiers):
+    """(cache, key, hit) for the container assets; hit is None on a miss or with no workspace cache."""
+    from container_items import item_patches
+    import hashlib
+    from setup_build_cache import Cache, root, forced, fingerprint, converter_identity, install_fingerprint
+    # Opt-in: publishing copies 31 GB, which a one-off build never gets back.
+    if root() is None or os.environ.get('GLUEMAPPER_STEP_CACHE') != '1':
+        return None, None, None
+    patches = hashlib.sha256()
+    for blob in item_patches(package):
+        patches.update(hashlib.sha256(blob).digest())
+    key = fingerprint(dict(version=1, step='containers', converter=converter_identity(),
+        kcd1=install_fingerprint(source), kcd2=install_fingerprint(target),
+        item_patches=patches.hexdigest(), identifiers=sorted(identifiers)))
+    cache = Cache(root()/'containers')
+    return cache, key, None if forced() else cache.lookup(key)
+
+
 def build_containers(source, target, package, output):
     """Connect the existing loot importer and full-world container builder."""
     from container_audit import audit
@@ -121,9 +140,30 @@ def build_containers(source, target, package, output):
     inventory = audit(source, target)
     identifiers = {item for group in inventory['inventories'].values()
                    for item in group.get('item_dependencies', [])}
-    items(source, target, package, output/'items', identifiers)
+    from setup_build_cache import copy_payload
+    cache, key, hit = container_cache(source, target, package, identifiers)
     staged = output/'containers'
-    containers(source, target, package/'Data/Levels/kcd1_travel/level.pak', output/'items', staged)
+    level = package/'Data/Levels/kcd1_travel/level.pak'
+    if hit is not None:
+        # Same converters, games and staged item tables as an earlier build:
+        # reuse its loot report and 31 GB of asset archives; rebuild the rest.
+        payload, metadata = hit
+        copy_payload(payload/'items', output/'items')
+        containers(source, target, level, output/'items', staged,
+                   cached_packages=(payload, metadata['asset_packages']))
+    else:
+        items(source, target, package, output/'items', identifiers)
+        containers(source, target, level, output/'items', staged)
+        if cache is not None:
+            report = json.loads((staged/'containers-report.json').read_text(encoding='utf-8'))
+            files = {'items/report.json': output/'items/report.json'}
+            files.update({'items/' + p.relative_to(output/'items').as_posix(): p
+                          for p in (output/'items/converted').rglob('*')
+                          if p.is_file() and p.relative_to(output/'items/converted').as_posix().lower().startswith('localization/')})
+            files.update({'Data/' + entry['path'].replace('\\', '/').split('/', 1)[1]: staged/entry['path']
+                          for entry in report['asset_packages']})
+            cache.publish(key, files, dict(asset_packages=report['asset_packages']))
+            cache.prune(keep=2)
     overlay = output/'package';overlay.mkdir()
     (staged/'Data').rename(overlay/'Data')
     # The container builder's localization PAK contains an additional table.
