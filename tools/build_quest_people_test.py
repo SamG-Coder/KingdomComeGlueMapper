@@ -8,6 +8,7 @@ import copy
 import hashlib
 import json
 import os
+import pickle
 import time
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -101,6 +102,42 @@ def convert_character(source, target, mod, person, name, sid, source_level, name
     character's folders and archives, so characters can convert in parallel.
     person is None when it still has to be resolved from the source level.
     """
+    started = time.perf_counter()
+    cache, key, hit = character_cache(source, target, mod, person, name, sid, source_level, namespace)
+    if hit is not None:
+        from setup_build_cache import copy_payload
+        notify('Reusing converted character: ' + name)
+        payload, _ = hit
+        copy_payload(payload/'Data', data_dir)
+        result = pickle.loads((payload/'result.pickle').read_bytes())
+        return dict(result, elapsed=time.perf_counter() - started)
+    result = _convert_character_files(source, target, mod, person, name, sid, source_level, namespace, output, data_dir, notify)
+    paks = result.pop('paks', [])
+    if cache is not None and 'error' not in result:
+        record = output/'people'/namespace/'cached-result.pickle'
+        record.write_bytes(pickle.dumps({k: v for k, v in result.items() if k != 'elapsed'}))
+        cache.publish(key, {'result.pickle': record, **{'Data/' + p.name: p for p in paks}}, {})
+    return result
+
+
+def character_cache(source, target, mod, person, name, sid, source_level, namespace):
+    """(cache, key, hit) for one converted character; all None unless GLUEMAPPER_STEP_CACHE=1."""
+    from container_items import item_patches
+    from setup_build_cache import Cache, root, forced, fingerprint, converter_identity, install_fingerprint
+    if root() is None or os.environ.get('GLUEMAPPER_STEP_CACHE') != '1':
+        return None, None, None
+    patches = hashlib.sha256()
+    for blob in item_patches(mod):
+        patches.update(hashlib.sha256(blob).digest())
+    key = fingerprint(dict(version=1, step='character', converter=converter_identity(),
+        kcd1=install_fingerprint(source), kcd2=install_fingerprint(target), item_patches=patches.hexdigest(),
+        person=hashlib.sha256(pickle.dumps(person)).hexdigest() if person is not None else None,
+        name=name, sid=sid, source_level=source_level, namespace=namespace))
+    cache = Cache(root()/'characters')
+    return cache, key, None if forced() else cache.lookup(key)
+
+
+def _convert_character_files(source, target, mod, person, name, sid, source_level, namespace, output, data_dir, notify):
     from character_weapon_inventory import stage as stage_weapons
     started = time.perf_counter()
     notify('Resolving source character: ' + name)
@@ -127,10 +164,10 @@ def convert_character(source, target, mod, person, name, sid, source_level, name
     # Keep each actor's geometry in its own ZIP32 archive. The shared world
     # archive is already large and must not grow past the engine's limit.
     notify(person['name'] + ': Packing and validating character assets')
-    libs = write_actor_paks(appearance, data_dir, namespace)[1]
+    paks, libs = write_actor_paks(appearance, data_dir, namespace)
     strings = appearance / 'Localization/English/text_ui_items.xml'
     if strings.exists(): item_tables.append(strings.read_bytes())
-    return dict(person=person, character=character, libs=libs, item_tables=item_tables,
+    return dict(person=person, character=character, libs=libs, item_tables=item_tables, paks=paks,
                 elapsed=time.perf_counter() - started)
 
 
@@ -162,6 +199,16 @@ def convert_characters(jobs, progress, cancelled, convert=None):
     from bounded_pool import worker_count
     workers = worker_count(len(jobs), CHARACTER_WORKER_BYTES, 'GLUEMAPPER_CHARACTER_WORKERS',
                            limit=max(1, (os.cpu_count() or 1) // 4)) if len(jobs) > 1 else 1
+    from setup_build_cache import root
+    if jobs and root() is not None and os.environ.get('GLUEMAPPER_STEP_CACHE') == '1':
+        # Bound the opt-in cache before this batch adds to it (one entry per character).
+        from setup_build_cache import Cache
+        Cache(root()/'characters').prune(keep=max(200, 3 * len(jobs)))
+    yield from _convert_in_order(jobs, workers, progress, cancelled, convert)
+
+
+def _convert_in_order(jobs, workers, progress, cancelled, convert):
+    from bounded_pool import worker_count
     if workers <= 1:
         for job in jobs:
             yield (convert or convert_character)(*job, notify=progress)

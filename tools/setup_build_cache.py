@@ -53,9 +53,16 @@ def converter_identity():
     return dict(tools=tools_digest(), python=sys.version, libraries=libraries, settings=settings)
 
 
+_INSTALLS = {}
+
+
 def install_fingerprint(game):
-    """Every game archive's path, size and time: patches, DLC and repairs change it."""
+    """Every game archive's path, size and time: patches, DLC and repairs change it.
+
+    Remembered per process: a game is never patched while a build runs.
+    """
     game = Path(game)
+    if game.resolve() in _INSTALLS: return _INSTALLS[game.resolve()]
     entries = []
     for folder in ('Data', 'Localization'):
         for directory, _, files in os.walk(game/folder):
@@ -64,7 +71,8 @@ def install_fingerprint(game):
                     stat = os.stat(os.path.join(directory, name))
                     entries.append((os.path.relpath(os.path.join(directory, name), game).replace('\\', '/').lower(),
                                     stat.st_size, stat.st_mtime_ns))
-    return fingerprint(sorted(entries))
+    _INSTALLS[game.resolve()] = fingerprint(sorted(entries))
+    return _INSTALLS[game.resolve()]
 
 
 @contextmanager

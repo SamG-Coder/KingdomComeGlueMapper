@@ -19,10 +19,15 @@ class StepCacheTests(unittest.TestCase):
             game = Path(t); (game/'Data').mkdir(); (game/'Localization').mkdir()
             (game/'Data/a.pak').write_bytes(b'one'); (game/'Localization/English.pak').write_bytes(b'en')
             first = install_fingerprint(game)
-            (game/'Data/readme.txt').write_text('not an archive')
-            self.assertEqual(install_fingerprint(game), first)
             (game/'Data/a.pak').write_bytes(b'two!')
-            self.assertNotEqual(install_fingerprint(game), first)
+            self.assertEqual(install_fingerprint(game), first)  # remembered for this process
+            setup_build_cache._INSTALLS.clear()
+            (game/'Data/readme.txt').write_text('not an archive')
+            changed = install_fingerprint(game)
+            self.assertNotEqual(changed, first)
+            setup_build_cache._INSTALLS.clear()
+            (game/'Data/readme.txt').write_text('still not an archive')
+            self.assertEqual(install_fingerprint(game), changed)
 
     def test_converter_identity_ignores_worker_counts_but_not_settings(self):
         with patch.dict(os.environ, {'GLUEMAPPER_BAKE_WORKERS': '3'}):
