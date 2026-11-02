@@ -28,6 +28,7 @@ LEVEL_FILES = ('objects_mission0.xml', 'whdata_0', 'waitinglinks.xml', 'triggera
 
 
 def rewrite(source, target, replacements):
+    from audit_maps import copy_member
     target.parent.mkdir(parents=True, exist_ok=True)
     # Travel and baked-level builders can already produce ZIP64 archives.
     # Recipe rewrites must retain that capacity as assets and entries grow.
@@ -37,7 +38,8 @@ def rewrite(source, target, replacements):
         for info in original.infolist():
             if info.filename in existing: raise ValueError('Duplicate archive path: '+info.filename)
             existing.add(info.filename)
-            dest.writestr(info, replacements.get(info.filename, read(original, info.filename)))
+            if info.filename in replacements: dest.writestr(info, replacements[info.filename])
+            else: copy_member(original, info, dest)
         for name, blob in replacements.items():
             if name not in existing: dest.writestr(name, blob)
 

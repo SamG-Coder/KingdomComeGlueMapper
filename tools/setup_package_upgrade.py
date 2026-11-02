@@ -5,6 +5,7 @@ import shutil
 import zipfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
+from audit_maps import copy_member
 from upgrade_map import read, xml
 from setup_campaign import RECEIPT, MOD_ID, digest, verify_package
 
@@ -64,8 +65,9 @@ def rewrite(package, relative, replacements, remove=lambda name: False):
     # Python only emits the extension when needed; ordinary PAKs stay unchanged.
     with zipfile.ZipFile(path) as source, zipfile.ZipFile(pending, 'x', zipfile.ZIP_STORED, allowZip64=True) as out:
         for entry in source.infolist():
-            if not remove(entry.filename):
-                out.writestr(entry, replacements.get(entry.filename, read(source, entry.filename)))
+            if remove(entry.filename): continue
+            if entry.filename in replacements: out.writestr(entry, replacements[entry.filename])
+            else: copy_member(source, entry, out)
         for name in sorted(set(replacements) - set(source.namelist())):
             out.writestr(name, replacements[name])
     with zipfile.ZipFile(pending) as check:

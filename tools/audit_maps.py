@@ -52,6 +52,53 @@ def open_entry(archive, entry):
     return archive.open(adjusted)
 
 
+COPY_CHUNK = 8 << 20
+
+
+def copy_member(archive, entry, destination):
+    """Append one stored member to destination without decoding it.
+
+    Combine rewrites its 0.3-1.4 GB package archives about 150 times a build
+    and most members pass through unchanged. Their bytes go straight from the
+    local header to the writer, which recomputes the CRC, so a damaged read
+    still fails as it would under testzip. Compressed members take the
+    ordinary read-and-write path. The written member is byte-identical to
+    writestr of the same bytes, so archives rewritten either way are the same.
+    """
+    info = copy.copy(entry)
+    if entry.compress_type != zipfile.ZIP_STORED:
+        with open_entry(archive, entry) as stream:
+            destination.writestr(info, stream.read())
+        return
+    with archive._lock:
+        source = archive.fp
+        position = source.tell()
+        try:
+            source.seek(entry.header_offset)
+            header = source.read(30)
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                raise ValueError("Invalid local ZIP header")
+            name_length, extra_length = struct.unpack_from("<HH", header, 26)
+            flags = struct.unpack_from("<H", header, 6)[0]
+            local_name = source.read(name_length).decode("utf-8" if flags & 0x800 else "cp437")
+            if local_name.replace("\\", "/") != entry.orig_filename.replace("\\", "/"):
+                raise ValueError("Local and central ZIP names disagree beyond separators")
+            source.seek(extra_length, 1)
+            remaining = entry.compress_size
+            with destination.open(info, "w") as member:
+                while remaining:
+                    chunk = source.read(min(remaining, COPY_CHUNK))
+                    if not chunk:
+                        raise ValueError("Truncated ZIP member: " + entry.filename)
+                    member.write(chunk)
+                    remaining -= len(chunk)
+        finally:
+            source.seek(position)
+    written = destination.getinfo(info.filename)
+    if (written.CRC, written.file_size) != (entry.CRC, entry.file_size):
+        raise ValueError("ZIP member changed while copying: " + entry.filename)
+
+
 def inspect_archive(path):
     report = {"path": str(path), "bytes": path.stat().st_size}
     with zipfile.ZipFile(path) as archive:
