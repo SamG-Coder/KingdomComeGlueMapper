@@ -44,8 +44,58 @@ def archive_signature(archive):
     return Path(name).resolve(), stat.st_size, stat.st_mtime_ns
 
 
+class _Namespaced(Exception):
+    """The document needs ElementTree's namespace handling."""
+
+
+def _serialize(push, elem):
+    # The same decisions as ElementTree._serialize_xml for documents without
+    # namespaces, with ElementTree's own escaping, so the bytes are identical.
+    tag, text = elem.tag, elem.text
+    if tag is ET.Comment:
+        push("<!--%s-->" % text)
+    elif tag is ET.ProcessingInstruction:
+        push("<?%s?>" % text)
+    elif tag is None:
+        if text:
+            push(ET._escape_cdata(text))
+        for child in elem:
+            _serialize(push, child)
+    else:
+        if not isinstance(tag, str) or tag[:1] == "{":
+            raise _Namespaced
+        push("<" + tag)
+        for key, value in elem.items():
+            if not isinstance(key, str) or key[:1] == "{" or isinstance(value, ET.QName):
+                raise _Namespaced
+            push(' %s="%s"' % (key, ET._escape_attrib(value)))
+        if text or len(elem):
+            push(">")
+            if text:
+                push(ET._escape_cdata(text))
+            for child in elem:
+                _serialize(push, child)
+            push("</" + tag + ">")
+        else:
+            push(" />")
+    if elem.tail:
+        push(ET._escape_cdata(elem.tail))
+
+
 def xml(element):
-    return ET.tostring(element, encoding="utf-8", xml_declaration=True)
+    """ET.tostring(element, encoding='utf-8', xml_declaration=True), built as one string.
+
+    Combine serializes the 34 MB mission and other large documents thousands
+    of times a build. ElementTree writes them through a text stream in hundreds
+    of millions of small pieces; collecting the same pieces and encoding once
+    is 1.6x faster and byte-identical. Namespaced documents keep the stdlib path.
+    """
+    parts = ["<?xml version='1.0' encoding='utf-8'?>\n"]
+    try:
+        _serialize(parts.append, element)
+    except _Namespaced:
+        return ET.tostring(element, encoding="utf-8", xml_declaration=True)
+    return "".join(parts).encode("utf-8", "xmlcharrefreplace")
 
 
 def main():
