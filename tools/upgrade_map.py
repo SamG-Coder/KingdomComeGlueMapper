@@ -32,6 +32,18 @@ def digest_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def archive_signature(archive):
+    """Identity of an archive file for per-build memos; None for in-memory archives."""
+    name = getattr(archive, 'filename', None)
+    if not isinstance(name, str):
+        return None
+    try:
+        stat = Path(name).stat()
+    except OSError:
+        return None
+    return Path(name).resolve(), stat.st_size, stat.st_mtime_ns
+
+
 def xml(element):
     return ET.tostring(element, encoding="utf-8", xml_declaration=True)
 

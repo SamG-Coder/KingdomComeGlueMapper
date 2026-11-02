@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from campaign_entity_links import append_links
 from cooking_pots import rotate, vector
 from entity_visuals import initial_entity, world_transform, quaternion_product as qmul
-from upgrade_map import read
+from upgrade_map import archive_signature, read
 
 PREFIX = 'gm_chair_'
 # Ordinary chair with native sit/stand interactions and coincident in/out anchors.
@@ -17,18 +17,38 @@ DONOR = '20382'
 ROLES = ('attachable', 'chairPointIn', 'chairPointOut', '')
 
 
-def inventory(source, kind='Chair', *, notify=lambda message: None):
+_SCANS = {}
+
+
+def scan(source, *, notify=lambda message: None):
+    """Every source entity by id and the ids placed at the start, parsed once per unchanged archive.
+
+    Chairs, benches, beds, doors, lights and props all read the same 1,800
+    layer files. The elements are shared and read-only; deep-copy what you edit.
+    """
+    key = archive_signature(source)
+    if key is not None and key in _SCANS:
+        return _SCANS[key]
     entities, active = {}, set()
     paths = [path for path in source.namelist() if path.lower() == 'objects_mission0.xml'
              or (path.lower().startswith('layers/') and path.lower().endswith('.xml'))]
     for number, path in enumerate(paths):
-        notify(f'Scanning source {kind} objects ({number + 1}/{len(paths)}): {path}')
+        notify(f'Scanning source objects ({number + 1}/{len(paths)}): {path}')
         main = path.lower() == 'objects_mission0.xml'
         for node in ET.fromstring(read(source, path)).iter('Entity'):
-            key = node.get('EntityId')
-            entities.setdefault(key, node)
+            identity = node.get('EntityId')
+            entities.setdefault(identity, node)
             if (main and not node.get('Layer')) or initial_entity(node):
-                active.add(key)
+                active.add(identity)
+    if key is not None:
+        _SCANS.clear()  # one source level per build
+        _SCANS[key] = (entities, active)
+    return entities, active
+
+
+def inventory(source, kind='Chair', *, notify=lambda message: None):
+    entities, active = scan(source, notify=notify)
+    entities = dict(entities)
     chairs = [e for e in entities.values() if e.get('EntityClass') == kind] if kind != 'Bench' else [
         e for e in entities.values() if e.get('EntityClass') == 'SmartObjectHolder' and e.find('Properties') is not None
         and e.find('Properties').get('soclasses_SmartObjectHelpers', '').startswith('Bench_')]

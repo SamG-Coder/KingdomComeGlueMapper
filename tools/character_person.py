@@ -15,7 +15,7 @@ import zipfile
 from campaign_dependency_adapters import SourceTables
 from campaign_sources import RetailSourceReader
 from campaign_entity_links import native_guid
-from upgrade_map import read, xml
+from upgrade_map import archive_signature, read, xml
 from character_person_ai import (capture_person_ai, native_brain_and_class,
                                stat_operations, apply_person_properties, receipt, register_factions)
 
@@ -57,6 +57,25 @@ def layer_entity_index(archive):
     if signature not in _LAYER_INDEX:
         _LAYER_INDEX[signature] = build()
     return _LAYER_INDEX[signature]
+
+
+_SOURCE_ENTITIES = {}
+
+
+def source_entities(archive):
+    """Every Entity of the archive's objects_mission0.xml, parsed once per unchanged archive.
+
+    Schedule and merchant resolution read the 50 MB source mission for every
+    person. The elements are shared: read them and deep-copy what you keep, as
+    world_entity does. In-memory archives are parsed each time.
+    """
+    key = archive_signature(archive)
+    if key is None:
+        return list(ET.fromstring(read(archive, 'objects_mission0.xml')).iter('Entity'))
+    if key not in _SOURCE_ENTITIES:
+        _SOURCE_ENTITIES.clear()  # one source level per build
+        _SOURCE_ENTITIES[key] = list(ET.fromstring(read(archive, 'objects_mission0.xml')).iter('Entity'))
+    return list(_SOURCE_ENTITIES[key])
 
 
 def resolve_link_targets(archive, actor, entities, provenance):

@@ -51,8 +51,25 @@ def resolve(start, entities, archive, source, reader):
     return list(seats.values())
 
 
+_CONTRACT = {}
+
+
 def native_contract(target):
+    """The native city bench database id and its unrestricted activity link, deep-copied.
+
+    Checked once per unchanged installation; a build asks for it per seated person.
+    """
     target = Path(target)
+    key = tuple((path, path.stat().st_size, path.stat().st_mtime_ns) for path in
+                (target/'Data/Tables.pak', target/'Data/Scripts.pak', target/'Data/Levels/trosecko/level.pak'))
+    if key not in _CONTRACT:
+        _CONTRACT.clear()
+        _CONTRACT[key] = _contract(target)
+    database_id, link = _CONTRACT[key]
+    return database_id, copy.deepcopy(link)
+
+
+def _contract(target):
     with zipfile.ZipFile(target/'Data/Tables.pak') as z:
         template = E.fromstring(read(z, TABLE)).find('.//SmartEntityTemplate')
     behavior = template.find("BehaviorTemplates/SmartBehaviorTemplate[@Name='use']")
@@ -80,7 +97,7 @@ def native_contract(target):
                 and p is not None and all(p.get(k) == v for k, v in dict(BehaviorName='use',
                     BehaviorOverride='false', AllowedGenders='0', TimeOfDayStart='0', TimeOfDayEnd='1440').items())
                 and not any(k in p.attrib for k in ('RequiredRole', 'ProvidedRole', 'LinkTag', 'RequiredContext'))):
-            return template.get('DatabaseId'), copy.deepcopy(link)
+            return template.get('DatabaseId'), link
     raise ValueError('Missing unrestricted native city bench activity')
 
 

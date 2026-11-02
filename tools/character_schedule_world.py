@@ -7,7 +7,7 @@ import copy
 import hashlib
 import uuid
 import xml.etree.ElementTree as ET
-from character_person import resolve_link_targets, world_entity
+from character_person import resolve_link_targets, source_entities, world_entity
 from campaign_entity_links import native_guid, guid_value, append_links
 from character_person_activity import validate_scheduler_targets
 from character_person_world import native_wait_activity
@@ -40,7 +40,7 @@ def arrival_resources():
 
 def resolve_arrivals(schedule, archive, person=None, source=None, reader=None, target=None):
     result = []
-    mission = list(ET.fromstring(read(archive, 'objects_mission0.xml')).iter('Entity'))
+    mission = source_entities(archive)
     for entry in schedule['resolved']:
         behavior = entry['behavior']
         from character_horse_handler_work import supports as stable_supports, resolve as stable_resolve
