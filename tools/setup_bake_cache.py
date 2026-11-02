@@ -8,6 +8,8 @@ import zipfile
 
 from setup_build_cache import fingerprint, file_hash, copy_payload
 
+# Geometry, materials and textures, with split texture pieces (.dds.1, .dds.1a, .dds.a).
+BAKED = re.compile(r'\.(?:cgf|cga|mtl|dds(?:\.(?:\d+a?|a))?)$')
 SOURCES = ('setup_bake_cache.py','setup_baking.py','world_surface_scene.py',
            'world_surface_landscape.py','stage_world_surfaces.py','vegetation_gi.py',
            'compiled_terrain.py','water_volumes.py','vegetation.py','world_voxels.py',
@@ -21,17 +23,20 @@ def key(level, game, overrides, preset):
     assets = Assets(Path(game)/'Data', overrides)
     # Same effective precedence as the voxelizer. Archive names, timestamps and
     # job paths aren't content. ZIP CRC/size is its existing catalog contract.
+    # Only what the bake reads counts: geometry, materials and textures. Quest,
+    # table, report, dialogue, audio, animation and skinned-character members
+    # change with every build or NPC edit and would hide every exact hit.
     entries = {}
     try:
         for path in sorted({v[0] for v in assets.entries.values() if v is not None}):
             with zipfile.ZipFile(path) as z:
                 for item in z.infolist():
                     name = item.filename.replace('\\','/').lower()
-                    if name.startswith(('quests/','scripts/','ai/','libs/tables/')): continue
+                    if not BAKED.search(name): continue
                     if assets.entries.get(name) == (path,item.filename):
                         entries[name] = [item.CRC,item.file_size]
         for name, value in assets.entries.items():
-            if value is None: entries[name] = 'ambiguous'
+            if value is None and BAKED.search(name): entries[name] = 'ambiguous'
     finally: assets.close()
     with zipfile.ZipFile(Path(level)/'level.pak') as z:
         import hashlib
@@ -40,7 +45,7 @@ def key(level, game, overrides, preset):
     # Terrain includes height, roads, vegetation transforms and their tables.
     with zipfile.ZipFile(Path(level)/'terrain.pak') as z:
         terrain = sorted((i.filename.replace('\\','/').lower(),i.CRC,i.file_size) for i in z.infolist())
-    return fingerprint(dict(version=1,preset=preset,geometry=geometry,terrain=terrain,
+    return fingerprint(dict(version=2,preset=preset,geometry=geometry,terrain=terrain,
         assets=entries,code=code_digest(),
         sources={n:file_hash(Path(__file__).with_name(n)) for n in SOURCES},
         backend='auto',samples=2,experimental_base_materials=True,gpu=gpu_configuration()))

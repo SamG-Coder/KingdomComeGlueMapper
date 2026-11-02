@@ -155,6 +155,10 @@ def _bake_package(package,game,workspace,preset,progress,cancelled,cache=None):
                 print(f'Reusing {report["tiles"]} lighting tiles from {cache.folder}; validation: {report["cache_validation"]}',flush=True)
                 if report['input_compatibility']=='not_recorded':
                     print('Existing lighting output hashes and tile layout checked. The older cache did not record scene inputs.',flush=True)
+                # The exact key missed on inputs the scene check then proved
+                # equal. Record this package's key so the next job skips the check.
+                progress('Record shared lighting cache',0,0,"Recording this package's inputs for future jobs")
+                publish(cache,cache_key,output,report,cancelled,scene_identity=report.get('scene_identity'),preset=preset,level=level.name)
                 staged.append((level.name,output/'packages'))
                 reports.append(dict(level=level.name,tiles=report['tiles'],limitations=report['limitations'],
                     vegetation_gi_upgrade=report.get('vegetation_gi_upgrade'),cache_key=report['cache_key'],
