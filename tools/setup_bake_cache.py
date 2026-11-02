@@ -87,7 +87,7 @@ def scene_identity(scene, preset):
     assets. NPZ member checksums exclude the ZIP wrapper's creation timestamp.
     """
     from geometry_opacity import Assets
-    from world_surface_tiles import code_digest, gpu_configuration
+    from world_surface_tiles import code_digest, gpu_configuration, mesh_records
     scene = Path(scene)
     plan = json.loads((scene/'plan.json').read_text())
     geometry = {k:plan[k] for k in ('tiles','vegetation','category_policy') if k in plan}
@@ -96,10 +96,9 @@ def scene_identity(scene, preset):
         # can change when the same arrays are repackaged by another job.
         geometry['vegetation'] = {k:v for k,v in geometry['vegetation'].items() if k!='sha256'}
     meshes, material_names = {}, set()
-    for path in sorted((scene/'meshes').glob('*.json')):
-        record = json.loads(path.read_text())
+    for stem, record in sorted(mesh_records(scene).items()):
         material_names.update(name if name.endswith('.mtl') else name+'.mtl' for name,_ in record['bindings'])
-        meshes[path.stem] = record
+        meshes[stem] = record
     arrays = {}
     # Mesh cache keys already identify source geometry + material bindings;
     # opening thousands of derived NPZ files adds minutes of antivirus/file I/O.
