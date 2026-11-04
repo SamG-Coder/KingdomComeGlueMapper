@@ -3,9 +3,12 @@
 Keeps existing actors and packages. Does not install or claim dialogue conversion.
 """
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import copy
 import hashlib
 import json
+import os
+import pickle
 import time
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -54,6 +57,12 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
     paths = runtime_paths(appearance, paths, namespace)
     asset_count = sum(p.relative_to(appearance).as_posix().startswith('objects/') for p in paths)
     work_progress('Pack character assets', 0, asset_count)
+    # Characters pack in parallel into the shared Data folder, where other
+    # workers list and open *.pak. Write each archive under a partial name
+    # and give it its final name only once every shard is complete.
+    def partial(path):
+        if path.exists(): raise FileExistsError(path)
+        return path.with_name(path.name + '.partial')
     def entries():
         completed, written = 0, 0
         for p in paths:
@@ -76,7 +85,7 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
             if pak is None:
                 suffix = '' if not paks else '_%02d' % len(paks)
                 paks.append(data_dir / (namespace + suffix + '.pak'))
-                pak = zipfile.ZipFile(paks[-1], 'x', zipfile.ZIP_STORED, allowZip64=False)
+                pak = zipfile.ZipFile(partial(paks[-1]), 'x', zipfile.ZIP_STORED, allowZip64=False)
                 used, count = 22, 0
             item = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
             item.create_system = 0
@@ -84,11 +93,144 @@ def write_actor_paks(appearance, data_dir, namespace, limit=ACTOR_PAK_LIMIT):
             used += size; count += 1
         if not paks:
             paks.append(data_dir / (namespace + '.pak'))
-            pak = zipfile.ZipFile(paks[0], 'x', zipfile.ZIP_STORED, allowZip64=False)
+            pak = zipfile.ZipFile(partial(paks[0]), 'x', zipfile.ZIP_STORED, allowZip64=False)
     finally:
         if pak is not None: pak.close()
+    for path in paks:
+        partial(path).rename(path)
     work_progress('Pack character assets', asset_count, asset_count, 'Assets packed and validated')
     return paks, libs
+
+
+def convert_character(source, target, mod, person, name, sid, source_level, namespace, output, data_dir,
+                      notify=lambda message: None):
+    """Appearance, carried equipment and actor archives of one character.
+
+    Reads only the game installs and the input mod, and writes only this
+    character's folders and archives, so characters can convert in parallel.
+    person is None when it still has to be resolved from the source level.
+    """
+    started = time.perf_counter()
+    cache, key, hit = character_cache(source, target, mod, person, name, sid, source_level, namespace)
+    if hit is not None:
+        from setup_build_cache import copy_payload
+        notify('Reusing converted character: ' + name)
+        payload, _ = hit
+        copy_payload(payload/'Data', data_dir)
+        result = pickle.loads((payload/'result.pickle').read_bytes())
+        return dict(result, elapsed=time.perf_counter() - started)
+    result = _convert_character_files(source, target, mod, person, name, sid, source_level, namespace, output, data_dir, notify)
+    paks = result.pop('paks', [])
+    if cache is not None and 'error' not in result:
+        record = output/'people'/namespace/'cached-result.pickle'
+        record.write_bytes(pickle.dumps({k: v for k, v in result.items() if k != 'elapsed'}))
+        cache.publish(key, {'result.pickle': record, **{'Data/' + p.name: p for p in paks}}, {})
+    return result
+
+
+def character_cache(source, target, mod, person, name, sid, source_level, namespace):
+    """(cache, key, hit) for one converted character; all None unless GLUEMAPPER_STEP_CACHE=1."""
+    from container_items import item_patches
+    from setup_build_cache import Cache, root, forced, fingerprint, converter_identity, install_fingerprint
+    if root() is None or os.environ.get('GLUEMAPPER_STEP_CACHE') != '1':
+        return None, None, None
+    patches = hashlib.sha256()
+    for blob in item_patches(mod):
+        patches.update(hashlib.sha256(blob).digest())
+    key = fingerprint(dict(version=1, step='character', converter=converter_identity(),
+        kcd1=install_fingerprint(source), kcd2=install_fingerprint(target), item_patches=patches.hexdigest(),
+        person=hashlib.sha256(pickle.dumps(person)).hexdigest() if person is not None else None,
+        name=name, sid=sid, source_level=source_level, namespace=namespace))
+    cache = Cache(root()/'characters')
+    return cache, key, None if forced() else cache.lookup(key)
+
+
+def _convert_character_files(source, target, mod, person, name, sid, source_level, namespace, output, data_dir, notify):
+    from character_weapon_inventory import stage as stage_weapons
+    started = time.perf_counter()
+    notify('Resolving source character: ' + name)
+    if person is None:
+        person = resolve_person(source, name, source_level)
+    notify('Converting source appearance: ' + person['name'])
+    appearance = output / 'people' / namespace
+    try:
+        character = build_appearance(source, target, person, namespace, appearance,
+            notify=lambda message: notify(person['name'] + ': ' + message))
+    except ValueError as error:
+        return dict(person=person, error=str(error))
+    notify(person['name'] + ': Converting carried equipment')
+    weapon_result = stage_weapons(source, target, mod, person, character, namespace, output / 'equipment' / namespace)
+    character['source_weapons'] = weapon_result['items']
+    item_tables = []
+    for path, payload in weapon_result['files'].items():
+        if path.startswith('Localization/'):
+            item_tables.append(payload)
+        else:
+            dest = appearance / path; dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(payload)
+    (appearance / 'appearance-result.json').write_text(json.dumps(character, indent=2))
+    # Keep each actor's geometry in its own ZIP32 archive. The shared world
+    # archive is already large and must not grow past the engine's limit.
+    notify(person['name'] + ': Packing and validating character assets')
+    paks, libs = write_actor_paks(appearance, data_dir, namespace)
+    strings = appearance / 'Localization/English/text_ui_items.xml'
+    if strings.exists(): item_tables.append(strings.read_bytes())
+    return dict(person=person, character=character, libs=libs, item_tables=item_tables, paks=paks,
+                elapsed=time.perf_counter() - started)
+
+
+# Measured: a 14-part guard peaks below 1 GB with one texture bake worker.
+CHARACTER_WORKER_BYTES = 1536 * 1024**2
+_WORKER_BATCH = None
+
+
+def _start_character_worker(bakes):
+    """Share the texture bake budget between workers; keep one source batch open per worker."""
+    global _WORKER_BATCH
+    os.environ['GLUEMAPPER_BAKE_WORKERS'] = str(bakes)
+    from character_build_cache import appearance_batch
+    _WORKER_BATCH = appearance_batch()
+    _WORKER_BATCH.__enter__()
+
+
+def _convert_character(job, convert=None):
+    return (convert or convert_character)(*job)
+
+
+def convert_characters(jobs, progress, cancelled, convert=None):
+    """Yield convert_character results in job order, in worker processes when memory allows.
+
+    Workers are sized from free memory and a quarter of the cores, so a 16 GB
+    machine runs one or two; GLUEMAPPER_CHARACTER_WORKERS overrides the count.
+    convert replaces convert_character (module-level, for tests).
+    """
+    from bounded_pool import worker_count
+    workers = worker_count(len(jobs), CHARACTER_WORKER_BYTES, 'GLUEMAPPER_CHARACTER_WORKERS',
+                           limit=max(1, (os.cpu_count() or 1) // 4)) if len(jobs) > 1 else 1
+    from setup_build_cache import root
+    if jobs and root() is not None and os.environ.get('GLUEMAPPER_STEP_CACHE') == '1':
+        # Bound the opt-in cache before this batch adds to it (one entry per character).
+        from setup_build_cache import Cache
+        Cache(root()/'characters').prune(keep=max(200, 3 * len(jobs)))
+    yield from _convert_in_order(jobs, workers, progress, cancelled, convert)
+
+
+def _convert_in_order(jobs, workers, progress, cancelled, convert):
+    from bounded_pool import worker_count
+    if workers <= 1:
+        for job in jobs:
+            yield (convert or convert_character)(*job, notify=progress)
+        return
+    bakes = max(1, worker_count(16, 768 * 1024**2, 'GLUEMAPPER_BAKE_WORKERS') // workers)
+    progress(f'Converting {len(jobs)} characters in {workers} worker processes')
+    with ProcessPoolExecutor(max_workers=workers, initializer=_start_character_worker, initargs=(bakes,)) as pool:
+        futures = [pool.submit(_convert_character, job, convert) for job in jobs]
+        try:
+            for future in futures:
+                if cancelled(): raise InterruptedError('Cancelled during character conversion')
+                yield future.result()
+        finally:
+            for future in futures: future.cancel()
 
 
 def build(a):
@@ -172,55 +314,51 @@ def _build(a):
         else:
             getattr(a, 'notify', print)(message)
     progress(f'{total} new characters to convert')
+    # Decide every conversion first, in request order, then convert the
+    # characters (in worker processes when memory allows) and register them
+    # in that same order, so reports and archives match a serial run.
+    plan = []
     for aid, row in requested.items():
         if getattr(a, 'cancelled', lambda: False)():
             raise InterruptedError('Cancelled before actor conversion')
         sid = row.get('soul_id')
         if not sid or row.get('soul_class_id') or row.get('soul_faction_id'):
-            pending.append(dict(asset=aid, reason='Filtered or non-explicit soul')); continue
+            plan.append(('pending', dict(asset=aid, reason='Filtered or non-explicit soul'))); continue
         if sid in seen: continue
         seen.add(sid)
         if sid in registered:
-            existing.append(dict(soul_id=sid, person=source_souls.get(sid))); continue
+            plan.append(('existing', dict(soul_id=sid, person=source_souls.get(sid)))); continue
         if sid not in source_souls: raise ValueError('Missing source soul: ' + sid)
-        started = time.perf_counter()
-        progress('Resolving source character: ' + source_souls[sid])
-        person = conversion_person(a, source_souls[sid], sid)
+        resolved = getattr(a, 'resolved_people', {}).get(source_souls[sid])
+        plan.append(('convert', aid, sid, conversion_person(a, source_souls[sid], sid) if resolved is not None else None))
+    jobs = [(a.source, a.target, a.mod, step[3], source_souls[step[2]], step[2], a.source_level,
+             'gm_person_' + step[2].replace('-', ''), a.output, package / 'Data') for step in plan if step[0] == 'convert']
+    results = convert_characters(jobs, progress, getattr(a, 'cancelled', lambda: False))
+    for step in plan:
+        if step[0] == 'pending':
+            pending.append(step[1]); continue
+        if step[0] == 'existing':
+            existing.append(step[1]); continue
+        if getattr(a, 'cancelled', lambda: False)():
+            raise InterruptedError('Cancelled before actor conversion')
+        _, aid, sid, _ = step
+        result = next(results)
+        person = result['person']
         if aid.startswith('profile_actor_') and person['actor'].get('EntityGuid', '').lower() != aid[14:].lower():
             raise ValueError('Profile actor resolved to a different source placement: ' + person['name'])
         namespace = 'gm_person_' + sid.replace('-', '')
-        progress('Converting source appearance: ' + person['name'])
-        appearance = a.output / 'people' / namespace
-        try:
-            character = build_appearance(a.source, a.target, person, namespace, appearance,
-                notify=lambda message: progress(person['name'] + ': ' + message))
-        except ValueError as error:
-            pending.append(dict(asset=aid, person=person['name'], reason=str(error)))
+        if 'error' in result:
+            pending.append(dict(asset=aid, person=person['name'], reason=result['error']))
             print(json.dumps(pending[-1]), flush=True)
             completed += 1
-            progress('Appearance conversion failed: ' + person['name'] + ': ' + str(error))
+            progress('Appearance conversion failed: ' + person['name'] + ': ' + result['error'])
             continue
-        from character_weapon_inventory import stage as stage_weapons
-        progress(person['name'] + ': Converting carried equipment')
-        weapon_result = stage_weapons(a.source, a.target, a.mod, person, character, namespace,
-                                      a.output / 'equipment' / namespace)
-        character['source_weapons'] = weapon_result['items']
-        for path, payload in weapon_result['files'].items():
-            if path.startswith('Localization/'):
-                item_tables.append(payload)
-            else:
-                dest = appearance / path; dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(payload)
-        (appearance / 'appearance-result.json').write_text(json.dumps(character, indent=2))
+        character = result['character']
         resources = actor_resources(a.target, person, character, namespace,
             role_name=namespace + '_role', native_soul_table='Libs/Tables/rpg/soul__ttac.xml',
             native_soul_name='ttac_procek', native_role_name='PREVOZNIK_TROSECKO', resources=resources)
-        # Keep each actor's geometry in its own ZIP32 archive. The shared world
-        # archive is already large and must not grow past the engine's limit.
-        progress(person['name'] + ': Packing and validating character assets')
-        resources.update(write_actor_paks(appearance, package / 'Data', namespace)[1])
-        strings = appearance / 'Localization/English/text_ui_items.xml'
-        if strings.exists(): item_tables.append(strings.read_bytes())
+        resources.update(result['libs'])
+        item_tables.extend(result['item_tables'])
         with zipfile.ZipFile(a.source / 'Localization/English_xml.pak') as z:
             key = person['instance'].findtext('StaticData/NameStringId')
             names.append(next(r for r in ET.fromstring(read(z, 'text_ui_soul.xml')) if r.findtext('Cell') == key))
@@ -229,10 +367,10 @@ def _build(a):
         people.append(person); registered.add(sid)
         converted.append(dict(person=person['name'], soul_id=sid, position=(placement or person['actor']).get('Pos'),
                               source_level=person['source_level'], namespace=namespace,
-                              elapsed_seconds=time.perf_counter()-started,
+                              elapsed_seconds=result['elapsed'],
                               appearance_timings_seconds=character.get('timings_seconds', {})))
         completed += 1
-        progress(f'{person["name"]}: completed ({completed}/{total}) in {time.perf_counter()-started:.1f} s')
+        progress(f'{person["name"]}: completed ({completed}/{total}) in {result["elapsed"]:.1f} s')
     from bake_pool import release
     from static_assets import release_library_index
     release(); release_library_index()  # the people are converted; free the bake workers and archives

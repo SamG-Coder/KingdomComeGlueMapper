@@ -19,6 +19,62 @@ def file_hash(path):
     return h.hexdigest()
 
 
+TOOLS = Path(__file__).resolve().parent
+_TOOLS_DIGEST = None
+
+
+def tools_digest():
+    """Digest of every file under tools/: any converter change makes a new key.
+
+    The converters import one another throughout, so a narrower list could
+    miss a dependency. Cached outputs survive only identical code.
+    """
+    global _TOOLS_DIGEST
+    if _TOOLS_DIGEST is None:
+        files = {}
+        for directory, folders, names in os.walk(TOOLS):
+            folders[:] = sorted(f for f in folders if f != '__pycache__')
+            for name in names:
+                path = Path(directory)/name
+                files[path.relative_to(TOOLS).as_posix()] = file_hash(path)
+        _TOOLS_DIGEST = fingerprint(files)
+    return _TOOLS_DIGEST
+
+
+def converter_identity():
+    """Code, interpreter, libraries and output-affecting settings of this process."""
+    import importlib.metadata
+    import sys
+    ignored = ('GLUEMAPPER_BUILD_CACHE', 'GLUEMAPPER_REBUILD_CACHE', 'GLUEMAPPER_IMPORTED_CACHE',
+               'GLUEMAPPER_FULL_VERIFY', 'GLUEMAPPER_PROFILE')
+    settings = {k: v for k, v in os.environ.items() if k.startswith('GLUEMAPPER_')
+                and k not in ignored and not k.endswith('_WORKERS')}
+    libraries = sorted((d.metadata['Name'] or '', d.version) for d in importlib.metadata.distributions())
+    return dict(tools=tools_digest(), python=sys.version, libraries=libraries, settings=settings)
+
+
+_INSTALLS = {}
+
+
+def install_fingerprint(game):
+    """Every game archive's path, size and time: patches, DLC and repairs change it.
+
+    Remembered per process: a game is never patched while a build runs.
+    """
+    game = Path(game)
+    if game.resolve() in _INSTALLS: return _INSTALLS[game.resolve()]
+    entries = []
+    for folder in ('Data', 'Localization'):
+        for directory, _, files in os.walk(game/folder):
+            for name in files:
+                if name.lower().endswith('.pak'):
+                    stat = os.stat(os.path.join(directory, name))
+                    entries.append((os.path.relpath(os.path.join(directory, name), game).replace('\\', '/').lower(),
+                                    stat.st_size, stat.st_mtime_ns))
+    _INSTALLS[game.resolve()] = fingerprint(sorted(entries))
+    return _INSTALLS[game.resolve()]
+
+
 @contextmanager
 def environment(config):
     values = {'GLUEMAPPER_BUILD_CACHE': str(Path(config['workspace']).resolve()/'cache'),
@@ -89,6 +145,26 @@ class Cache:
         pending.write_text(json.dumps(dict(entry=entry.name)))
         pending.replace(self.folder/(key+'.json'))
         return payload
+
+    def prune(self, keep):
+        """Keep the `keep` most recently published keys; remove other and abandoned entries.
+
+        Entries younger than an hour that no pointer names may belong to a
+        publish still in progress elsewhere and are left alone.
+        """
+        import time
+        pointers = sorted((p for p in self.folder.glob('*.json')), key=lambda p: p.stat().st_mtime, reverse=True)
+        kept = set()
+        for index, pointer in enumerate(pointers):
+            try: name = json.loads(pointer.read_text())['entry']
+            except (OSError, ValueError, KeyError, TypeError): name = None
+            if index < keep and name and Path(name).name == name:
+                kept.add(name); continue
+            pointer.unlink(missing_ok=True)
+        for entry in self.folder.iterdir():
+            if (entry.is_dir() and entry.name not in kept and entry.resolve().parent == self.folder.resolve()
+                    and time.time() - entry.stat().st_mtime > 3600):
+                shutil.rmtree(entry, ignore_errors=True)
 
 
 def copy_payload(payload, destination):
