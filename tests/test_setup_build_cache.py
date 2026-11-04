@@ -47,17 +47,25 @@ class BuildCacheTests(unittest.TestCase):
     def test_bake_key_ignores_job_path_quests_and_repacked_zip_timestamps(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t);game=root/'game';(game/'Data').mkdir(parents=True)
-            def make(job,quest='first',mesh=b'geometry',hlod=b'placements'):
+            def make(job,quest='first',mesh=b'geometry',hlod=b'placements',material=b'<Material/>',texture=b'pixels'):
                 level=root/job/'level'
                 pak(level/'level.pak',{'terrain/hlods.dat':hlod,'leveldata.xml':b'surfaces',
                     'objects_mission0.xml':quest.encode(),'tables/ai/scheduler.xml':quest.encode()})
                 pak(level/'terrain.pak',{'terrain/terrain.dat':b'terrain'})
                 override=root/job/'assets.pak'
-                pak(override,{'objects/house.cgf':mesh,'Quests/intro.xml':quest.encode()})
+                # Reports, tables, dialogue, music, animations and skinned NPC files
+                # change with every build or NPC edit; the bake never reads them.
+                pak(override,{'objects/house.cgf':mesh,'objects/house.mtl':material,'textures/wall.dds.1':texture,
+                    'Quests/intro.xml':quest.encode(),'Libs/GlueMapper/PersonImport/'+job+'.json':job.encode(),
+                    'Libs/Tables/rpg/role.xml':quest.encode(),'Libs/skald/'+quest+'.xml':quest.encode(),
+                    'music/track.sqcb':quest.encode(),'animations/walk.dba':quest.encode(),
+                    'objects/characters/body.skin':quest.encode(),'objects/characters/head.chr':quest.encode()})
                 return key(level,game,[str(override)],'all')
             a=make('a');self.assertEqual(a,make('b','new quest'))
             self.assertNotEqual(a,make('c',mesh=b'new geometry'))
             self.assertNotEqual(a,make('d',hlod=b'new placements'))
+            self.assertNotEqual(a,make('e',material=b'<Material Opacity="0.5"/>'))
+            self.assertNotEqual(a,make('f',texture=b'new pixels'))
             self.assertNotEqual(a,key(root/'a/level',game,[str(root/'a/assets.pak')],'buildings'))
             with patch('world_surface_tiles.code_digest',return_value='new baker'):
                 self.assertNotEqual(a,key(root/'a/level',game,[str(root/'a/assets.pak')],'all'))

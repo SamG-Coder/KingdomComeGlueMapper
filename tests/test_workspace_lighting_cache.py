@@ -115,6 +115,21 @@ class WorkspaceLightingCacheTests(unittest.TestCase):
                 self.assertEqual(archive.read('objects_mission0.xml'),b'current quests and people')
             receipt=json.loads((package/RECEIPT).read_text())
             self.assertEqual(receipt['baking']['levels'][0]['input_compatibility'],'not_recorded')
+            # The match is recorded under this package's exact key, so the next
+            # job with the same inputs skips the scene check.
+            recorded=Cache(root/'cache/lighting').lookup(fingerprint('new broad inputs'))
+            self.assertIsNotNone(recorded)
+            self.assertEqual((recorded[1]['tiles'],sorted(p.name for p in recorded[0].iterdir())),(1,['svo-part0.pak']))
+            second=root/'second';later=second/'Data/Levels/map'
+            pak(later/'level.pak',{'mission_mission0.xml':b'<Mission><Environment><Total_Illumination_v2/></Environment></Mission>',
+                                 'objects_mission0.xml':b'later people'})
+            pak(later/'terrain.pak',{'terrain/terrain.dat':b'current terrain'})
+            (second/RECEIPT).write_text(json.dumps(dict(files={},travel_bridge={'destination':'map'})))
+            with patch('setup_bake_cache.matching_workspace_cache',side_effect=AssertionError('scene check ran')):
+                bake_package(second,root/'game',root/'work2','all',lambda *a:None,lambda:False)
+            self.assertTrue((later/'svo-part0.pak').is_file())
+            with zipfile.ZipFile(later/'level.pak') as archive:
+                self.assertEqual(archive.read('objects_mission0.xml'),b'later people')
 
 
 if __name__=='__main__':unittest.main()
