@@ -158,7 +158,9 @@ def worker(path):
     root=Path(raw.get("resume_from",path.parent)).resolve()
     try:
         from setup_build_cache import environment
-        with job_lock(root), environment(raw):return _worker(path)
+        from archive_directories import install as share_archive_directories
+        with job_lock(root), environment(raw):
+            share_archive_directories();return _worker(path)
     except (OSError,ValueError) as e:
         events=legacy.EventLog(path.parent/"events.jsonl")
         events.emit("error",message=str(e));events.stream.close();events.text.close()

@@ -369,6 +369,8 @@ class LogWriter(io.TextIOBase):
 def worker(config_path):
     config_path = Path(config_path).resolve()
     config = json.loads(config_path.read_text(encoding='utf-8'))
+    from archive_directories import install as share_archive_directories
+    share_archive_directories()
     original_sdk = os.environ.get('KCD2_MOD_TOOLS')
     # Workers are separate processes; keep the selected SDK consistent with preflight.
     if config.get('mod_tools'):os.environ['KCD2_MOD_TOOLS']=config['mod_tools']
