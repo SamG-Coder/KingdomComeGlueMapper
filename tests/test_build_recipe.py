@@ -181,6 +181,18 @@ class RecipeTests(unittest.TestCase):
             self.assertFalse((overlay/'asset.pak').exists())
             self.assertEqual((root/'package/asset.pak').read_bytes(), b'converted')
 
+    def test_consumed_overlay_is_hashed_once_and_copies_are_checked(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for consume, reads in ((True, 1), (False, 2)):
+                overlay = root/f'overlay{reads}'; overlay.mkdir()
+                (overlay/'asset.pak').write_bytes(b'converted')
+                with patch('build_recipe.digest', side_effect=lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()) as counted:
+                    changed = apply_overlay(root/f'package{reads}', overlay, consume=consume)
+                self.assertEqual(counted.call_count, reads)
+                self.assertEqual(changed, {'asset.pak': hashlib.sha256(b'converted').hexdigest()})
+
     def test_cancel_and_completed_recipe_do_not_run_builders(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -98,11 +98,13 @@ def apply_overlay(package, overlay, *, consume=False):
             # Builders and the assembled package share the configured workspace.
             # Move completed archives instead of retaining another full copy at
             # every recipe step. Reports and source conversion inputs remain.
+            # A rename keeps the bytes, and fails rather than copies across
+            # volumes, so only real copies are hashed again.
             source.replace(pending)
         else:
             shutil.copy2(source, pending)
-        if digest(pending) != expected:
-            raise ValueError('Builder output copy failed: ' + str(relative))
+            if digest(pending) != expected:
+                raise ValueError('Builder output copy failed: ' + str(relative))
         pending.replace(destination)
         changed[relative.as_posix()] = expected
     return changed

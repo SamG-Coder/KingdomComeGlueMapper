@@ -43,8 +43,7 @@ def registered_shops(package):
 
 def refresh_receipt(package, report):
     """Refresh ownership hashes without modifying the hard-linked baseline."""
-    from concurrent.futures import ThreadPoolExecutor
-    from setup_campaign import RECEIPT, verify_package
+    from setup_campaign import RECEIPT, digests, verify_package
     # Check ownership/layout before accepting existing receipt fields. Changed
     # and new files are expected here, so validate against the final inventory.
     path=package/RECEIPT
@@ -52,8 +51,8 @@ def refresh_receipt(package, report):
     paths=sorted(p for p in package.rglob('*') if p.is_file() and p!=path)
     if any(p.is_symlink() or not p.resolve().is_relative_to(package.resolve()) for p in paths):
         raise ValueError('Invalid population package path')
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        receipt['files']={p.relative_to(package).as_posix(): sha for p,sha in zip(paths,pool.map(digest,paths))}
+    hashed=digests(paths)
+    receipt['files']={p.relative_to(package).as_posix(): hashed[p] for p in paths}
     receipt['profile_population']=dict(version=report['version'],profiles=report['profiles'],
         people=report['people'],runtime_verified=False)
     temporary=path.with_suffix('.json.partial')
