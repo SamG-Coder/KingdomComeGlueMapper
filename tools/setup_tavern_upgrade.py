@@ -4,7 +4,7 @@ import zipfile
 import xml.etree.ElementTree as E
 from pathlib import Path
 from types import SimpleNamespace
-from upgrade_map import read
+from upgrade_map import read, xml
 
 VERSION=1
 MARKER='Libs/GlueMapper/source_tavern.json'
@@ -18,13 +18,13 @@ def build(source,target,package,work,model_path,person,namespace,entry,level,pro
     from setup_package_upgrade import rewrite
     from build_english_audio_test import merge_audio_strings
     from character_schedule import plan
-    from character_schedule_world import resolve_arrivals,bind_arrivals,arrival_resources
-    from character_schedule_jobs import bind_jobs
+    from character_schedule_world import resolve_arrivals,bind_arrival_trees,arrival_resources
+    from character_schedule_jobs import bind_job_trees
     from character_sweeping_routes import resources as route_resources
     from campaign_sources import RetailSourceReader
     from campaign_dependency_adapters import SourceTables
     from world_item_definitions import native_items,native_item_registry
-    from campaign_merchant_work import register
+    from campaign_merchant_work import register_trees
     import seating_animations
     source,target,package,work=map(Path,(source,target,package,work))
     travel='Data/gluemappertravel.pak';lp='Data/Levels/'+level+'/level.pak'
@@ -70,10 +70,14 @@ def build(source,target,package,work,model_path,person,namespace,entry,level,pro
         schedule=plan(merchant,SourceTables(source,reader))
         if schedule['pending']:raise ValueError('Unresolved merchant schedule')
         schedules={person:resolve_arrivals(schedule,z,merchant)}
-        files,arrivals=bind_arrivals(files,schedules,target)
-        files,jobs=bind_jobs(files,schedules,z,target,native_item_registry(native_items(target,patches)),True)
+        # Parse the mission once for all three binders; serialize it once.
+        mission=E.fromstring(files['objects_mission0.xml']);scheduler=E.fromstring(files['tables/ai/scheduler.xml'])
+        files=dict(files)
+        arrivals=bind_arrival_trees(files,mission,scheduler,schedules,target)
+        files,jobs=bind_job_trees(files,mission,scheduler,schedules,z,target,native_item_registry(native_items(target,patches)),True)
     if any(not j.get('job') for j in jobs):raise ValueError('Unsupported source merchant work program')
-    files,resources,service=register(files,resources,entry,merchant,stock,namespace)
+    files,resources,service=register_trees(files,resources,mission,scheduler,entry,merchant,stock,namespace)
+    files['objects_mission0.xml']=xml(mission)
     resources.update(arrival_resources());routes,_=route_resources(source,target);resources.update(routes)
     with zipfile.ZipFile(target/'Data/Levels/trosecko/level.pak') as z:files,_=seating_animations.install(files,z)
     resources.update(item_files)

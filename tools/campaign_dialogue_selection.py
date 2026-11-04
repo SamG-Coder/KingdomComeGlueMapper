@@ -26,19 +26,33 @@ def load_contract(source, target, skill_adapters=None):
         native = {key: [e.attrib for e in ET.fromstring(read(archive, 'Libs/Tables/rpg/' + name + '.xml')).iter(name)]
                   for key, name in [('native_difficulties', 'skill_check_difficulty'),
                                     ('native_reputations', 'reputation_change')]}
-    skills = set()
-    with zipfile.ZipFile(Path(target) / 'Data/Scripts.pak') as archive:
-        for path in archive.namelist():
-            if not path.lower().startswith('quests/') or not path.lower().endswith('.xml'):
-                continue
-            blob = read(archive, path)
-            if b'SkillCheckType=' not in blob:
-                continue
-            for sequence in ET.fromstring(blob).iter('Sequence'):
-                if sequence.get('Type') == 'Skillcheck' and sequence.get('SkillCheckType'):
-                    skills.add(sequence.get('SkillCheckType'))
     return dict(source_types=SelectionCompiler.source_types(sources['types']['data']),
-                **rows, **native, native_skills=sorted(skills), skill_adapters=dict(skill_adapters or {}))
+                **rows, **native, native_skills=native_skill_checks(target), skill_adapters=dict(skill_adapters or {}))
+
+
+_NATIVE_SKILLS = {}
+
+
+def native_skill_checks(target):
+    """SkillCheckType values authored in native quests; Scripts.pak is scanned once per build."""
+    path = Path(target) / 'Data/Scripts.pak'
+    stat = path.stat()
+    key = (path.resolve(), stat.st_size, stat.st_mtime_ns)
+    if key not in _NATIVE_SKILLS:
+        skills = set()
+        with zipfile.ZipFile(path) as archive:
+            for entry in archive.namelist():
+                if not entry.lower().startswith('quests/') or not entry.lower().endswith('.xml'):
+                    continue
+                blob = read(archive, entry)
+                if b'SkillCheckType=' not in blob:
+                    continue
+                for sequence in ET.fromstring(blob).iter('Sequence'):
+                    if sequence.get('Type') == 'Skillcheck' and sequence.get('SkillCheckType'):
+                        skills.add(sequence.get('SkillCheckType'))
+        _NATIVE_SKILLS.clear()
+        _NATIVE_SKILLS[key] = sorted(skills)
+    return list(_NATIVE_SKILLS[key])
 
 
 class SelectionCompiler:

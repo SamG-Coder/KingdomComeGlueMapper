@@ -5,6 +5,7 @@ uint64. These representations must not be confused when binding binary areas.
 The native AI link network loads waitinglinks.xml, independently of CryEngine's
 EntityLinks records in objects_mission0.xml.
 """
+from functools import lru_cache
 import re
 import xml.etree.ElementTree as ET
 
@@ -15,6 +16,7 @@ def native_guid(value):
     return f'{value & 0xffffffff:08x}-{(value >> 32) & 0xffff:04x}-{value >> 48:04x}'
 
 
+@lru_cache(maxsize=1 << 18)  # a build asks for the same few hundred thousand GUIDs millions of times
 def guid_value(value):
     if not isinstance(value, str) or not re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}', value):
         raise ValueError('Expected a native 8-4-4 entity GUID')

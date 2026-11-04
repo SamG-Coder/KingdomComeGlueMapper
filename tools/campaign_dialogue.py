@@ -15,7 +15,7 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 
-from campaign_sources import retail_sources
+from campaign_sources import RetailSourceReader, retail_sources
 from campaign_quest_graph import definition, identifier, objective_identifier, xml
 from upgrade_map import read
 
@@ -154,21 +154,51 @@ def load(game, alias=None, locale='English', *, start_topic=None):
     return load_many(game, [(alias, start_topic)], locale)[0]
 
 
-def load_many(game, selections, locale='English'):
-    """Resolve a campaign dialogue closure against one source database snapshot."""
-    if not re.fullmatch(r'[A-Za-z]+', locale): raise ValueError('Invalid locale')
+_SNAPSHOTS = {}
+
+
+def snapshot(game, locale):
+    """The parsed dialogue tables and every localized dialogue string of one installation.
+
+    Every actor conversation resolves against the same snapshot; parse the
+    tables and the 300,000-row string table once per unchanged installation.
+    """
     paths = {n: ('Tables.pak', 'Libs/Tables/text/' + n + '.xml') for n in TABLES}
     paths['role'] = ('Tables.pak', 'Libs/Tables/rpg/role.xml')
     paths['dialogue_functions'] = ('Tables.pak', 'Libs/Tables/text/dialogue_functions.xml')
-    sources = retail_sources(game, paths)
+    localization = Path(game) / 'Localization' / (locale + '_xml.pak')
+    with RetailSourceReader(game) as reader:
+        stat = localization.stat()
+        key = (reader.game, locale, reader.signature('Tables.pak'), stat.st_size, stat.st_mtime_ns)
+        if key in _SNAPSHOTS: return _SNAPSHOTS[key]
+        sources = reader(game, paths)
     tables = {n: [dict(r.attrib) for r in ET.fromstring(s['data']).findall('./table/rows/row')]
               for n, s in sources.items()}
+    with zipfile.ZipFile(localization) as z:
+        data = read(z, 'text_ui_dialog.xml')
+    strings, duplicates = {}, set()
+    for row in ET.fromstring(data).findall('Row'):
+        cells = row.findall('Cell')
+        if len(cells) < 3: raise ValueError('Unsupported localization row')
+        name = cells[0].text
+        if name in strings: duplicates.add(name)
+        else: strings[name] = ''.join(cells[2].itertext())
+    _SNAPSHOTS.clear()
+    _SNAPSHOTS[key] = dict(sources=sources, tables=tables, strings=strings, duplicates=duplicates,
+                           sha256=hashlib.sha256(data).hexdigest())
+    return _SNAPSHOTS[key]
+
+
+def load_many(game, selections, locale='English'):
+    """Resolve a campaign dialogue closure against one source database snapshot."""
+    if not re.fullmatch(r'[A-Za-z]+', locale): raise ValueError('Invalid locale')
+    shared = snapshot(game, locale)
+    # Models carry their rows onward; give each call its own copies.
+    tables = {n: [dict(r) for r in rows] for n, rows in shared['tables'].items()}
     indexes = index_tables(tables)
     models = [resolve(tables, alias, start_topic=start, indexes=indexes) for alias, start in selections]
     for model in models:
         model['roles'] = {r['role_id']: r for r in tables['role']}
-    with zipfile.ZipFile(Path(game) / 'Localization' / (locale + '_xml.pak')) as z:
-        data = read(z, 'text_ui_dialog.xml')
     keys = set()
     model_keys = []
     for model in models:
@@ -181,19 +211,14 @@ def load_many(game, selections, locale='English'):
         model_keys.append(selected_keys)
         keys.update(selected_keys)
     keys.discard('')
-    strings = {}
-    for row in ET.fromstring(data).findall('Row'):
-        cells = row.findall('Cell')
-        if len(cells) < 3: raise ValueError('Unsupported localization row')
-        key = cells[0].text
-        if key in keys:
-            if key in strings: raise ValueError('Duplicate localized dialogue: ' + key)
-            strings[key] = ''.join(cells[2].itertext())
+    duplicated = sorted(keys & shared['duplicates'])
+    if duplicated: raise ValueError('Duplicate localized dialogue: ' + duplicated[0])
+    strings = shared['strings']
     if keys - strings.keys(): raise ValueError('Missing dialogue text: ' + ', '.join(sorted(keys - strings.keys())))
     for model, selected_keys in zip(models, model_keys):
         model['strings'] = {key: strings[key] for key in selected_keys}
-        model['provenance'] = {n: s['candidates'] for n, s in sources.items()}
-        model['localization'] = dict(locale=locale, entry='text_ui_dialog.xml', sha256=hashlib.sha256(data).hexdigest())
+        model['provenance'] = {n: list(s['candidates']) for n, s in shared['sources'].items()}
+        model['localization'] = dict(locale=locale, entry='text_ui_dialog.xml', sha256=shared['sha256'])
     return models
 
 

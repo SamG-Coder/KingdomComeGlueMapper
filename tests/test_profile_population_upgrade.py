@@ -15,6 +15,7 @@ from profile_population_upgrade import shops_for_people, validate_people, valida
 from character_market_jobs import resolve, contract
 from merchant_stash import source_stashes, source_stash
 from source_merchant_upgrade import bind_storage
+from upgrade_map import xml
 
 
 class PopulationTests(unittest.TestCase):
@@ -114,6 +115,18 @@ class PopulationTests(unittest.TestCase):
         self.assertEqual(len(list(root)),3)
         self.assertEqual(root.find("Entity[@Name='gm_container_3']/Properties").get('Preserved'),'lock-and-loot')
         self.assertEqual(root.find("Entity[@Name='service_shop']/EntityLinks/Link").get('TargetId'),'3')
+
+    def test_storage_on_a_parsed_mission_matches_the_serialized_path(self):
+        files={'objects_mission0.xml':b'<Objects><Entity Name="service_shop" EntityGuid="00000001-0000-0000" EntityId="1"/><Entity Name="person" EntityGuid="00000002-0000-0000" EntityId="2"/></Objects>',
+               'waitinglinks.xml':b'<StaticLinksInfo version="1"><WaitingLinks/></StaticLinksInfo>'}
+        authored=E.fromstring('<Entity EntityId="3" Pos="1,2,3"><Properties object_Model="source.cga"><Database guidInventoryDBId="0"/><Lock/></Properties></Entity>')
+        with patch('ordinary_containers.properties',side_effect=lambda *a:E.Element('Properties')):
+            serialized,report=bind_storage(files,dict(name='person',shop_entity=None),None,'service','converted.cga',authored=authored)
+            mission=E.fromstring(files['objects_mission0.xml'])
+            parsed,same=bind_storage(files,dict(name='person',shop_entity=None),None,'service','converted.cga',authored=authored,mission=mission)
+        self.assertEqual(parsed['objects_mission0.xml'],files['objects_mission0.xml'])
+        self.assertEqual(xml(mission),serialized['objects_mission0.xml'])
+        self.assertEqual((parsed['waitinglinks.xml'],same),(serialized['waitinglinks.xml'],report))
 
     def test_independent_shop_chest_inventory_cannot_be_erased(self):
         original=E.fromstring('<Entity EntityId="3"><Properties><Database guidInventoryDBId="authored-loot"/></Properties></Entity>')

@@ -7,7 +7,7 @@ import copy
 import hashlib
 import uuid
 import xml.etree.ElementTree as ET
-from character_person import resolve_link_targets, world_entity
+from character_person import resolve_link_targets, source_entities, world_entity
 from campaign_entity_links import native_guid, guid_value, append_links
 from character_person_activity import validate_scheduler_targets
 from character_person_world import native_wait_activity
@@ -40,7 +40,7 @@ def arrival_resources():
 
 def resolve_arrivals(schedule, archive, person=None, source=None, reader=None, target=None):
     result = []
-    mission = list(ET.fromstring(read(archive, 'objects_mission0.xml')).iter('Entity'))
+    mission = source_entities(archive)
     for entry in schedule['resolved']:
         behavior = entry['behavior']
         from character_horse_handler_work import supports as stable_supports, resolve as stable_resolve
@@ -130,6 +130,17 @@ def bind_arrivals(files, schedules, target):
     files = dict(files)
     mission = ET.fromstring(files['objects_mission0.xml'])
     scheduler = ET.fromstring(files['tables/ai/scheduler.xml'])
+    report = bind_arrival_trees(files, mission, scheduler, schedules, target)
+    files.update({'objects_mission0.xml':xml(mission), 'tables/ai/scheduler.xml':xml(scheduler)})
+    return files, report
+
+
+def bind_arrival_trees(files, mission, scheduler, schedules, target):
+    """bind_arrivals on already parsed trees, edited in place.
+
+    Callers binding many people in turn parse the 30+ MB mission once instead
+    of once per person. Only files['waitinglinks.xml'] is replaced.
+    """
     rows = scheduler.find('Schedulers')
     template, _ = native_wait_activity(target)
     next_id = max(int(e.get('EntityId', '0')) for e in mission) + 1
@@ -189,6 +200,5 @@ def bind_arrivals(files, schedules, target):
                 interval=[entry['start_minute'],entry['end_minute']],
                 activity_tree=entry['behavior']['tree_name'], activity_pending=True, runtime_verified=False))
     validate_scheduler_targets(scheduler)
-    files.update({'objects_mission0.xml':xml(mission), 'tables/ai/scheduler.xml':xml(scheduler),
-                  'waitinglinks.xml':append_links(xml(waiting),links)})
-    return files, report
+    files['waitinglinks.xml'] = append_links(xml(waiting), links)
+    return report

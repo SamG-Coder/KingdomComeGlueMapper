@@ -16,8 +16,21 @@ def hours(shop):
 
 
 def register(files, resources, entry, merchant, stock, namespace, role='innkeeper'):
+    mission=E.fromstring(files['objects_mission0.xml'])
+    files,resources,report=register_trees(files,resources,mission,E.fromstring(files['tables/ai/scheduler.xml']),
+                                          entry,merchant,stock,namespace,role)
+    files['objects_mission0.xml']=xml(mission)
+    return files,resources,report
+
+
+def register_trees(files, resources, mission, scheduler, entry, merchant, stock, namespace, role='innkeeper'):
+    """register on an already parsed mission, edited in place.
+
+    The caller serializes the mission. The scheduler is serialized here into
+    files, because the native shop lifecycle is added to that copy; do not
+    serialize the scheduler tree again.
+    """
     files,resources=dict(files),dict(resources)
-    mission=E.fromstring(files['objects_mission0.xml']);scheduler=E.fromstring(files['tables/ai/scheduler.xml'])
     rows=scheduler.find('Schedulers');name=merchant['name']
     actors=[e for e in mission if e.get('Name')==name]
     if len(actors)!=1:raise ValueError('Missing imported merchant: '+name)
@@ -66,7 +79,6 @@ def register(files, resources, entry, merchant, stock, namespace, role='innkeepe
         if ls is None:ls=E.SubElement(a,'EntityLinks')
         E.SubElement(ls,'Link',Name=label,TargetGuid=b.get('EntityGuid'),TargetId=b.get('EntityId'))
     files['waitinglinks.xml']=append_links(files['waitinglinks.xml'],[(a.get('EntityGuid'),b.get('EntityGuid'),label) for a,b,label in edges])
-    files['objects_mission0.xml']=xml(mission)
     validate_scheduler_targets(E.fromstring(files['tables/ai/scheduler.xml']))
     return files,resources,dict(person=name,shop=stock['shop_name'],business_hours=hours(merchant['shop']),runtime_verified=False)
 

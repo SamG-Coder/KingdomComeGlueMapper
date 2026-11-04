@@ -32,8 +32,26 @@ def source_home_geometry(entity):
     return TriggerArea(int(entity.get('EntityGuid'),16), float(area.get('Height'))*scale[2], tuple(vertices))
 
 
+_WAIT_ACTIVITY = {}
+
+
 def native_wait_activity(target):
-    with zipfile.ZipFile(Path(target) / 'Data/Levels/trosecko/level.pak') as z:
+    """The unrestricted native schedulerWait link and its terminal hub, deep-copied.
+
+    Read once per unchanged level archive; a build asks for it per person.
+    """
+    path = Path(target) / 'Data/Levels/trosecko/level.pak'
+    stat = path.stat()
+    key = (path.resolve(), stat.st_size, stat.st_mtime_ns)
+    if key not in _WAIT_ACTIVITY:
+        _WAIT_ACTIVITY.clear()
+        _WAIT_ACTIVITY[key] = _wait_activity(path)
+    link, terminal = _WAIT_ACTIVITY[key]
+    return copy.deepcopy(link), copy.deepcopy(terminal)
+
+
+def _wait_activity(path):
+    with zipfile.ZipFile(path) as z:
         entities = ET.fromstring(read(z, 'objects_mission0.xml'))
         land = next(e for e in entities if e.get('Name') == 'sa_land')
         rows = ET.fromstring(read(z, 'tables/ai/scheduler.xml')).find('Schedulers')
@@ -48,7 +66,7 @@ def native_wait_activity(target):
                     and not any(k in p.attrib for k in ('RequiredRole', 'LinkTag', 'ProvidedRole', 'RequiredContext'))):
                 terminal = next(r for r in rows if r.get('EntityGuid') == guid)
                 if len(terminal): raise ValueError('Native land scheduler has new dependencies')
-                return copy.deepcopy(link), copy.deepcopy(terminal)
+                return link, terminal
     raise ValueError('Missing unrestricted native schedulerWait contract')
 
 

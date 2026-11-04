@@ -54,11 +54,24 @@ def job_resources(source, target, files, schedules):
     return resources
 
 
+_NATIVE_JOBS={}
+
+
 def native_job(target, name):
-    with zipfile.ZipFile(Path(target)/'Data/Tables.pak') as archive:
+    # Each sweeping job used to re-read the 21 MB native mission; keep one
+    # small copy per installed level and template, and hand out copies.
+    paks=(Path(target)/'Data/Tables.pak', Path(target)/'Data/Levels/trosecko/level.pak')
+    key=(str(paks[0].resolve()), name)+tuple((s.st_size, s.st_mtime_ns) for s in map(Path.stat, paks))
+    if key not in _NATIVE_JOBS:
+        _NATIVE_JOBS[key]=_native_job(*paks, name)
+    return copy.deepcopy(_NATIVE_JOBS[key])
+
+
+def _native_job(tables, level, name):
+    with zipfile.ZipFile(tables) as archive:
         table=ET.fromstring(read(archive,'Libs/Tables/ai/smartEntity/SmartEntity__'+name+'.xml'))
     template=table.find('SmartEntitys/SmartEntityTemplate')
-    with zipfile.ZipFile(Path(target)/'Data/Levels/trosecko/level.pak') as archive:
+    with zipfile.ZipFile(level) as archive:
         entities=list(ET.fromstring(read(archive,'objects_mission0.xml')))
     byid={e.get('EntityId'):e for e in entities}
     for job in entities:
@@ -76,7 +89,27 @@ It does not represent the other housework activities as converted.
 """
     mission=ET.fromstring(files['objects_mission0.xml'])
     scheduler=ET.fromstring(files['tables/ai/scheduler.xml'])
-    source_entities=list(ET.fromstring(read(archive,'objects_mission0.xml')))
+    result,report=bind_job_trees(files,mission,scheduler,schedules,archive,target,registered_items,convert_routes)
+    result['objects_mission0.xml']=xml(mission)
+    result['tables/ai/scheduler.xml']=xml(scheduler)
+    return result,report
+
+
+def source_mission_entities(archive):
+    """Parsed source mission entities; bind_job_trees only reads them."""
+    return list(ET.fromstring(read(archive,'objects_mission0.xml')))
+
+
+def bind_job_trees(files, mission, scheduler, schedules, archive, target, registered_items,
+                   convert_routes=False, source_entities=None):
+    """bind_jobs on already parsed trees, edited in place.
+
+    Returns a copy of files with waitinglinks.xml replaced; callers serialize
+    the mission and scheduler once after binding every person. Pass
+    source_entities from source_mission_entities(archive) to parse it once.
+    """
+    if source_entities is None:
+        source_entities=source_mission_entities(archive)
     waiting=[];report=[]; renamed={};city_pools={};seated_pools={};guard_pools={};farmer_pools={};stable_pools={}
     for person,entries in schedules.items():
         for entry in entries:
@@ -260,7 +293,5 @@ It does not represent the other housework activities as converted.
                 if definition.text=='_,use':
                     activity=renamed[record.get('TargetId')]
                     definition.text='_'+(','+activity if activity else '')
-    result['objects_mission0.xml']=xml(mission)
-    result['tables/ai/scheduler.xml']=xml(scheduler)
     result['waitinglinks.xml']=append_links(xml(authoring),waiting,allow_untagged=True)
     return result,report

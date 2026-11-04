@@ -15,7 +15,7 @@ import zipfile
 from campaign_sources import RetailSourceReader
 from campaign_dependency_adapters import SourceTables
 from profile_population_upgrade import discover, validate_people, validate_services, retain_work
-from upgrade_map import read, digest
+from upgrade_map import read, digest, xml
 
 
 def clone_missing(source, destination):
@@ -65,8 +65,8 @@ def refresh_receipt(package, report):
 def upgrade_work(source, target, package, source_level, level, people, new_people, merchants, tables, reader,
                  notify=lambda message: None):
     from character_schedule import plan
-    from character_schedule_world import resolve_arrivals, bind_arrivals, arrival_resources, baseline_schedule_names
-    from character_schedule_jobs import bind_jobs, population_work_supports, job_resources
+    from character_schedule_world import resolve_arrivals, bind_arrival_trees, arrival_resources, baseline_schedule_names
+    from character_schedule_jobs import bind_job_trees, source_mission_entities, population_work_supports, job_resources
     from world_item_definitions import native_items, native_item_registry
     from container_items import item_patches
     from setup_package_upgrade import rewrite
@@ -105,6 +105,7 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
             entries = resolve_arrivals(dict(schedule, resolved=housework), archive, person, source, reader)
             files, repaired = repair_housework_bindings(files, {name: entries}, archive)
             pending.extend(repaired)
+        trees=None
         for name in sorted(eligible):
             notify('Converting source schedule: ' + name)
             person=people[name];schedule=plan(person,tables)
@@ -119,9 +120,18 @@ def upgrade_work(source, target, package, source_level, level, people, new_peopl
                     l['label']=='garrison_forcedWorkplace' for l in person['ai']['links']):
                 pending.append(dict(person=name, reason='Source garrison assignment is pending', schedule=schedule));continue
             entries=resolve_arrivals(schedule,archive,person,source,reader,target)
-            working,_=bind_arrivals(files,{name:entries},target)
-            working,jobs=bind_jobs(working,{name:entries},archive,target,items,convert_routes=True)
-            files=working;converted.extend(jobs)
+            # Parse the mission, scheduler and source mission once for every
+            # person and serialize after the loop, instead of per person.
+            if trees is None:
+                trees=(E.fromstring(files['objects_mission0.xml']),E.fromstring(files['tables/ai/scheduler.xml']),
+                       source_mission_entities(archive))
+                files=dict(files)
+            bind_arrival_trees(files,*trees[:2],{name:entries},target)
+            files,jobs=bind_job_trees(files,*trees[:2],{name:entries},archive,target,items,
+                                      convert_routes=True,source_entities=trees[2])
+            converted.extend(jobs)
+        if trees is not None:
+            files.update({'objects_mission0.xml':xml(trees[0]),'tables/ai/scheduler.xml':xml(trees[1])})
         # Earlier recipes already converted city walking. Extend only those
         # verified owned pools; do not reset actors or their quest activities.
         from character_city_work import supports as city_supports, extend_existing

@@ -13,7 +13,7 @@ import zipfile
 from campaign_dependency_adapters import SourceTables
 from campaign_sources import RetailSourceReader
 from upgrade_map import read, xml
-from character_person import native_xml, unique, resolve_person, resolve_link_targets
+from character_person import native_xml, unique, resolve_person, resolve_link_targets, source_entities
 
 
 def resolve_stock(shop, defaults, overrides):
@@ -53,8 +53,7 @@ def resolve_merchant(source, name, source_level='rataje'):
         stock = resolve_stock(shop, tables.get('shop/shop_type2item')['rows'], tables.get('shop/shop2item')['rows'])
         table_evidence = {k: v['provenance'] for k, v in tables.cache.items()}
     with zipfile.ZipFile(Path(source) / 'Data/Levels' / source_level / 'level.pak') as archive:
-        mission = read(archive, 'objects_mission0.xml')
-        entities = list(ET.fromstring(mission).iter('Entity'))
+        entities = source_entities(archive)
         actor = person['actor']
         entities = resolve_link_targets(archive, actor, entities, person['provenance']['actor_sources'])
         work = unique((l for l in actor.findall('EntityLinks/Link') if l.get('Name', '').startswith('Work[')), 'source merchant work link')
